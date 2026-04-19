@@ -3,9 +3,9 @@
 
 control:
   # Port série UART de la Pi 5 vers l'ESP32 Waveshare.
-  # Sur Pi 5 : /dev/ttyAMA0 (UART0 hardware) — vérifier avec `ls /dev/tty*`.
-  # Si vous utilisez l'USB-CDC de l'ESP32 : /dev/ttyUSB0 ou /dev/ttyACM0.
-  serial_port: /dev/ttyAMA0
+  # - Matériel réel : /dev/ttyAMA0 (UART Pi 5) ou /dev/ttyUSB0 (ESP32 en USB)
+  # - Émulateur   : socket://localhost:9999   (lancer `python3 -m tools.fake_esp32`)
+  serial_port: socket://localhost:9999
   baudrate: 115200
   timeout_s: 1.0
 

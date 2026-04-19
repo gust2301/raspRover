@@ -73,11 +73,53 @@ sudo usermod -aG dialout $USER
 ## Test rapide du Module Contrôle
 
 ```bash
-# Script interactif pour tester moteurs + Pan-Tilt :
-python3 -m tests.test_control
+# Script interactif pour tester moteurs + Pan-Tilt sur vrai matériel :
+python3 -m tests.test_control --port /dev/ttyAMA0
 ```
 
-Commandes disponibles : `f` (avance), `b` (recul), `l` (gauche), `r` (droite), `s` (stop), `p <pan> <tilt>` (orienter caméra), `q` (quitter).
+Commandes disponibles : `f` (avance), `b` (recul), `l` (gauche), `r` (droite), `s` (stop), `p <pan> <tilt>` (orienter caméra), `c` (recentre caméra), `?` (état), `q` (quitter).
+
+## Tester SANS le matériel (émulateur)
+
+En attendant le RaspRover physique, un émulateur ESP32 livré avec le projet reproduit le protocole JSON-UART Waveshare UGV sur un socket TCP local. Il maintient un état robot virtuel (position 2D intégrée, angles Pan-Tilt, batterie qui se décharge) et répond aux commandes comme le ferait le firmware réel. Pas besoin de driver virtuel : ça marche sous Windows, macOS et Linux.
+
+Terminal 1 — lancer l'émulateur :
+
+```bash
+python3 -m tools.fake_esp32                # par défaut localhost:9999
+python3 -m tools.fake_esp32 --viz          # avec mini ASCII map temps-réel
+python3 -m tools.fake_esp32 --port 9999
+```
+
+Terminal 2 — pointer le code sur l'émulateur (URL `socket://` au lieu d'un port série) :
+
+```bash
+# REPL interactif :
+python3 -m tests.test_control --port socket://localhost:9999
+
+# Ou édition de config.yaml :
+#   serial_port: socket://localhost:9999
+# puis : python3 main.py
+
+# Ou directement en Python :
+from modules.control import ESP32Link, MotorController, PanTiltController
+link = ESP32Link(port="socket://localhost:9999")
+link.open()
+motors = MotorController(link)
+motors.forward(0.4)
+```
+
+Pour basculer vers le vrai matériel, remplacer `socket://localhost:9999` par `/dev/ttyAMA0` (UART hardware Pi 5) ou `/dev/ttyUSB0` (ESP32 en USB) — le reste du code ne change pas.
+
+### Limites de l'émulateur et alternatives plus poussées
+
+L'émulateur livré simule : le protocole JSON, la physique 2D différentielle, la batterie, et le feedback (T=126). Il ne simule pas la vidéo, le capteur ultrasonique, ni les collisions.
+
+Pour aller plus loin quand vous aurez besoin de tester la détection visuelle et la navigation :
+
+- **Webots** (gratuit, officiellement recommandé pour robots Waveshare) — simulation 3D complète avec caméras, capteurs ultrasoniques, physique réaliste
+- **Gazebo + ROS 2 Humble** (le kit supporte ROS 2) — écosystème standard en robotique, nodes caméra et lidar disponibles
+- **Photos/vidéos en playback** : pour la Phase 4 (détection IA), on peut rejouer un fichier MP4 au lieu de la caméra réelle via OpenCV — pas besoin de matériel du tout
 
 ## Structure du dépôt
 
