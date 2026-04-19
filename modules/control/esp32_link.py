@@ -12,9 +12,6 @@ où le champ ``T`` identifie le type de commande. Les codes ``T`` utilisés ici 
     T=1   Commande vitesse différentielle (L/R, chacun dans [-0.5, 0.5])
     T=13  Contrôle position Pan-Tilt (X=pan°, Y=tilt°)
     T=126 Demande feedback (batterie, IMU) — optionnel
-    T=131 Reset servos (optionnel)
-
-La classe est thread-safe : un verrou protège les écritures série concurrentes.
 """
 
 from __future__ import annotations
@@ -58,17 +55,13 @@ class ESP32Link:
     """
     Liaison série bas niveau vers l'ESP32 Waveshare.
 
-    Usage typique :
-
-        link = ESP32Link(port="/dev/ttyAMA0")
-        link.open()
-        link.send({"T": 1, "L": 0.3, "R": 0.3})
-        link.close()
-
-    Ou comme context manager :
+    Usage :
 
         with ESP32Link("/dev/ttyAMA0") as link:
             link.send({"T": 1, "L": 0.3, "R": 0.3})
+
+    Accepte aussi les URL pyserial (socket://, loop://, rfc2217://) pour
+    les tests sans matériel.
     """
 
     def __init__(
@@ -87,34 +80,18 @@ class ESP32Link:
     # -- Gestion de cycle de vie ---------------------------------------------
 
     def open(self) -> None:
-        """
-        Ouvre le port (série natif ou URL pyserial).
-
-        Accepte aussi bien un chemin matériel classique
-        (``/dev/ttyAMA0``, ``/dev/ttyUSB0``, ``COM3``) qu'une URL pyserial :
-
-        - ``socket://localhost:9999`` pour parler à l'émulateur ESP32
-        - ``loop://`` pour les tests unitaires (boucle interne)
-        - ``rfc2217://host:port`` pour un port série distant
-
-        Idempotent.
-        """
+        """Ouvre le port (série natif ou URL pyserial). Idempotent."""
         if self._ser and self._ser.is_open:
             return
         log.info("Ouverture du port %s @ %d bauds", self.port, self.baudrate)
-        # serial_for_url accepte les chemins natifs ET les URL (socket://, loop://…)
         self._ser = serial.serial_for_url(
-            self.port,
-            baudrate=self.baudrate,
-            timeout=self.timeout_s,
+            self.port, baudrate=self.baudrate, timeout=self.timeout_s
         )
-        # Laisser l'ESP32 (ou l'émulateur) initialiser son buffer.
         time.sleep(0.3)
         try:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
         except (serial.SerialException, AttributeError, NotImplementedError):
-            # Certaines URL (socket://, loop://) n'implémentent pas ces méthodes.
             pass
 
     def close(self) -> None:
@@ -123,11 +100,11 @@ class ESP32Link:
             return
         try:
             self.emergency_stop()
-        except Exception:  # noqa: BLE001 — on ferme de toute façon
+        except Exception:  # noqa: BLE001
             log.warning("Impossible d'envoyer emergency_stop avant close()")
         if self._ser.is_open:
             self._ser.close()
-        log.info("Port série %s fermé", self.port)
+        log.info("Port %s fermé", self.port)
 
     def __enter__(self) -> "ESP32Link":
         self.open()
@@ -143,66 +120,67 @@ class ESP32Link:
     # -- API publique --------------------------------------------------------
 
     def send(self, payload: dict[str, Any]) -> None:
-        """
-        Sérialise ``payload`` en JSON compact + newline, et l'envoie à l'ESP32.
-        Thread-safe.
-        """
+        """Sérialise ``payload`` en JSON + \\n et l'envoie à l'ESP32 (thread-safe)."""
         if not self.is_open:
             raise LinkNotOpenError(
-                "ESP32Link.send() appelé alors que le port n'est pas ouvert. "
-                "Appelez .open() d'abord."
+                "ESP32Link.send() sans port ouvert. Appelez .open() d'abord."
             )
         line = (json.dumps(payload, separators=(",", ":")) + "\n").encode("ascii")
         with self._lock:
             try:
-                assert self._ser is not None  # pour mypy
+                assert self._ser is not None
                 self._ser.write(line)
                 self._ser.flush()
                 self.stats.bytes_sent += len(line)
                 self.stats.commands_sent += 1
-                log.debug("TX → %s", line.rstrip())
+                log.debug("TX -> %s", line.rstrip())
             except serial.SerialException as exc:
                 self.stats.last_error = str(exc)
-                log.error("Erreur d'écriture série : %s", exc)
+                log.error("Erreur d'ecriture serie : %s", exc)
                 raise
 
     def emergency_stop(self) -> None:
-        """Arrêt immédiat : moteurs à zéro via T=0, puis T=1 L=0 R=0 par sécurité."""
+        """Arret immediat : T=0 puis T=1 L=0 R=0 par securite."""
         try:
             self.send({"T": CMD_EMERGENCY_STOP})
         finally:
-            # Double filet : certains firmwares ignorent T=0, T=1 fonctionne toujours.
             self.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
 
     def request_feedback(self, timeout_s: Optional[float] = None) -> dict:
         """
-        Demande un retour d'état à l'ESP32 (batterie, IMU, position…).
+        Envoie {"T":126} et attend la reponse JSON de l'ESP32.
 
-        Retourne le dict JSON reçu. Lève :class:`ESP32TimeoutError` si rien
-        n'est reçu dans le délai imparti.
+        Retourne le dict recu. Leve ESP32TimeoutError en cas de timeout.
         """
         if not self.is_open:
             raise LinkNotOpenError("Port non ouvert")
         assert self._ser is not None
-        deadline = time.time() + (timeout_s if timeout_s is not None else self.timeout_s)
+
+        effective_timeout = timeout_s if timeout_s is not None else self.timeout_s
+        result: Optional[dict] = None
+
         with self._lock:
-            # Vider le buffer d'entrée avant la requête pour ne pas lire
-            # une ancienne trame.
+            # 1) purger le buffer d'entree
             try:
                 self._ser.reset_input_buffer()
             except (serial.SerialException, AttributeError, NotImplementedError):
                 pass
-            # Envoyer la requête en gardant le verrou (pour que la réponse
-            # ne soit pas consommée par un autre thread).
-            line_out = (json.dumps({"T": CMD_REQUEST_FEEDBACK}) + "\n").encode("ascii")
+
+            # 2) envoyer la requete (sans repasser par send() pour ne pas
+            #    reprendre le verrou)
+            line_out = (
+                json.dumps({"T": CMD_REQUEST_FEEDBACK}, separators=(",", ":"))
+                + "\n"
+            ).encode("ascii")
             self._ser.write(line_out)
             self._ser.flush()
             self.stats.bytes_sent += len(line_out)
             self.stats.commands_sent += 1
+            log.debug("TX -> %s", line_out.rstrip())
 
+            # 3) lire jusqu'a une ligne JSON valide ou timeout
+            deadline = time.time() + effective_timeout
             while time.time() < deadline:
-                # read_until est plus fiable que read(1) sur socket:// et marche
-                # aussi sur serial natif. Retourne b"" si timeout sans newline.
                 raw = self._ser.read_until(b"\n", size=4096)
                 if not raw:
                     continue
@@ -210,10 +188,15 @@ class ESP32Link:
                 if not line:
                     continue
                 try:
-                    return json.loads(line)
+                    result = json.loads(line)
+                    log.debug("RX <- %s", line)
+                    break
                 except json.JSONDecodeError:
-                    log.debug("Ligne non-JSON ignorée : %r", line)
+                    log.debug("Ligne non-JSON ignoree : %r", line)
                     continue
-        raise ESP32TimeoutError(
-            f"Pas de réponse de l'ESP32 après {timeout_s or self.timeout_s}s"
-        )
+
+        if result is None:
+            raise ESP32TimeoutError(
+                f"Pas de reponse de l'ESP32 apres {effective_timeout}s"
+            )
+        return result
