@@ -1,0 +1,27 @@
+# Configuration du RaspRover
+# Modifier ici sans toucher au code.
+
+control:
+  # Port série UART de la Pi 5 vers l'ESP32 Waveshare.
+  # Sur Pi 5 : /dev/ttyAMA0 (UART0 hardware) — vérifier avec `ls /dev/tty*`.
+  # Si vous utilisez l'USB-CDC de l'ESP32 : /dev/ttyUSB0 ou /dev/ttyACM0.
+  serial_port: /dev/ttyAMA0
+  baudrate: 115200
+  timeout_s: 1.0
+
+  # Limites de sécurité
+  motor_max_speed: 0.5        # Vitesse maximale normalisée (0.0 à 1.0)
+  motor_default_speed: 0.35   # Vitesse par défaut
+  command_rate_hz: 20         # Fréquence max d'envoi de commandes
+
+  pantilt:
+    pan_min_deg: -90
+    pan_max_deg:  90
+    tilt_min_deg: -45
+    tilt_max_deg:  60
+    servo_speed: 600          # Vitesse servo ST3215 (0-4096)
+    servo_accel: 50           # Accélération servo ST3215 (0-255)
+
+logging:
+  level: INFO
+  file: logs/rasprover.log
