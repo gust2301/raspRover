@@ -30,7 +30,6 @@ from modules.control import (  # noqa: E402
     PanTiltController,
 )
 
-
 CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "config.yaml"
 
 
@@ -106,7 +105,9 @@ Commandes disponibles :
 """
 
 
-def run_repl(link: ESP32Link | DryRunLink, motors: MotorController, pantilt: PanTiltController) -> None:
+def run_repl(
+    link: ESP32Link | DryRunLink, motors: MotorController, pantilt: PanTiltController
+) -> None:
     print(HELP)
     while True:
         try:
