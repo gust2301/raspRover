@@ -11,7 +11,6 @@ import yaml
 
 from modules.control import ESP32Link, MotorController, PanTiltController
 
-
 CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"
 log = logging.getLogger(__name__)
 
