@@ -21,14 +21,14 @@ Exemple minimal
 """
 
 from .esp32_link import ESP32Link
-from .motor_controller import MotorController, Direction
-from .pantilt_controller import PanTiltController
 from .exceptions import (
     ControlError,
-    LinkNotOpenError,
-    InvalidParameterError,
     ESP32TimeoutError,
+    InvalidParameterError,
+    LinkNotOpenError,
 )
+from .motor_controller import Direction, MotorController
+from .pantilt_controller import PanTiltController
 
 __all__ = [
     "ESP32Link",

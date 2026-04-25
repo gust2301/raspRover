@@ -31,36 +31,33 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import socket
 import socketserver
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 # --- Paramètres physiques du modèle ------------------------------------------
 
-MAX_SPEED_M_S = 0.65       # Waveshare RaspRover max linear speed
-WHEELBASE_M = 0.18         # approx. distance entre roues gauche/droite
-PHYSICS_DT = 0.05          # pas d'intégration (50 ms)
+MAX_SPEED_M_S = 0.65  # Waveshare RaspRover max linear speed
+WHEELBASE_M = 0.18  # approx. distance entre roues gauche/droite
+PHYSICS_DT = 0.05  # pas d'intégration (50 ms)
 BATTERY_CAPACITY_WH = 120  # 3S × 3200 mAh × 12.6 V ≈ 120 Wh
-IDLE_POWER_W = 5           # conso quand à l'arrêt (ESP32 + servos statiques)
-MOTOR_POWER_W = 30         # conso nominale moteurs à pleine vitesse
+IDLE_POWER_W = 5  # conso quand à l'arrêt (ESP32 + servos statiques)
+MOTOR_POWER_W = 30  # conso nominale moteurs à pleine vitesse
 
 
 @dataclass
 class RobotState:
     """État instantané du robot virtuel."""
 
-    L: float = 0.0                      # consigne côté gauche  [-1, 1]
-    R: float = 0.0                      # consigne côté droit   [-1, 1]
+    L: float = 0.0  # consigne côté gauche  [-1, 1]
+    R: float = 0.0  # consigne côté droit   [-1, 1]
     pan_deg: float = 0.0
     tilt_deg: float = 0.0
-    x: float = 0.0                      # position en mètres
+    x: float = 0.0  # position en mètres
     y: float = 0.0
-    heading_rad: float = 0.0            # cap (0 = +x)
-    voltage: float = 12.6               # batterie 3S pleine
+    heading_rad: float = 0.0  # cap (0 = +x)
+    voltage: float = 12.6  # batterie 3S pleine
     uptime_s: float = 0.0
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
@@ -73,9 +70,7 @@ class RobotState:
             omega = (v_r - v_l) / WHEELBASE_M
             self.x += v * math.cos(self.heading_rad) * dt
             self.y += v * math.sin(self.heading_rad) * dt
-            self.heading_rad = (self.heading_rad + omega * dt + math.pi) % (
-                2 * math.pi
-            ) - math.pi
+            self.heading_rad = (self.heading_rad + omega * dt + math.pi) % (2 * math.pi) - math.pi
 
             # Décharge batterie proportionnelle à l'activité moteur.
             power_w = IDLE_POWER_W + (abs(self.L) + abs(self.R)) * MOTOR_POWER_W
@@ -108,7 +103,7 @@ class ESP32Handler(socketserver.StreamRequestHandler):
     """Une connexion TCP = un "ESP32" pour un client."""
 
     def handle(self) -> None:
-        server: "FakeESP32Server" = self.server  # type: ignore[assignment]
+        server: FakeESP32Server = self.server  # type: ignore[assignment]
         state: RobotState = server.state
         addr = self.client_address
         print(f"[SIM] + client connecté {addr}")
@@ -119,7 +114,7 @@ class ESP32Handler(socketserver.StreamRequestHandler):
             while not server.stopping.is_set():
                 try:
                     chunk = self.request.recv(1024)
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 if not chunk:
                     break
@@ -159,10 +154,7 @@ class ESP32Handler(socketserver.StreamRequestHandler):
             with state._lock:
                 state.pan_deg = float(cmd.get("X", state.pan_deg))
                 state.tilt_deg = float(cmd.get("Y", state.tilt_deg))
-            print(
-                f"[SIM] CMD T=13 PANTILT  pan={state.pan_deg:+.1f}°  "
-                f"tilt={state.tilt_deg:+.1f}°"
-            )
+            print(f"[SIM] CMD T=13 PANTILT  pan={state.pan_deg:+.1f}°  tilt={state.tilt_deg:+.1f}°")
         elif t == 126:
             snap = state.snapshot()
             data = (json.dumps(snap, separators=(",", ":")) + "\n").encode("ascii")
@@ -292,9 +284,7 @@ def main() -> int:
 
     threads = [
         threading.Thread(target=srv.serve_forever, name="tcp", daemon=True),
-        threading.Thread(
-            target=physics_loop, args=(state, stop), name="physics", daemon=True
-        ),
+        threading.Thread(target=physics_loop, args=(state, stop), name="physics", daemon=True),
     ]
     if args.viz:
         threads.append(
@@ -302,9 +292,7 @@ def main() -> int:
         )
     else:
         threads.append(
-            threading.Thread(
-                target=status_loop, args=(state, stop), name="status", daemon=True
-            )
+            threading.Thread(target=status_loop, args=(state, stop), name="status", daemon=True)
         )
     for t in threads:
         t.start()

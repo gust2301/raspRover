@@ -1,0 +1,6 @@
+# Dev dependencies — tests + lint
+# Installees uniquement en environnement de developpement / CI.
+pytest>=8.0
+pytest-cov>=5.0
+pytest-timeout>=2.3
+ruff>=0.6

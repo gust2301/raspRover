@@ -21,14 +21,12 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 try:
     import serial  # type: ignore
 except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "pyserial est requis. Installez-le avec : pip install pyserial"
-    ) from exc
+    raise ImportError("pyserial est requis. Installez-le avec : pip install pyserial") from exc
 
 from .exceptions import ESP32TimeoutError, LinkNotOpenError
 
@@ -40,6 +38,7 @@ CMD_EMERGENCY_STOP = 0
 CMD_SPEED_CTRL = 1
 CMD_PANTILT_CTRL = 13
 CMD_REQUEST_FEEDBACK = 126
+FEEDBACK_TYPES = {1001, CMD_REQUEST_FEEDBACK}
 
 
 @dataclass
@@ -48,7 +47,7 @@ class LinkStats:
 
     bytes_sent: int = 0
     commands_sent: int = 0
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
 
 class ESP32Link:
@@ -73,7 +72,7 @@ class ESP32Link:
         self.port = port
         self.baudrate = baudrate
         self.timeout_s = timeout_s
-        self._ser: Optional[serial.Serial] = None
+        self._ser: serial.Serial | None = None
         self._lock = threading.Lock()
         self.stats = LinkStats()
 
@@ -84,9 +83,7 @@ class ESP32Link:
         if self._ser and self._ser.is_open:
             return
         log.info("Ouverture du port %s @ %d bauds", self.port, self.baudrate)
-        self._ser = serial.serial_for_url(
-            self.port, baudrate=self.baudrate, timeout=self.timeout_s
-        )
+        self._ser = serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=self.timeout_s)
         time.sleep(0.3)
         try:
             self._ser.reset_input_buffer()
@@ -106,7 +103,7 @@ class ESP32Link:
             self._ser.close()
         log.info("Port %s fermé", self.port)
 
-    def __enter__(self) -> "ESP32Link":
+    def __enter__(self) -> ESP32Link:
         self.open()
         return self
 
@@ -122,9 +119,7 @@ class ESP32Link:
     def send(self, payload: dict[str, Any]) -> None:
         """Sérialise ``payload`` en JSON + \\n et l'envoie à l'ESP32 (thread-safe)."""
         if not self.is_open:
-            raise LinkNotOpenError(
-                "ESP32Link.send() sans port ouvert. Appelez .open() d'abord."
-            )
+            raise LinkNotOpenError("ESP32Link.send() sans port ouvert. Appelez .open() d'abord.")
         line = (json.dumps(payload, separators=(",", ":")) + "\n").encode("ascii")
         with self._lock:
             try:
@@ -146,7 +141,7 @@ class ESP32Link:
         finally:
             self.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
 
-    def request_feedback(self, timeout_s: Optional[float] = None) -> dict:
+    def request_feedback(self, timeout_s: float | None = None) -> dict:
         """
         Envoie {"T":126} et attend la reponse JSON de l'ESP32.
 
@@ -157,7 +152,7 @@ class ESP32Link:
         assert self._ser is not None
 
         effective_timeout = timeout_s if timeout_s is not None else self.timeout_s
-        result: Optional[dict] = None
+        result: dict | None = None
 
         with self._lock:
             # 1) purger le buffer d'entree
@@ -169,8 +164,7 @@ class ESP32Link:
             # 2) envoyer la requete (sans repasser par send() pour ne pas
             #    reprendre le verrou)
             line_out = (
-                json.dumps({"T": CMD_REQUEST_FEEDBACK}, separators=(",", ":"))
-                + "\n"
+                json.dumps({"T": CMD_REQUEST_FEEDBACK}, separators=(",", ":")) + "\n"
             ).encode("ascii")
             self._ser.write(line_out)
             self._ser.flush()
@@ -188,15 +182,21 @@ class ESP32Link:
                 if not line:
                     continue
                 try:
-                    result = json.loads(line)
-                    log.debug("RX <- %s", line)
-                    break
+                    candidate = json.loads(line)
                 except json.JSONDecodeError:
                     log.debug("Ligne non-JSON ignoree : %r", line)
                     continue
+                if not isinstance(candidate, dict):
+                    log.debug("Message non-dict ignore : %r", candidate)
+                    continue
+                msg_type = candidate.get("T")
+                if msg_type not in FEEDBACK_TYPES and "voltage" not in candidate:
+                    log.debug("Message JSON ignore (pas un feedback) : %s", line)
+                    continue
+                result = candidate
+                log.debug("RX <- %s", line)
+                break
 
         if result is None:
-            raise ESP32TimeoutError(
-                f"Pas de reponse de l'ESP32 apres {effective_timeout}s"
-            )
+            raise ESP32TimeoutError(f"Pas de reponse de l'ESP32 apres {effective_timeout}s")
         return result
