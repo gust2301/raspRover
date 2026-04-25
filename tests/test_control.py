@@ -1,31 +1,21 @@
 """
-REPL interactif pour tester le Module Contrôle sur matériel réel.
+REPL interactif pour tester le module controle sur materiel reel.
 
-Usage (depuis la Pi 5, à la racine du dépôt) :
-
-    python3 -m tests.test_control                       # /dev/ttyAMA0 par défaut
-    python3 -m tests.test_control --port /dev/ttyUSB0   # si ESP32 connecté en USB
-    python3 -m tests.test_control --dry-run             # sans matériel, juste pour voir les trames
-
-Commandes du REPL :
-    f [spd]   avance (spd optionnel, ex: f 0.3)
-    b [spd]   recule
-    l [spd]   rotation gauche
-    r [spd]   rotation droite
-    s         stop
-    p <pan> <tilt>   orienter la caméra (ex: p 30 -15)
-    c         recentrer la caméra
-    ?         état courant
-    q         quitter (stop + close)
+Usage:
+    python3 -m tests.test_control
+    python3 -m tests.test_control --port /dev/ttyUSB0
+    python3 -m tests.test_control --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import pathlib
 import shlex
 import sys
-from typing import Optional
+
+import yaml
 
 # Permet de lancer le script en autonome aussi bien qu'avec -m
 if __package__ is None or __package__ == "":  # pragma: no cover
@@ -35,9 +25,13 @@ if __package__ is None or __package__ == "":  # pragma: no cover
 
 from modules.control import (  # noqa: E402
     ESP32Link,
+    ESP32TimeoutError,
     MotorController,
     PanTiltController,
 )
+
+
+CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "config.yaml"
 
 
 class DryRunLink:
@@ -54,45 +48,65 @@ class DryRunLink:
 
     def send(self, payload: dict) -> None:
         import json
-        print(f"[DRY-RUN] TX → {json.dumps(payload, separators=(',', ':'))}")
+
+        print(f"[DRY-RUN] TX -> {json.dumps(payload, separators=(',', ':'))}")
 
     def emergency_stop(self) -> None:
         self.send({"T": 0})
         self.send({"T": 1, "L": 0.0, "R": 0.0})
 
+    def request_feedback(self, timeout_s: float | None = None) -> dict:
+        return {"T": 1001, "dry_run": True, "timeout_s": timeout_s}
+
     def __enter__(self):
         return self
 
-    def __exit__(self, *a):
+    def __exit__(self, *args):
         self.close()
 
 
+def load_config(path: pathlib.Path = CONFIG_PATH) -> dict:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Test interactif du Module Contrôle")
-    p.add_argument("--port", default="/dev/ttyAMA0", help="Port série de l'ESP32")
-    p.add_argument("--baudrate", type=int, default=115200)
-    p.add_argument("--max-speed", type=float, default=0.4)
-    p.add_argument("--dry-run", action="store_true", help="Ne pas ouvrir le port série")
-    p.add_argument("--verbose", "-v", action="store_true")
-    return p.parse_args()
+    cfg = load_config()
+    ctrl_cfg = cfg.get("control", {})
+    parser = argparse.ArgumentParser(description="Test interactif du module controle")
+    parser.add_argument("--port", default=ctrl_cfg.get("serial_port", "/dev/ttyAMA0"))
+    parser.add_argument("--baudrate", type=int, default=ctrl_cfg.get("baudrate", 115200))
+    parser.add_argument("--max-speed", type=float, default=ctrl_cfg.get("motor_max_speed", 0.4))
+    parser.add_argument("--timeout", type=float, default=ctrl_cfg.get("timeout_s", 1.0))
+    parser.add_argument("--dry-run", action="store_true", help="Ne pas ouvrir le port serie")
+    parser.add_argument(
+        "--skip-feedback",
+        action="store_true",
+        help="Ne pas faire de ping feedback au demarrage",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true")
+    return parser.parse_args()
 
 
 HELP = """
 Commandes disponibles :
-  f [speed]         avance         (défaut : vitesse par défaut)
+  f [speed]         avance
   b [speed]         recule
   l [speed]         rotation gauche
   r [speed]         rotation droite
   s                 stop
-  p <pan> <tilt>    orienter la caméra (degrés)
-  c                 recentrer la caméra
-  ?                 afficher l'état
+  p <pan> <tilt>    orienter la camera (degres)
+  c                 recentrer la camera
+  fb                demander le feedback ESP32
+  ?                 afficher l'etat local
   h                 cette aide
   q                 quitter
 """
 
 
-def run_repl(motors: MotorController, pantilt: PanTiltController) -> None:
+def run_repl(link: ESP32Link | DryRunLink, motors: MotorController, pantilt: PanTiltController) -> None:
     print(HELP)
     while True:
         try:
@@ -112,37 +126,53 @@ def run_repl(motors: MotorController, pantilt: PanTiltController) -> None:
         try:
             if cmd in ("q", "quit", "exit"):
                 break
-            elif cmd in ("h", "help", "?help"):
+            if cmd in ("h", "help", "?help"):
                 print(HELP)
-            elif cmd == "?":
-                L, R = motors.last_command
+                continue
+            if cmd == "?":
+                left, right = motors.last_command
                 pan, tilt = pantilt.position
-                print(f"  moteurs : L={L:+.2f}  R={R:+.2f}")
-                print(f"  caméra  : pan={pan:+.1f}°  tilt={tilt:+.1f}°")
-            elif cmd == "f":
+                print(f"  moteurs : L={left:+.2f}  R={right:+.2f}")
+                print(f"  camera  : pan={pan:+.1f}deg  tilt={tilt:+.1f}deg")
+                continue
+            if cmd == "f":
                 motors.forward(_opt_float(args, 0))
-            elif cmd == "b":
+                continue
+            if cmd == "b":
                 motors.backward(_opt_float(args, 0))
-            elif cmd == "l":
+                continue
+            if cmd == "l":
                 motors.rotate_left(_opt_float(args, 0))
-            elif cmd == "r":
+                continue
+            if cmd == "r":
                 motors.rotate_right(_opt_float(args, 0))
-            elif cmd == "s":
+                continue
+            if cmd == "s":
                 motors.stop()
-            elif cmd == "c":
+                continue
+            if cmd == "c":
                 pantilt.center()
-            elif cmd == "p":
+                continue
+            if cmd == "fb":
+                try:
+                    feedback = link.request_feedback(timeout_s=1.5)
+                except ESP32TimeoutError as exc:
+                    print(f"Feedback timeout : {exc}")
+                else:
+                    print(f"  feedback: {feedback}")
+                continue
+            if cmd == "p":
                 if len(args) != 2:
                     print("Usage : p <pan> <tilt>  (ex : p 30 -15)")
                     continue
                 pantilt.goto(pan_deg=float(args[0]), tilt_deg=float(args[1]))
-            else:
-                print(f"Commande inconnue : {cmd!r} (tape 'h' pour l'aide)")
+                continue
+            print(f"Commande inconnue : {cmd!r} (tape 'h' pour l'aide)")
         except Exception as exc:  # noqa: BLE001
             print(f"[ERREUR] {exc}")
 
 
-def _opt_float(args: list[str], idx: int) -> Optional[float]:
+def _opt_float(args: list[str], idx: int) -> float | None:
     try:
         return float(args[idx])
     except (IndexError, ValueError):
@@ -157,16 +187,25 @@ def main() -> int:
     )
 
     if args.dry_run:
-        link = DryRunLink()  # type: ignore[assignment]
+        link = DryRunLink()
     else:
-        link = ESP32Link(port=args.port, baudrate=args.baudrate)
+        link = ESP32Link(port=args.port, baudrate=args.baudrate, timeout_s=args.timeout)
         link.open()
 
     motors = MotorController(link, max_speed=args.max_speed)  # type: ignore[arg-type]
     pantilt = PanTiltController(link)  # type: ignore[arg-type]
 
     try:
-        run_repl(motors, pantilt)
+        print(f"Liaison ouverte sur {args.port} @ {args.baudrate}")
+        print("Commande conseillee au demarrage: 'fb' puis 'c'")
+        if not args.skip_feedback:
+            try:
+                feedback = link.request_feedback(timeout_s=args.timeout)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[WARN] Feedback indisponible au demarrage: {exc}")
+            else:
+                print(f"[OK] Feedback initial: {feedback}")
+        run_repl(link, motors, pantilt)
     finally:
         motors.shutdown()
         link.close()

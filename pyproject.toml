@@ -1,0 +1,43 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "__pycache__", ".git"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "B",
+    "UP",
+]
+ignore = [
+    "E501",
+    "B008",
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --timeout=10"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: tests lents (> 1s)",
+    "hardware: tests qui necessitent le vrai robot (skippes par defaut)",
+]
+
+[tool.coverage.run]
+source = ["modules", "tools"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

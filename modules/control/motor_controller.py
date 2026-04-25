@@ -17,7 +17,6 @@ import enum
 import logging
 import threading
 import time
-from typing import Optional
 
 from .esp32_link import CMD_SPEED_CTRL, ESP32Link
 from .exceptions import InvalidParameterError
@@ -57,12 +56,10 @@ class MotorController:
         link: ESP32Link,
         max_speed: float = 0.5,
         default_speed: float = 0.35,
-        watchdog_s: Optional[float] = 1.0,
+        watchdog_s: float | None = 1.0,
     ) -> None:
         if not (0.0 < max_speed <= 1.0):
-            raise InvalidParameterError(
-                f"max_speed doit être dans ]0, 1], reçu {max_speed}"
-            )
+            raise InvalidParameterError(f"max_speed doit être dans ]0, 1], reçu {max_speed}")
         if not (0.0 <= default_speed <= max_speed):
             raise InvalidParameterError(
                 f"default_speed ({default_speed}) doit être dans [0, {max_speed}]"
@@ -75,7 +72,7 @@ class MotorController:
         self._last_cmd_ts = 0.0
         self._last_cmd: tuple[float, float] = (0.0, 0.0)
         self._stop_event = threading.Event()
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
         if watchdog_s:
             self._start_watchdog()
 
@@ -95,9 +92,7 @@ class MotorController:
                     )
                     self.stop()
 
-        self._watchdog_thread = threading.Thread(
-            target=loop, name="MotorWatchdog", daemon=True
-        )
+        self._watchdog_thread = threading.Thread(target=loop, name="MotorWatchdog", daemon=True)
         self._watchdog_thread.start()
 
     def shutdown(self) -> None:
@@ -105,7 +100,10 @@ class MotorController:
         self._stop_event.set()
         if self._watchdog_thread:
             self._watchdog_thread.join(timeout=1.0)
-        self.stop()
+        try:
+            self.stop()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Impossible d'envoyer stop() pendant shutdown: %s", exc)
 
     # -- API publique --------------------------------------------------------
 
@@ -123,22 +121,22 @@ class MotorController:
         self._last_cmd_ts = time.time()
         log.debug("drive(L=%.2f, R=%.2f)", left, right)
 
-    def forward(self, speed: Optional[float] = None) -> None:
+    def forward(self, speed: float | None = None) -> None:
         """Avance en ligne droite."""
         v = self.default_speed if speed is None else speed
         self.drive(v, v)
 
-    def backward(self, speed: Optional[float] = None) -> None:
+    def backward(self, speed: float | None = None) -> None:
         """Recule en ligne droite."""
         v = self.default_speed if speed is None else speed
         self.drive(-v, -v)
 
-    def rotate_left(self, speed: Optional[float] = None) -> None:
+    def rotate_left(self, speed: float | None = None) -> None:
         """Rotation sur place vers la gauche (R positif, L négatif)."""
         v = self.default_speed if speed is None else speed
         self.drive(-v, v)
 
-    def rotate_right(self, speed: Optional[float] = None) -> None:
+    def rotate_right(self, speed: float | None = None) -> None:
         """Rotation sur place vers la droite."""
         v = self.default_speed if speed is None else speed
         self.drive(v, -v)
@@ -161,7 +159,7 @@ class MotorController:
         self._last_cmd_ts = time.time()
         log.debug("stop()")
 
-    def from_direction(self, direction: Direction, speed: Optional[float] = None) -> None:
+    def from_direction(self, direction: Direction, speed: float | None = None) -> None:
         """Facilité : dispatch selon un enum Direction (utile pour l'API Web)."""
         mapping = {
             Direction.FORWARD: self.forward,

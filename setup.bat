@@ -68,12 +68,22 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/3] Installation des dependances (requirements.txt) ...
+echo [3/3] Installation des dependances runtime...
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 (
     echo [ERREUR] echec pip install.
     pause
     exit /b 1
+)
+
+if exist requirements-dev.txt (
+    echo [3bis] Installation des dependances de developpement...
+    .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+    if errorlevel 1 (
+        echo [ERREUR] echec pip install dev.
+        pause
+        exit /b 1
+    )
 )
 
 echo.

@@ -19,7 +19,6 @@ Conventions :
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from .esp32_link import CMD_PANTILT_CTRL, ESP32Link
 from .exceptions import InvalidParameterError
@@ -64,10 +63,10 @@ class PanTiltController:
 
     def goto(
         self,
-        pan_deg: Optional[float] = None,
-        tilt_deg: Optional[float] = None,
-        speed: Optional[int] = None,
-        accel: Optional[int] = None,
+        pan_deg: float | None = None,
+        tilt_deg: float | None = None,
+        speed: int | None = None,
+        accel: int | None = None,
     ) -> None:
         """
         Déplace la caméra vers une position absolue (en degrés).
