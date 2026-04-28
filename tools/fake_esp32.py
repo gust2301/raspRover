@@ -154,7 +154,9 @@ class ESP32Handler(socketserver.StreamRequestHandler):
             with state._lock:
                 state.pan_deg = float(cmd.get("X", state.pan_deg))
                 state.tilt_deg = float(cmd.get("Y", state.tilt_deg))
-            print(f"[SIM] CMD T=133 PANTILT  pan={state.pan_deg:+.1f}°  tilt={state.tilt_deg:+.1f}°")
+            print(
+                f"[SIM] CMD T=133 PANTILT  pan={state.pan_deg:+.1f}°  tilt={state.tilt_deg:+.1f}°"
+            )
         elif t in (126, 130):
             snap = state.snapshot()
             data = (json.dumps(snap, separators=(",", ":")) + "\n").encode("ascii")
