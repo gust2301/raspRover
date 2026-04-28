@@ -77,7 +77,14 @@ sudo usermod -aG dialout $USER
 python3 -m tests.test_control --port /dev/ttyAMA0
 ```
 
-Commandes disponibles : `f` (avance), `b` (recul), `l` (gauche), `r` (droite), `s` (stop), `p <pan> <tilt>` (orienter caméra), `c` (recentre caméra), `?` (état), `q` (quitter).
+Commandes disponibles : `f` (avance), `b` (recul), `l` (gauche), `r` (droite), `s` (stop), `p <pan> <tilt>` (orienter caméra), `c` (recentre caméra), `fb` / `fb126` / `fb130` (diagnostic feedback), `echo on|off`, `stream on|off`, `raw <json>`, `rx`, `?` (état), `q` (quitter).
+
+Notes protocole Waveshare :
+
+- Vitesse châssis : `{"T":1,"L":0.5,"R":0.5}`
+- Pan-Tilt : `{"T":133,"X":45,"Y":10,"SPD":600,"ACC":50}`
+- Feedback châssis : `{"T":130}`
+- IMU / statut : `{"T":126}`
 
 ## Tester SANS le matériel (émulateur)
 

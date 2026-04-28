@@ -99,6 +99,12 @@ Commandes disponibles :
   p <pan> <tilt>    orienter la camera (degres)
   c                 recentrer la camera
   fb                demander le feedback ESP32
+  fb126             demander l'IMU / statut (T=126)
+  fb130             demander le feedback chassis (T=130)
+  echo on|off       activer/desactiver l'echo serie de l'ESP32
+  stream on|off     activer/desactiver le feedback serie continu
+  raw <json>        envoyer une trame JSON brute
+  rx                lire une ligne brute du port serie
   ?                 afficher l'etat local
   h                 cette aide
   q                 quitter
@@ -161,6 +167,46 @@ def run_repl(
                     print(f"Feedback timeout : {exc}")
                 else:
                     print(f"  feedback: {feedback}")
+                continue
+            if cmd in ("fb126", "fb130"):
+                fb_type = 126 if cmd == "fb126" else 130
+                try:
+                    feedback = link.request_feedback(timeout_s=1.5, command_type=fb_type)
+                except ESP32TimeoutError as exc:
+                    print(f"Feedback timeout : {exc}")
+                else:
+                    print(f"  feedback T={fb_type}: {feedback}")
+                continue
+            if cmd == "echo":
+                if len(args) != 1 or args[0] not in ("on", "off"):
+                    print("Usage : echo on|off")
+                    continue
+                link.set_serial_echo(args[0] == "on")
+                print(f"Echo serie {'active' if args[0] == 'on' else 'desactive'}")
+                continue
+            if cmd == "stream":
+                if len(args) != 1 or args[0] not in ("on", "off"):
+                    print("Usage : stream on|off")
+                    continue
+                link.set_serial_feedback(args[0] == "on")
+                print(f"Feedback serie continu {'active' if args[0] == 'on' else 'desactive'}")
+                continue
+            if cmd == "raw":
+                if not args:
+                    print('Usage : raw \'{"T":143,"cmd":1}\'')
+                    continue
+                import json
+
+                payload = json.loads(" ".join(args))
+                if not isinstance(payload, dict):
+                    print("Le JSON brut doit etre un objet")
+                    continue
+                link.send(payload)
+                print(f"  tx: {payload}")
+                continue
+            if cmd == "rx":
+                line = link.read_line(timeout_s=1.0)
+                print(f"  rx: {line!r}")
                 continue
             if cmd == "p":
                 if len(args) != 2:
