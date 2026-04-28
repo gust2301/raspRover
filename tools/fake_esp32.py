@@ -7,7 +7,7 @@ Votre code client se connecte avec :
     ESP32Link(port="socket://localhost:9999")
 
 L'émulateur :
-- Parse les commandes entrantes (T=0 stop, T=1 speed, T=13 pan-tilt, T=126 feedback)
+- Parse les commandes entrantes (T=0 stop, T=1 speed, T=133 pan-tilt, T=126/130 feedback)
 - Maintient un état robot (vitesses, angles, position virtuelle 2D, batterie)
 - Intègre la position dans le temps avec un modèle différentiel simple
 - Renvoie un JSON de feedback quand on le lui demande (T=126)
@@ -150,16 +150,16 @@ class ESP32Handler(socketserver.StreamRequestHandler):
                 state.L = max(-1.0, min(1.0, L))
                 state.R = max(-1.0, min(1.0, R))
             print(f"[SIM] CMD T=1  SPEED    L={state.L:+.2f}  R={state.R:+.2f}")
-        elif t == 13:
+        elif t == 133:
             with state._lock:
                 state.pan_deg = float(cmd.get("X", state.pan_deg))
                 state.tilt_deg = float(cmd.get("Y", state.tilt_deg))
-            print(f"[SIM] CMD T=13 PANTILT  pan={state.pan_deg:+.1f}°  tilt={state.tilt_deg:+.1f}°")
-        elif t == 126:
+            print(f"[SIM] CMD T=133 PANTILT  pan={state.pan_deg:+.1f}°  tilt={state.tilt_deg:+.1f}°")
+        elif t in (126, 130):
             snap = state.snapshot()
             data = (json.dumps(snap, separators=(",", ":")) + "\n").encode("ascii")
             self.request.sendall(data)
-            print(f"[SIM] CMD T=126 FEEDBACK → sent {snap}")
+            print(f"[SIM] CMD T={t} FEEDBACK → sent {snap}")
         else:
             print(f"[SIM] ? commande inconnue T={t}: {cmd}")
 

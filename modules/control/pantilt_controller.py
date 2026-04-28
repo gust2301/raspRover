@@ -9,7 +9,7 @@ firmware ESP32 traduit vers le bus ST3215.
 
 Commande JSON utilisée (firmware UGV Waveshare) :
 
-    {"T":13,"X":<pan_deg>,"Y":<tilt_deg>,"SPD":<speed>,"ACC":<accel>}
+    {"T":133,"X":<pan_deg>,"Y":<tilt_deg>,"SPD":<speed>,"ACC":<accel>}
 
 Conventions :
 - pan  > 0 : caméra tourne vers la droite

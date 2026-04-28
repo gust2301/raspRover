@@ -10,8 +10,9 @@ où le champ ``T`` identifie le type de commande. Les codes ``T`` utilisés ici 
 
     T=0   Emergency stop (toutes sorties à zéro)
     T=1   Commande vitesse différentielle (L/R, chacun dans [-0.5, 0.5])
-    T=13  Contrôle position Pan-Tilt (X=pan°, Y=tilt°)
-    T=126 Demande feedback (batterie, IMU) — optionnel
+    T=126 Demande IMU / informations de statut
+    T=130 Demande feedback châssis
+    T=133 Contrôle position Pan-Tilt (X=pan°, Y=tilt°)
 """
 
 from __future__ import annotations
@@ -36,9 +37,12 @@ log = logging.getLogger(__name__)
 # --- Codes de commande du firmware Waveshare UGV -----------------------------
 CMD_EMERGENCY_STOP = 0
 CMD_SPEED_CTRL = 1
-CMD_PANTILT_CTRL = 13
-CMD_REQUEST_FEEDBACK = 126
-FEEDBACK_TYPES = {1001, CMD_REQUEST_FEEDBACK}
+CMD_REQUEST_IMU = 126
+CMD_REQUEST_BASE_FEEDBACK = 130
+CMD_PANTILT_CTRL = 133
+CMD_SERIAL_FEEDBACK = 131
+CMD_SERIAL_ECHO = 143
+FEEDBACK_TYPES = {1001, CMD_REQUEST_IMU, CMD_REQUEST_BASE_FEEDBACK}
 
 
 @dataclass
@@ -141,10 +145,16 @@ class ESP32Link:
         finally:
             self.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
 
-    def request_feedback(self, timeout_s: float | None = None) -> dict:
+    def request_feedback(
+        self,
+        timeout_s: float | None = None,
+        command_type: int | None = None,
+    ) -> dict:
         """
-        Envoie {"T":126} et attend la reponse JSON de l'ESP32.
+        Envoie une requete de feedback JSON et attend la reponse de l'ESP32.
 
+        Par defaut, essaie d'abord ``T=130`` (feedback châssis), puis ``T=126``
+        (IMU / statut) pour rester compatible avec plusieurs firmwares Waveshare.
         Retourne le dict recu. Leve ESP32TimeoutError en cas de timeout.
         """
         if not self.is_open:
@@ -152,51 +162,90 @@ class ESP32Link:
         assert self._ser is not None
 
         effective_timeout = timeout_s if timeout_s is not None else self.timeout_s
-        result: dict | None = None
+        command_types = (
+            [command_type]
+            if command_type is not None
+            else [CMD_REQUEST_BASE_FEEDBACK, CMD_REQUEST_IMU]
+        )
+        last_error: ESP32TimeoutError | None = None
 
-        with self._lock:
-            # 1) purger le buffer d'entree
-            try:
-                self._ser.reset_input_buffer()
-            except (serial.SerialException, AttributeError, NotImplementedError):
-                pass
-
-            # 2) envoyer la requete (sans repasser par send() pour ne pas
-            #    reprendre le verrou)
-            line_out = (
-                json.dumps({"T": CMD_REQUEST_FEEDBACK}, separators=(",", ":")) + "\n"
-            ).encode("ascii")
-            self._ser.write(line_out)
-            self._ser.flush()
-            self.stats.bytes_sent += len(line_out)
-            self.stats.commands_sent += 1
-            log.debug("TX -> %s", line_out.rstrip())
-
-            # 3) lire jusqu'a une ligne JSON valide ou timeout
-            deadline = time.time() + effective_timeout
-            while time.time() < deadline:
-                raw = self._ser.read_until(b"\n", size=4096)
-                if not raw:
-                    continue
-                line = raw.decode("ascii", errors="replace").strip()
-                if not line:
-                    continue
+        for cmd_type in command_types:
+            result: dict | None = None
+            with self._lock:
                 try:
-                    candidate = json.loads(line)
-                except json.JSONDecodeError:
-                    log.debug("Ligne non-JSON ignoree : %r", line)
-                    continue
-                if not isinstance(candidate, dict):
-                    log.debug("Message non-dict ignore : %r", candidate)
-                    continue
-                msg_type = candidate.get("T")
-                if msg_type not in FEEDBACK_TYPES and "voltage" not in candidate:
-                    log.debug("Message JSON ignore (pas un feedback) : %s", line)
-                    continue
-                result = candidate
-                log.debug("RX <- %s", line)
-                break
+                    self._ser.reset_input_buffer()
+                except (serial.SerialException, AttributeError, NotImplementedError):
+                    pass
 
-        if result is None:
-            raise ESP32TimeoutError(f"Pas de reponse de l'ESP32 apres {effective_timeout}s")
-        return result
+                line_out = (json.dumps({"T": cmd_type}, separators=(",", ":")) + "\n").encode(
+                    "ascii"
+                )
+                self._ser.write(line_out)
+                self._ser.flush()
+                self.stats.bytes_sent += len(line_out)
+                self.stats.commands_sent += 1
+                log.debug("TX -> %s", line_out.rstrip())
+
+                deadline = time.time() + effective_timeout
+                while time.time() < deadline:
+                    raw = self._ser.read_until(b"\n", size=4096)
+                    if not raw:
+                        continue
+                    line = raw.decode("ascii", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        candidate = json.loads(line)
+                    except json.JSONDecodeError:
+                        log.debug("Ligne non-JSON ignoree : %r", line)
+                        continue
+                    if not isinstance(candidate, dict):
+                        log.debug("Message non-dict ignore : %r", candidate)
+                        continue
+                    msg_type = candidate.get("T")
+                    if msg_type not in FEEDBACK_TYPES and not self._looks_like_feedback(candidate):
+                        log.debug("Message JSON ignore (pas un feedback) : %s", line)
+                        continue
+                    result = candidate
+                    log.debug("RX <- %s", line)
+                    break
+
+            if result is not None:
+                return result
+            last_error = ESP32TimeoutError(
+                f"Pas de reponse de l'ESP32 apres {effective_timeout}s avec T={cmd_type}"
+            )
+
+        assert last_error is not None
+        raise last_error
+
+    def set_serial_feedback(self, enabled: bool) -> None:
+        """Active ou coupe le feedback serie continu (T=131)."""
+        self.send({"T": CMD_SERIAL_FEEDBACK, "cmd": 1 if enabled else 0})
+
+    def set_serial_echo(self, enabled: bool) -> None:
+        """Active ou coupe l'echo serie des commandes recues (T=143)."""
+        self.send({"T": CMD_SERIAL_ECHO, "cmd": 1 if enabled else 0})
+
+    def read_line(self, timeout_s: float | None = None) -> str | None:
+        """Lit une ligne brute du port serie pour le diagnostic."""
+        if not self.is_open:
+            raise LinkNotOpenError("Port non ouvert")
+        assert self._ser is not None
+        previous_timeout = self._ser.timeout
+        try:
+            if timeout_s is not None:
+                self._ser.timeout = timeout_s
+            raw = self._ser.read_until(b"\n", size=4096)
+        finally:
+            self._ser.timeout = previous_timeout
+        if not raw:
+            return None
+        return raw.decode("ascii", errors="replace").rstrip("\r\n")
+
+    @staticmethod
+    def _looks_like_feedback(candidate: dict[str, Any]) -> bool:
+        return any(
+            key in candidate
+            for key in ("voltage", "x", "y", "yaw", "imu", "roll", "pitch", "pan", "tilt")
+        )
