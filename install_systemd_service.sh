@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SERVICE_NAME="rasprover-control.service"
-PROJECT_DIR="${PROJECT_DIR:-/home/ws/urgvrpi}"
+PROJECT_DIR="${PROJECT_DIR:-/home/ws/ugvrpi/raspRover}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 RUN_USER="${RUN_USER:-ws}"
 PYTHON_BIN="${PYTHON_BIN:-}"
