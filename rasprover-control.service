@@ -1,0 +1,16 @@
+[Unit]
+Description=RaspRover control backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ws
+WorkingDirectory=/home/ws/ugvrpi/raspRover
+ExecStart=/home/ws/ugvrpi/raspRover/.venv/bin/python /home/ws/ugvrpi/raspRover/run_control_service.py --port /dev/ttyAMA0 --skip-feedback
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
