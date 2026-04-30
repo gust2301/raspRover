@@ -79,7 +79,9 @@ keyUsage = digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 """.strip()
 
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".cnf", delete=False) as cfg_file:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=".cnf", delete=False
+    ) as cfg_file:
         cfg_file.write(openssl_config)
         cfg_path = pathlib.Path(cfg_file.name)
 
@@ -129,7 +131,9 @@ def _ensure_tls_material(args: argparse.Namespace) -> tuple[pathlib.Path, pathli
             "Fournissez-les ou activez la generation automatique."
         )
 
-    subject_alt_names = _build_subject_alt_names(args.https_common_name, args.https_subject_alt_names)
+    subject_alt_names = _build_subject_alt_names(
+        args.https_common_name, args.https_subject_alt_names
+    )
     log.warning(
         "Generation d'un certificat auto-signe pour HTTPS (%s, SAN=%s). "
         "Il devra etre approuve sur les appareils clients.",
