@@ -7,7 +7,6 @@ import logging
 import pathlib
 import signal
 import threading
-import time
 
 import yaml
 
