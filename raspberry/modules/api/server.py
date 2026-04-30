@@ -11,11 +11,12 @@ from typing import Any
 import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from modules.control import ESP32Link, MotorController, PanTiltController
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
+from .camera import generate_frames
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +94,14 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True, "robot": "rasprover"}
+
+
+@app.get("/stream")
+async def video_stream() -> StreamingResponse:
+    return StreamingResponse(
+        generate_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 # ---------------------------------------------------------------------------

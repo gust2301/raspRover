@@ -25,3 +25,8 @@ control:
 logging:
   level: INFO
   file: logs/rasprover.log
+
+camera:
+  width: 640
+  height: 480
+  framerate: 24
