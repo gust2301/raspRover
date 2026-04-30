@@ -10,12 +10,16 @@ jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: raspberry
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: raspberry/requirements-dev.txt
       - name: Install dev deps
         run: |
           python -m pip install --upgrade pip
@@ -28,6 +32,9 @@ jobs:
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: raspberry
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +45,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: raspberry/requirements-dev.txt
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
