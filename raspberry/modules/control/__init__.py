@@ -27,6 +27,7 @@ from .exceptions import (
     InvalidParameterError,
     LinkNotOpenError,
 )
+from .light_controller import LightController
 from .motor_controller import Direction, MotorController
 from .pantilt_controller import PanTiltController
 
@@ -35,6 +36,7 @@ __all__ = [
     "MotorController",
     "Direction",
     "PanTiltController",
+    "LightController",
     "ControlError",
     "LinkNotOpenError",
     "InvalidParameterError",

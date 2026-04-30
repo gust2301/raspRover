@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Square, Camera, Settings2, Activity,
+  Square, Camera, CameraOff, Settings2, Activity, Lightbulb,
 } from 'lucide-react'
 import { useRobotConnection, type ConnectionStatus } from '../hooks/useRobotConnection'
 
@@ -279,8 +279,19 @@ export default function Pilotage() {
   const [pan, setPan] = useState(0)
   const [tilt, setTilt] = useState(0)
   const [emergency, setEmergency] = useState(false)
+  const [streamUnavailable, setStreamUnavailable] = useState(false)
+  const [cameraLight, setCameraLight] = useState(false)
 
   const connected = conn.status === 'connected' && !emergency
+  const streamUrl = `http://${conn.robotIp}:8080/stream`
+
+  useEffect(() => {
+    setStreamUnavailable(false)
+  }, [conn.robotIp, conn.status])
+
+  useEffect(() => {
+    setCameraLight(Boolean(conn.lastStatus?.camera_light))
+  }, [conn.lastStatus?.camera_light])
 
   const handleMove = useCallback((dir: Direction) => {
     conn.sendMove(dir, speed)
@@ -300,6 +311,12 @@ export default function Pilotage() {
     setEmergency(true)
     conn.sendStop()
   }, [conn])
+
+  const handleCameraLightToggle = useCallback(() => {
+    const next = !cameraLight
+    setCameraLight(next)
+    conn.sendLight(next)
+  }, [cameraLight, conn])
 
   return (
     <div className="flex flex-col h-full -m-6" style={{ background: '#070d1a' }}>
@@ -347,14 +364,31 @@ export default function Pilotage() {
               <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
             ))}
 
-            <div className="text-center z-10">
-              <Camera size={48} className="mx-auto mb-3 text-slate-700" />
-              <p className="text-slate-600 text-sm">
-                {conn.status === 'connected'
-                  ? 'Flux vidéo — module caméra à venir'
-                  : 'Connecte-toi au robot pour voir le flux'}
-              </p>
-            </div>
+            {connected && !streamUnavailable && (
+              <img
+                key={streamUrl}
+                src={streamUrl}
+                alt="Camera feed"
+                className="w-full h-full object-contain bg-black z-10"
+                onLoad={() => setStreamUnavailable(false)}
+                onError={() => setStreamUnavailable(true)}
+              />
+            )}
+
+            {(!connected || streamUnavailable) && (
+              <div className="text-center z-10 px-6">
+                {streamUnavailable ? (
+                  <CameraOff size={48} className="mx-auto mb-3 text-slate-700" />
+                ) : (
+                  <Camera size={48} className="mx-auto mb-3 text-slate-700" />
+                )}
+                <p className="text-slate-600 text-sm">
+                  {!connected
+                    ? 'Connecte-toi au robot pour voir le flux'
+                    : 'Flux caméra indisponible'}
+                </p>
+              </div>
+            )}
 
             {/* Pan/tilt overlay indicator */}
             {conn.status === 'connected' && (
@@ -415,6 +449,25 @@ export default function Pilotage() {
           {/* Pan-Tilt */}
           <div className="px-5 py-5 border-b border-slate-800">
             <PanTiltControl pan={pan} tilt={tilt} onPanTilt={handlePanTilt} connected={connected} />
+          </div>
+
+          <div className="px-5 py-5 border-b border-slate-800">
+            <button
+              onClick={handleCameraLightToggle}
+              disabled={!connected}
+              className={`w-full py-3 rounded-xl border transition-colors flex items-center justify-center gap-3 ${
+                !connected
+                  ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
+                  : cameraLight
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-900/30'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              <Lightbulb size={18} />
+              <span className="text-sm font-medium">
+                {cameraLight ? 'Lampe caméra allumée' : 'Allumer la lampe caméra'}
+              </span>
+            </button>
           </div>
 
           {/* Robot status */}

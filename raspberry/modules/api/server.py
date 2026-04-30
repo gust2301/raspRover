@@ -13,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from modules.control import ESP32Link, MotorController, PanTiltController
+from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 
@@ -26,6 +26,7 @@ CONFIG_PATH = pathlib.Path(__file__).parent.parent.parent / "config.yaml"
 _link: ESP32Link | None = None
 _motors: MotorController | None = None
 _pantilt: PanTiltController | None = None
+_lights: LightController | None = None
 
 
 def _load_config() -> dict:
@@ -37,7 +38,7 @@ def _load_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt
+    global _link, _motors, _pantilt, _lights
 
     cfg = _load_config()
     ctrl = cfg.get("control", {})
@@ -62,8 +63,10 @@ async def lifespan(app: FastAPI):
         accel=pt_cfg.get("servo_accel", 50),
     )
 
+    _lights = LightController(_link)
     _motors.stop()
     _pantilt.center()
+    _lights.set_camera_light(False)
     log.info("RaspRover API démarrée — port=%s", port)
 
     yield
@@ -172,6 +175,21 @@ async def pantilt_center() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST â€” Eclairage
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/lights/camera")
+async def camera_light(body: dict[str, Any]) -> dict:
+    if _lights is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
+    enabled = bool(body.get("enabled", False))
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda enabled=enabled: _lights.set_camera_light(enabled))
+    return {"ok": True, **_lights.state}
+
+
+# ---------------------------------------------------------------------------
 # REST — Statut
 # ---------------------------------------------------------------------------
 
@@ -187,7 +205,8 @@ async def get_status() -> dict:
             lambda: _link.request_feedback(timeout_s=1.0, command_type=126),  # type: ignore[union-attr]
         )
         pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
-        return {**feedback, "pan": pan, "tilt": tilt}
+        light_state = _lights.state if _lights else {"camera_light": False}
+        return {**feedback, "pan": pan, "tilt": tilt, **light_state}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=503, content={"error": str(exc)})
 
@@ -265,6 +284,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 except ControlError as exc:
                     await ws.send_json({"type": "error", "message": str(exc)})
 
+            elif msg_type == "light":
+                if _lights is None:
+                    await ws.send_json({"type": "error", "message": "not ready"})
+                    continue
+                enabled = bool(data.get("enabled", False))
+                await loop.run_in_executor(
+                    None,
+                    lambda enabled=enabled: _lights.set_camera_light(enabled),
+                )
+                await ws.send_json({"type": "light_ack", **_lights.state})
+
             elif msg_type == "status":
                 if _link is None:
                     await ws.send_json({"type": "error", "message": "not ready"})
@@ -275,7 +305,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         lambda: _link.request_feedback(timeout_s=1.0, command_type=126),  # type: ignore[union-attr]
                     )
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
-                    await ws.send_json({"type": "status", **feedback, "pan": pan, "tilt": tilt})
+                    light_state = _lights.state if _lights else {"camera_light": False}
+                    await ws.send_json(
+                        {"type": "status", **feedback, "pan": pan, "tilt": tilt, **light_state}
+                    )
                 except Exception as exc:  # noqa: BLE001
                     await ws.send_json({"type": "error", "message": str(exc)})
 
