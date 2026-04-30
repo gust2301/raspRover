@@ -141,7 +141,46 @@ sudo fuser -k /dev/ttyAMA0
 
 ---
 
-## 7. Référence rapide
+## 7. Switcher entre notre service et l'interface Waveshare
+
+Les deux systèmes ne peuvent pas tourner en même temps — ils se disputent `/dev/ttyAMA0`.
+
+### Passer à l'interface Waveshare (port 5000/8000)
+
+```bash
+# 1. Arrêter notre service
+sudo systemctl stop rasprover-control
+
+# 2. Lancer app.py Waveshare
+cd ~/ugv_rpi && ugv-env/bin/python app.py
+```
+
+L'interface Waveshare est accessible sur `http://192.168.1.121:5000` ou `:8000`.
+
+Pour arrêter : `Ctrl+C` dans le terminal SSH.
+
+### Repasser à notre service (SENTRYX)
+
+```bash
+# 1. Tuer app.py si encore actif
+sudo fuser -k /dev/ttyAMA0
+
+# 2. Redémarrer notre service
+sudo systemctl start rasprover-control
+sudo systemctl status rasprover-control
+```
+
+### État actuel du démarrage automatique
+
+- **Notre service** démarre automatiquement au boot (`systemctl enable rasprover-control`)
+- **app.py Waveshare** est désactivé au boot (ligne commentée dans `crontab -e`)
+
+Pour réactiver app.py au boot : `crontab -e` → décommenter la ligne `@reboot`.
+Pour désactiver notre service au boot : `sudo systemctl disable rasprover-control`.
+
+---
+
+## 8. Référence rapide
 
 | Quoi | Où |
 |---|---|
