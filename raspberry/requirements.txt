@@ -2,4 +2,6 @@ pyserial>=3.5
 PyYAML>=6.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
-picamera2; sys_platform == "linux" and platform_machine == "aarch64"  # optionnel, Pi 5 / Bookworm
+# picamera2 est fourni par Raspberry Pi OS Bookworm sur la Pi.
+# Le backend tente aussi l'import depuis /usr/lib/python3/dist-packages
+# quand il tourne dans un venv isole.
