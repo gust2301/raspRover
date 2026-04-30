@@ -26,6 +26,21 @@ logging:
   level: INFO
   file: logs/rasprover.log
 
+api:
+  host: 0.0.0.0
+  port: 8080
+  https:
+    enabled: true
+    port: 8443
+    certfile: certs/rasprover.crt
+    keyfile: certs/rasprover.key
+    auto_generate: true
+    common_name: 192.168.1.121
+    subject_alt_names:
+      - IP:192.168.1.121
+      - DNS:localhost
+      - IP:127.0.0.1
+
 camera:
   width: 640
   height: 480

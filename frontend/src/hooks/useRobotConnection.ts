@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getRobotTransportWarning, getRobotWsUrl } from '../lib/robotTransport'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -24,11 +25,11 @@ export interface RobotConnection {
   sendLight: (enabled: boolean) => void
   lastStatus: RobotStatus | null
   latencyMs: number | null
+  errorMessage: string | null
 }
 
 const STORAGE_KEY = 'sentryx_robot_ip'
 const DEFAULT_IP = '192.168.1.121'
-const WS_PORT = 8080
 
 export function useRobotConnection(): RobotConnection {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
@@ -37,9 +38,20 @@ export function useRobotConnection(): RobotConnection {
   )
   const [lastStatus, setLastStatus] = useState<RobotStatus | null>(null)
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const pingTsRef = useRef<number | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const shouldStayConnectedRef = useRef(false)
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
 
   const setRobotIp = useCallback((ip: string) => {
     setRobotIpState(ip)
@@ -47,25 +59,41 @@ export function useRobotConnection(): RobotConnection {
   }, [])
 
   const disconnect = useCallback(() => {
+    shouldStayConnectedRef.current = false
+    clearReconnectTimer()
+    pingTsRef.current = null
+    reconnectAttemptRef.current = 0
     wsRef.current?.close()
     wsRef.current = null
     setStatus('disconnected')
-  }, [])
+    setErrorMessage(null)
+  }, [clearReconnectTimer])
 
   const connect = useCallback(() => {
-    if (wsRef.current) disconnect()
+    shouldStayConnectedRef.current = true
+    clearReconnectTimer()
+    pingTsRef.current = null
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
     setStatus('connecting')
+    setErrorMessage(getRobotTransportWarning())
 
-    const ws = new WebSocket(`ws://${robotIp}:${WS_PORT}/ws`)
+    const ws = new WebSocket(getRobotWsUrl(robotIp))
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
+      reconnectAttemptRef.current = 0
       setStatus('connected')
+      setErrorMessage(null)
       // Demande un statut initial
       ws.send(JSON.stringify({ type: 'status' }))
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       try {
         const data = JSON.parse(event.data as string) as Record<string, unknown>
         if (data.type === 'status') {
@@ -80,12 +108,43 @@ export function useRobotConnection(): RobotConnection {
       }
     }
 
-    ws.onerror = () => setStatus('error')
-    ws.onclose = () => {
-      setStatus('disconnected')
-      wsRef.current = null
+    ws.onerror = () => {
+      if (wsRef.current !== ws) return
+      setStatus('error')
+      setErrorMessage(
+        getRobotTransportWarning() ?? 'Connexion WebSocket au robot impossible.'
+      )
     }
-  }, [robotIp, disconnect])
+
+    ws.onclose = () => {
+      if (wsRef.current !== ws && wsRef.current !== null) return
+
+      if (wsRef.current === ws) {
+        wsRef.current = null
+      }
+      pingTsRef.current = null
+
+      if (!shouldStayConnectedRef.current) {
+        setStatus('disconnected')
+        return
+      }
+
+      setStatus('connecting')
+      setErrorMessage(
+        getRobotTransportWarning() ?? 'Connexion perdue, reconnexion automatique...'
+      )
+
+      const attempt = reconnectAttemptRef.current + 1
+      reconnectAttemptRef.current = attempt
+      const delayMs = Math.min(1000 * 2 ** Math.min(attempt - 1, 3), 8000)
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        if (shouldStayConnectedRef.current) {
+          connect()
+        }
+      }, delayMs)
+    }
+  }, [clearReconnectTimer, robotIp])
 
   const send = useCallback((payload: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -120,7 +179,11 @@ export function useRobotConnection(): RobotConnection {
   }, [status, send])
 
   // Cleanup on unmount
-  useEffect(() => () => { wsRef.current?.close() }, [])
+  useEffect(() => () => {
+    shouldStayConnectedRef.current = false
+    clearReconnectTimer()
+    wsRef.current?.close()
+  }, [clearReconnectTimer])
 
   return {
     status,
@@ -134,5 +197,6 @@ export function useRobotConnection(): RobotConnection {
     sendLight,
     lastStatus,
     latencyMs,
+    errorMessage,
   }
 }

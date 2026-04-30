@@ -20,10 +20,12 @@ cd /home/ws/raspRover/raspberry
 /home/ws/raspRover/.venv/bin/python run_api_server.py
 ```
 
-Le serveur tourne sur `http://192.168.1.121:8080`. Pour vérifier :
+Le serveur tourne sur `http://192.168.1.121:8080` et expose aussi `https://192.168.1.121:8443`
+si `api.https.enabled: true` dans `config.yaml`. Pour vérifier :
 
 ```bash
 curl http://localhost:8080/health
+curl -k https://localhost:8443/health
 ```
 
 Arrêter : `Ctrl+C`
@@ -189,5 +191,7 @@ Pour désactiver notre service au boot : `sudo systemctl disable rasprover-contr
 | Logs applicatifs | `/home/ws/raspRover/raspberry/logs/rasprover.log` |
 | Logs systemd | `journalctl -u rasprover-control` |
 | API health | `http://192.168.1.121:8080/health` |
+| API health HTTPS | `https://192.168.1.121:8443/health` |
 | WebSocket | `ws://192.168.1.121:8080/ws` |
+| WebSocket sécurisé | `wss://192.168.1.121:8443/ws` |
 | Jupyter Waveshare | `http://192.168.1.121:8888` |
