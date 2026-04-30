@@ -8,6 +8,7 @@ import Robots from './pages/Robots'
 import Sites from './pages/Sites'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
+import Pilotage from './pages/Pilotage'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="pilotage" element={<Pilotage />} />
           <Route path="cameras" element={<Cameras />} />
           <Route path="patrols" element={<Patrols />} />
           <Route path="incidents" element={<Incidents />} />

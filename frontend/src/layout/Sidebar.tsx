@@ -2,19 +2,20 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Shield, LayoutDashboard, Camera, Route, AlertTriangle,
-  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon,
+  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Vue d\'ensemble' },
-  { to: '/cameras', icon: Camera, label: 'Caméras' },
-  { to: '/patrols', icon: Route, label: 'Patrouilles' },
-  { to: '/incidents', icon: AlertTriangle, label: 'Incidents' },
-  { to: '/robots', icon: Bot, label: 'Robots' },
-  { to: '/sites', icon: MapPin, label: 'Sites' },
-  { to: '/reports', icon: FileText, label: 'Rapports' },
-  { to: '/settings', icon: Settings, label: 'Paramètres' },
+  { to: '/dashboard', icon: LayoutDashboard, label: "Vue d'ensemble", highlight: false },
+  { to: '/pilotage',  icon: Gamepad2,        label: 'Pilotage',        highlight: true  },
+  { to: '/cameras',  icon: Camera,           label: 'Caméras',         highlight: false },
+  { to: '/patrols',  icon: Route,            label: 'Patrouilles',     highlight: false },
+  { to: '/incidents',icon: AlertTriangle,    label: 'Incidents',       highlight: false },
+  { to: '/robots',   icon: Bot,              label: 'Robots',          highlight: false },
+  { to: '/sites',    icon: MapPin,           label: 'Sites',           highlight: false },
+  { to: '/reports',  icon: FileText,         label: 'Rapports',        highlight: false },
+  { to: '/settings', icon: Settings,         label: 'Paramètres',      highlight: false },
 ]
 
 export default function Sidebar() {
@@ -36,7 +37,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, label, highlight }) => (
           <NavLink
             key={to}
             to={to}
@@ -44,7 +45,9 @@ export default function Sidebar() {
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 isActive
                   ? 'bg-blue-600/20 text-blue-400 border border-blue-600/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  : highlight
+                    ? 'text-blue-300 hover:text-white hover:bg-blue-600/20 border border-blue-600/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`
             }
           >
@@ -92,7 +95,7 @@ export default function Sidebar() {
           }`}
         >
           <AlertOctagon size={16} />
-          {emergencyActive ? 'ARRÊT ACTIF' : 'Arrêt d\'urgence'}
+          {emergencyActive ? "ARRÊT ACTIF" : "Arrêt d'urgence"}
         </button>
       </div>
     </aside>

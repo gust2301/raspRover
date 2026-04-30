@@ -1,13 +1,13 @@
 [Unit]
-Description=RaspRover control backend
+Description=RaspRover API server (FastAPI + WebSocket)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=ws
-WorkingDirectory=/home/ws/ugvrpi/raspRover
-ExecStart=/home/ws/ugvrpi/raspRover/.venv/bin/python /home/ws/ugvrpi/raspRover/run_control_service.py --port /dev/ttyAMA0 --skip-feedback
+WorkingDirectory=/home/ws/ugvrpi/raspRover/raspberry
+ExecStart=/home/ws/ugvrpi/raspRover/raspberry/.venv/bin/python /home/ws/ugvrpi/raspRover/raspberry/run_api_server.py
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

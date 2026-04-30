@@ -10,8 +10,8 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from modules.control import ESP32Link, MotorController, PanTiltController
 from modules.control.exceptions import ControlError
@@ -20,7 +20,6 @@ from modules.control.motor_controller import Direction
 log = logging.getLogger(__name__)
 
 CONFIG_PATH = pathlib.Path(__file__).parent.parent.parent / "config.yaml"
-STATIC_DIR = pathlib.Path(__file__).parent / "static"
 
 _link: ESP32Link | None = None
 _motors: MotorController | None = None
@@ -74,13 +73,26 @@ async def lifespan(app: FastAPI):
     log.info("RaspRover API arrêtée proprement")
 
 
-app = FastAPI(title="RaspRover Control API", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app = FastAPI(title="RaspRover Control API", version="1.0.0", lifespan=lifespan)
+
+# CORS : autorise le front Vercel + réseau local
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",   # dev local
+        "http://localhost:4173",   # vite preview
+        "https://*.vercel.app",    # production Vercel
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-@app.get("/")
-async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+@app.get("/health")
+async def health() -> dict:
+    return {"ok": True, "robot": "rasprover"}
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +114,7 @@ async def motors_move(body: dict[str, Any]) -> dict:
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, lambda: _motors.from_direction(direction, speed_f))
+        await loop.run_in_executor(None, lambda: _motors.from_direction(direction, speed_f))  # type: ignore[union-attr]
         return {"ok": True}
     except ControlError as exc:
         return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
@@ -132,7 +144,7 @@ async def pantilt_goto(body: dict[str, Any]) -> dict:
     tilt_f = float(tilt) if tilt is not None else None
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, lambda: _pantilt.goto(pan_f, tilt_f))
+        await loop.run_in_executor(None, lambda: _pantilt.goto(pan_f, tilt_f))  # type: ignore[union-attr]
         return {"ok": True, "pan": _pantilt.position[0], "tilt": _pantilt.position[1]}
     except ControlError as exc:
         return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
@@ -159,7 +171,7 @@ async def get_status() -> dict:
     loop = asyncio.get_running_loop()
     try:
         feedback = await loop.run_in_executor(
-            None, lambda: _link.request_feedback(timeout_s=1.0, command_type=126)
+            None, lambda: _link.request_feedback(timeout_s=1.0, command_type=126)  # type: ignore[union-attr]
         )
         pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
         return {**feedback, "pan": pan, "tilt": tilt}
@@ -182,15 +194,9 @@ class _ConnectionManager:
         log.info("Client WebSocket connecté (%d total)", len(self._clients))
 
     def disconnect(self, ws: WebSocket) -> None:
-        self._clients.remove(ws)
+        if ws in self._clients:
+            self._clients.remove(ws)
         log.info("Client WebSocket déconnecté (%d restants)", len(self._clients))
-
-    async def broadcast(self, data: dict) -> None:
-        for ws in list(self._clients):
-            try:
-                await ws.send_json(data)
-            except Exception:  # noqa: BLE001
-                self._clients.remove(ws)
 
 
 _manager = _ConnectionManager()
@@ -215,7 +221,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 speed_f = float(speed) if speed is not None else None
                 try:
                     direction = Direction(direction_str)
-                    await loop.run_in_executor(None, lambda: _motors.from_direction(direction, speed_f))
+                    await loop.run_in_executor(None, lambda: _motors.from_direction(direction, speed_f))  # type: ignore[union-attr]
                 except (ValueError, ControlError) as exc:
                     await ws.send_json({"type": "error", "message": str(exc)})
 
@@ -232,7 +238,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 pan_f = float(pan) if pan is not None else None
                 tilt_f = float(tilt) if tilt is not None else None
                 try:
-                    await loop.run_in_executor(None, lambda: _pantilt.goto(pan_f, tilt_f))
+                    await loop.run_in_executor(None, lambda: _pantilt.goto(pan_f, tilt_f))  # type: ignore[union-attr]
                     pos = _pantilt.position
                     await ws.send_json({"type": "pantilt_ack", "pan": pos[0], "tilt": pos[1]})
                 except ControlError as exc:
@@ -244,7 +250,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
                 try:
                     feedback = await loop.run_in_executor(
-                        None, lambda: _link.request_feedback(timeout_s=1.0, command_type=126)
+                        None, lambda: _link.request_feedback(timeout_s=1.0, command_type=126)  # type: ignore[union-attr]
                     )
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
                     await ws.send_json({"type": "status", **feedback, "pan": pan, "tilt": tilt})
