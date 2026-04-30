@@ -1,0 +1,16 @@
+[Unit]
+Description=RaspRover API server (FastAPI + WebSocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ws
+WorkingDirectory=/home/ws/ugvrpi/raspRover/raspberry
+ExecStart=/home/ws/ugvrpi/raspRover/raspberry/.venv/bin/python /home/ws/ugvrpi/raspRover/raspberry/run_api_server.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
