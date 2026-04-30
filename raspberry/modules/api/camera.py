@@ -103,10 +103,7 @@ def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]
     started = False
 
     try:
-        config = camera.create_video_configuration(
-            main={"size": (width, height)},
-            controls={"FrameRate": framerate},
-        )
+        config = camera.create_video_configuration(main={"size": (width, height)})
         camera.configure(config)
         camera.start()
         started = True
@@ -149,4 +146,10 @@ def generate_frames() -> Iterator[bytes]:
         yield from _test_pattern_stream(width, height, framerate)
         return
 
-    yield from _picamera_stream(width, height, framerate)
+    try:
+        yield from _picamera_stream(width, height, framerate)
+    except GeneratorExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.exception("picamera2 stream failed, falling back to test frames: %s", exc)
+        yield from _test_pattern_stream(width, height, framerate)
