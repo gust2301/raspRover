@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 import logging
 import pathlib
+import sys
 import time
 from collections.abc import Iterator
 
@@ -14,6 +16,13 @@ try:
     from picamera2 import Picamera2  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - dev hors Raspberry Pi
     Picamera2 = None  # type: ignore[assignment]
+    system_site = "/usr/lib/python3/dist-packages"
+    if system_site not in sys.path and pathlib.Path(system_site).exists():
+        sys.path.append(system_site)
+        try:
+            Picamera2 = importlib.import_module("picamera2").Picamera2  # type: ignore[attr-defined]
+        except ImportError:
+            Picamera2 = None  # type: ignore[assignment]
 
 try:
     from PIL import Image, ImageDraw  # type: ignore[import-not-found]
