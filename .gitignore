@@ -15,8 +15,13 @@ logs/
 
 # IDE
 .vscode/
+.idea/
+frontend/.idea/
 *.swp
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Local agent / workspace metadata
+.claude/
