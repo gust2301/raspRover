@@ -47,13 +47,13 @@ export default function Dashboard() {
   return (
     <div className="space-y-5">
       {/* KPIs */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpis.map((kpi, i) => <StatCard key={i} {...kpi} />)}
       </div>
 
       {/* Video + Robot status */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2">
           <VideoFeedCard />
         </div>
         <RobotStatusCard />
@@ -63,7 +63,7 @@ export default function Dashboard() {
       <MapCard />
 
       {/* Control + Incidents + Actions */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ManualControlCard />
         <IncidentList />
         <QuickActions />

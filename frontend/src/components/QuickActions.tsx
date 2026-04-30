@@ -24,7 +24,7 @@ export default function QuickActions() {
   return (
     <div className="rounded-xl border border-slate-800 p-5 h-full" style={{ background: '#0f1629' }}>
       <h2 className="text-white font-semibold text-sm mb-4">Actions rapides</h2>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {actions.map(({ id, icon: Icon, label, color, bg, active }) => {
           const isActive = activeActions.has(id)
           return (

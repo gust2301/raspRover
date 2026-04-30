@@ -37,7 +37,7 @@ function ConnectionBar({
   }
 
   return (
-    <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
+    <div className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
       <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.dot}`} />
       <span className={`text-sm font-medium ${s.text}`}>{s.label}</span>
 
@@ -45,16 +45,16 @@ function ConnectionBar({
         <span className="text-xs text-slate-500 font-mono">{latencyMs} ms</span>
       )}
 
-      <div className="flex-1" />
+      <div className="flex-1 min-w-0" />
 
       {/* IP editor */}
       {editing ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <input
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && save()}
-            className="bg-slate-800 border border-slate-600 text-white text-sm px-3 py-1.5 rounded-lg font-mono w-44 focus:outline-none focus:border-blue-500"
+            className="bg-slate-800 border border-slate-600 text-white text-sm px-3 py-1.5 rounded-lg font-mono w-full sm:w-44 focus:outline-none focus:border-blue-500"
             autoFocus
             placeholder="192.168.1.100"
           />
@@ -64,10 +64,10 @@ function ConnectionBar({
       ) : (
         <button
           onClick={() => { setDraft(robotIp); setEditing(true) }}
-          className="flex items-center gap-2 text-slate-400 hover:text-slate-200 text-sm font-mono px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors"
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-200 text-sm font-mono px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors max-w-full"
         >
           <Settings2 size={13} />
-          {robotIp}:{8080}
+          <span className="truncate">{robotIp}:{8080}</span>
         </button>
       )}
 
@@ -214,6 +214,128 @@ function Dpad({
   )
 }
 
+function MobileJoystick({
+  onMove, onStop, connected, label, accent = 'blue', actionLabel = 'Stop',
+}: {
+  onMove: (dir: Direction) => void
+  onStop: () => void
+  connected: boolean
+  label: string
+  accent?: 'blue' | 'amber'
+  actionLabel?: string
+}) {
+  const baseRef = useRef<HTMLDivElement | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [stick, setStick] = useState({ x: 0, y: 0 })
+  const [active, setActive] = useState<Direction | null>(null)
+
+  const stop = useCallback(() => {
+    setStick({ x: 0, y: 0 })
+    setActive(null)
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    onStop()
+  }, [onStop])
+
+  const startDirection = useCallback((dir: Direction) => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+    }
+    setActive(dir)
+    onMove(dir)
+    intervalRef.current = setInterval(() => onMove(dir), 150)
+  }, [onMove])
+
+  const updateFromPointer = useCallback((clientX: number, clientY: number) => {
+    const base = baseRef.current
+    if (!base || !connected) return
+
+    const rect = base.getBoundingClientRect()
+    const radius = rect.width / 2
+    const centerX = rect.left + radius
+    const centerY = rect.top + radius
+    const rawX = clientX - centerX
+    const rawY = clientY - centerY
+    const distance = Math.hypot(rawX, rawY)
+    const maxOffset = radius * 0.55
+    const ratio = distance > maxOffset ? maxOffset / distance : 1
+    const x = rawX * ratio
+    const y = rawY * ratio
+
+    setStick({ x, y })
+
+    if (distance < radius * 0.25) {
+      stop()
+      return
+    }
+
+    const dir: Direction =
+      Math.abs(rawX) > Math.abs(rawY)
+        ? (rawX > 0 ? 'right' : 'left')
+        : (rawY > 0 ? 'backward' : 'forward')
+
+    if (dir !== active) {
+      startDirection(dir)
+    }
+  }, [active, connected, startDirection, stop])
+
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current)
+  }, [])
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <p className="text-xs text-slate-500 text-center">{label}</p>
+      <div
+        ref={baseRef}
+        onPointerDown={(e) => {
+          if (!connected) return
+          e.currentTarget.setPointerCapture(e.pointerId)
+          updateFromPointer(e.clientX, e.clientY)
+        }}
+        onPointerMove={(e) => {
+          if (e.buttons === 0) return
+          updateFromPointer(e.clientX, e.clientY)
+        }}
+        onPointerUp={stop}
+        onPointerCancel={stop}
+        className={`relative w-40 h-40 rounded-full border ${
+          connected
+            ? accent === 'blue'
+              ? 'border-blue-500/40 bg-slate-900/80'
+              : 'border-amber-500/40 bg-slate-900/80'
+            : 'border-slate-800 bg-slate-900/40'
+        } touch-none select-none overflow-hidden`}
+      >
+        <div className="absolute inset-5 rounded-full border border-slate-800" />
+        <div className="absolute inset-1/2 h-px -translate-x-1/2 w-[70%] bg-slate-800" />
+        <div className="absolute inset-1/2 w-px -translate-y-1/2 h-[70%] bg-slate-800" />
+        <div
+          className={`absolute left-1/2 top-1/2 w-14 h-14 -translate-x-1/2 -translate-y-1/2 rounded-full border ${
+            connected
+              ? active
+                ? accent === 'blue'
+                  ? 'bg-blue-600 border-blue-400 shadow-lg shadow-blue-900/50'
+                  : 'bg-amber-500 border-amber-400 shadow-lg shadow-amber-900/40 text-slate-950'
+                : 'bg-slate-800 border-slate-700'
+              : 'bg-slate-800/50 border-slate-800'
+          }`}
+          style={{ transform: `translate(calc(-50% + ${stick.x}px), calc(-50% + ${stick.y}px))` }}
+        />
+      </div>
+      <button
+        onClick={stop}
+        disabled={!connected}
+        className="px-5 py-2 rounded-lg bg-red-600/15 text-red-400 border border-red-600/40 disabled:opacity-40"
+      >
+        {actionLabel}
+      </button>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Pan-Tilt
 // ---------------------------------------------------------------------------
@@ -282,6 +404,7 @@ export default function Pilotage() {
   const [emergency, setEmergency] = useState(false)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
   const [cameraLight, setCameraLight] = useState(false)
+  const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
   const connected = conn.status === 'connected' && !emergency
   const streamUrl = `http://${conn.robotIp}:8080/stream`
@@ -293,6 +416,16 @@ export default function Pilotage() {
   useEffect(() => {
     setCameraLight(Boolean(conn.lastStatus?.camera_light))
   }, [conn.lastStatus?.camera_light])
+
+  useEffect(() => {
+    const updateViewportMode = () => {
+      setIsMobileLandscape(window.innerWidth < 1024 && window.innerWidth > window.innerHeight)
+    }
+
+    updateViewportMode()
+    window.addEventListener('resize', updateViewportMode)
+    return () => window.removeEventListener('resize', updateViewportMode)
+  }, [])
 
   const handleMove = useCallback((dir: Direction) => {
     conn.sendMove(dir, speed)
@@ -319,23 +452,40 @@ export default function Pilotage() {
     conn.sendLight(next)
   }, [cameraLight, conn])
 
+  const handlePanTiltNudge = useCallback((dir: Direction) => {
+    const nextPan =
+      dir === 'left' ? pan - 6 :
+      dir === 'right' ? pan + 6 :
+      pan
+    const nextTilt =
+      dir === 'forward' ? tilt + 4 :
+      dir === 'backward' ? tilt - 4 :
+      tilt
+
+    setPan(nextPan)
+    setTilt(nextTilt)
+    conn.sendPanTilt(nextPan, nextTilt)
+  }, [conn, pan, tilt])
+
   return (
-    <div className="flex flex-col h-full -m-6" style={{ background: '#070d1a' }}>
+    <div className={`flex flex-col min-h-full ${isMobileLandscape ? 'h-[100dvh] m-0' : '-m-3 sm:-m-4 lg:-m-6'}`} style={{ background: '#070d1a' }}>
       {/* Connection bar */}
-      <ConnectionBar
-        status={conn.status}
-        robotIp={conn.robotIp}
-        setRobotIp={conn.setRobotIp}
-        connect={conn.connect}
-        disconnect={conn.disconnect}
-        latencyMs={conn.latencyMs}
-      />
+      {!isMobileLandscape && (
+        <ConnectionBar
+          status={conn.status}
+          robotIp={conn.robotIp}
+          setRobotIp={conn.setRobotIp}
+          connect={conn.connect}
+          disconnect={conn.disconnect}
+          latencyMs={conn.latencyMs}
+        />
+      )}
 
       {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col xl:flex-row flex-1 overflow-hidden">
 
         {/* Left — camera feed */}
-        <div className="flex-1 flex flex-col border-r border-slate-800 min-w-0">
+        <div className="flex-1 flex flex-col xl:border-r border-slate-800 min-w-0 min-h-[42vh] xl:min-h-0">
           <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-800">
             <span className="text-sm font-medium text-slate-300">Flux caméra</span>
             {conn.status === 'connected' && (
@@ -345,7 +495,10 @@ export default function Pilotage() {
               </div>
             )}
           </div>
-          <div className="flex-1 flex items-center justify-center relative" style={{ background: '#040810' }}>
+          <div
+            className={`flex-1 flex items-center justify-center relative sticky top-0 z-10 xl:static ${isMobileLandscape ? 'min-h-[100dvh]' : 'min-h-[42vh] md:min-h-[50vh] xl:min-h-0'}`}
+            style={{ background: '#040810' }}
+          >
             {/* Grille sci-fi */}
             <svg className="absolute inset-0 w-full h-full opacity-5">
               <defs>
@@ -397,14 +550,55 @@ export default function Pilotage() {
                 PAN {pan > 0 ? '+' : ''}{pan}° · TILT {tilt > 0 ? '+' : ''}{tilt}°
               </div>
             )}
+            {isMobileLandscape && (
+              <>
+                <div className="absolute left-3 bottom-3 z-20">
+                  <MobileJoystick
+                    label="D�placement"
+                    onMove={handleMove}
+                    onStop={handleStop}
+                    connected={connected}
+                  />
+                </div>
+                <div className="absolute right-3 bottom-3 z-20">
+                  <MobileJoystick
+                    label="Cam�ra"
+                    accent="amber"
+                    onMove={handlePanTiltNudge}
+                    onStop={() => handlePanTilt(0, 0)}
+                    connected={connected}
+                    actionLabel="Recentrer"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className={`${isMobileLandscape ? 'hidden' : 'md:hidden'} border-t border-slate-800 px-4 py-5`} style={{ background: '#0a0f1e' }}>
+            <div className="grid grid-cols-2 gap-4">
+              <MobileJoystick
+                label="Déplacement"
+                onMove={handleMove}
+                onStop={handleStop}
+                connected={connected}
+              />
+              <MobileJoystick
+                label="Caméra"
+                accent="amber"
+                onMove={handlePanTiltNudge}
+                onStop={() => handlePanTilt(0, 0)}
+                connected={connected}
+                actionLabel="Recentrer"
+              />
+            </div>
           </div>
         </div>
 
         {/* Right — controls */}
-        <div className="w-96 flex flex-col overflow-y-auto" style={{ background: '#0a0f1e' }}>
+        <div className={`${isMobileLandscape ? 'hidden' : 'flex'} w-full xl:w-96 flex-col overflow-y-auto`} style={{ background: '#0a0f1e' }}>
 
           {/* Emergency stop */}
-          <div className="px-5 pt-5 pb-4 border-b border-slate-800">
+          <div className="hidden md:block px-5 pt-5 pb-4 border-b border-slate-800">
             <button
               onClick={handleEmergency}
               className={`w-full py-4 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all duration-150 ${
@@ -427,7 +621,7 @@ export default function Pilotage() {
           </div>
 
           {/* Speed slider */}
-          <div className="px-5 py-4 border-b border-slate-800">
+          <div className="hidden md:block px-5 py-4 border-b border-slate-800">
             <div className="flex justify-between text-sm mb-2">
               <span className="text-slate-400">Vitesse maximale</span>
               <span className="text-blue-400 font-medium">{Math.round(speed * 200)} %</span>
@@ -443,12 +637,14 @@ export default function Pilotage() {
           </div>
 
           {/* D-pad */}
-          <div className="px-5 py-6 border-b border-slate-800 flex justify-center">
-            <Dpad onMove={handleMove} onStop={handleStop} speed={speed} connected={connected} />
+          <div className="hidden md:flex px-5 py-6 border-b border-slate-800 justify-center">
+            <div className="hidden md:block">
+              <Dpad onMove={handleMove} onStop={handleStop} speed={speed} connected={connected} />
+            </div>
           </div>
 
           {/* Pan-Tilt */}
-          <div className="px-5 py-5 border-b border-slate-800">
+          <div className="hidden md:block px-5 py-5 border-b border-slate-800">
             <PanTiltControl pan={pan} tilt={tilt} onPanTilt={handlePanTilt} connected={connected} />
           </div>
 
@@ -503,8 +699,55 @@ export default function Pilotage() {
               <p className="text-xs mt-1 text-slate-700">Port WebSocket : 8080</p>
             </div>
           )}
+
+          <div className="md:hidden mt-auto border-t border-slate-800">
+            <div className="px-5 py-4 border-b border-slate-800">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-slate-400">Vitesse maximale</span>
+                <span className="text-blue-400 font-medium">{Math.round(speed * 200)} %</span>
+              </div>
+              <input
+                type="range" min="0.1" max="0.5" step="0.05" value={speed}
+                onChange={e => setSpeed(Number(e.target.value))}
+                className="w-full accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-slate-600 mt-1">
+                <span>Lent</span><span>Rapide</span>
+              </div>
+            </div>
+
+            <div className="px-5 pt-5 pb-4">
+              <button
+                onClick={handleEmergency}
+                className={`w-full py-4 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all duration-150 ${
+                  emergency
+                    ? 'bg-red-700 text-white shadow-2xl shadow-red-900/50 cursor-default'
+                    : 'bg-red-600/15 text-red-400 border-2 border-red-600/50 hover:bg-red-600 hover:text-white hover:border-red-600 hover:shadow-xl hover:shadow-red-900/40'
+                }`}
+              >
+                <AlertOctagon size={22} />
+                {emergency ? '⚠ ARRÊT D\'URGENCE ACTIF' : 'Arrêt d\'urgence'}
+              </button>
+              {emergency && (
+                <button
+                  onClick={() => setEmergency(false)}
+                  className="w-full mt-2 py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   )
 }
+
+
+
+
+
+
+
+
