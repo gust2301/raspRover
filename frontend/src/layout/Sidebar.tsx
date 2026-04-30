@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  Shield, LayoutDashboard, Camera, Route, AlertTriangle,
+  LayoutDashboard, Camera, Route, AlertTriangle,
   Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
@@ -43,8 +43,12 @@ export default function Sidebar({
         style={{ background: '#0a0f1e', borderRight: '1px solid #1e293b' }}
       >
         <div className="flex items-center gap-3 px-5 py-4 md:px-6 md:py-5 border-b border-slate-800">
-          <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <Shield size={20} className="text-white" />
+          <div className="w-9 h-9 rounded-lg overflow-hidden bg-slate-900/80 ring-1 ring-slate-700/80 flex items-center justify-center flex-shrink-0">
+            <img
+              src="/assets/icons/android-chrome-192x192.png"
+              alt="SENTRYX"
+              className="w-full h-full object-cover"
+            />
           </div>
           <div className="min-w-0">
             <span className="text-white font-bold text-lg tracking-widest">SENTRYX</span>
