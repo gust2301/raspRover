@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Maximize2, Camera, CameraOff, Circle, Dot } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
+import { getRobotStreamUrl } from '../lib/robotTransport'
 
 export default function VideoFeedCard() {
   const conn = useSharedRobotConnection()
   const [recording] = useState(true)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
-  const streamUrl = `http://${conn.robotIp}:8080/stream`
+  const streamUrl = getRobotStreamUrl(conn.robotIp)
 
   useEffect(() => {
     setStreamUnavailable(false)

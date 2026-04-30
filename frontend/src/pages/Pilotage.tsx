@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
+import { getRobotStreamUrl } from '../lib/robotTransport'
 
 // ---------------------------------------------------------------------------
 // Connection bar
@@ -18,7 +19,7 @@ const STATUS_STYLES: Record<ConnectionStatus, { dot: string; label: string; text
 }
 
 function ConnectionBar({
-  status, robotIp, setRobotIp, connect, disconnect, latencyMs,
+  status, robotIp, setRobotIp, connect, disconnect, latencyMs, errorMessage,
 }: {
   status: ConnectionStatus
   robotIp: string
@@ -26,6 +27,7 @@ function ConnectionBar({
   connect: () => void
   disconnect: () => void
   latencyMs: number | null
+  errorMessage: string | null
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(robotIp)
@@ -88,6 +90,12 @@ function ConnectionBar({
           <Wifi size={14} />
           Connecter
         </button>
+      )}
+
+      {errorMessage && (
+        <div className="w-full text-xs text-amber-300/90 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2">
+          {errorMessage}
+        </div>
       )}
     </div>
   )
@@ -407,7 +415,7 @@ export default function Pilotage() {
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
   const connected = conn.status === 'connected' && !emergency
-  const streamUrl = `http://${conn.robotIp}:8080/stream`
+  const streamUrl = getRobotStreamUrl(conn.robotIp)
 
   useEffect(() => {
     setStreamUnavailable(false)
@@ -478,6 +486,7 @@ export default function Pilotage() {
           connect={conn.connect}
           disconnect={conn.disconnect}
           latencyMs={conn.latencyMs}
+          errorMessage={conn.errorMessage}
         />
       )}
 
@@ -743,6 +752,10 @@ export default function Pilotage() {
     </div>
   )
 }
+
+
+
+
 
 
 
