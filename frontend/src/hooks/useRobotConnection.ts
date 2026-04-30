@@ -8,6 +8,7 @@ export interface RobotStatus {
   speed_r?: number
   pan?: number
   tilt?: number
+  camera_light?: boolean
   [key: string]: unknown
 }
 
@@ -20,6 +21,7 @@ export interface RobotConnection {
   sendMove: (direction: string, speed: number) => void
   sendStop: () => void
   sendPanTilt: (pan: number, tilt: number) => void
+  sendLight: (enabled: boolean) => void
   lastStatus: RobotStatus | null
   latencyMs: number | null
 }
@@ -103,6 +105,10 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'pantilt', pan, tilt })
   }, [send])
 
+  const sendLight = useCallback((enabled: boolean) => {
+    send({ type: 'light', enabled })
+  }, [send])
+
   // Ping toutes les 3s pour mesurer la latence et récupérer le statut
   useEffect(() => {
     if (status !== 'connected') return
@@ -116,5 +122,17 @@ export function useRobotConnection(): RobotConnection {
   // Cleanup on unmount
   useEffect(() => () => { wsRef.current?.close() }, [])
 
-  return { status, robotIp, setRobotIp, connect, disconnect, sendMove, sendStop, sendPanTilt, lastStatus, latencyMs }
+  return {
+    status,
+    robotIp,
+    setRobotIp,
+    connect,
+    disconnect,
+    sendMove,
+    sendStop,
+    sendPanTilt,
+    sendLight,
+    lastStatus,
+    latencyMs,
+  }
 }
