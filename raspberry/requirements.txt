@@ -2,3 +2,4 @@ pyserial>=3.5
 PyYAML>=6.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
+picamera2; sys_platform == "linux" and platform_machine == "aarch64"  # optionnel, Pi 5 / Bookworm
