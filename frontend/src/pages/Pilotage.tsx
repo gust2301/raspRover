@@ -3,7 +3,8 @@ import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Square, Camera, CameraOff, Settings2, Activity, Lightbulb,
 } from 'lucide-react'
-import { useRobotConnection, type ConnectionStatus } from '../hooks/useRobotConnection'
+import { type ConnectionStatus } from '../hooks/useRobotConnection'
+import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
 // ---------------------------------------------------------------------------
 // Connection bar
@@ -274,7 +275,7 @@ function PanTiltControl({
 // ---------------------------------------------------------------------------
 
 export default function Pilotage() {
-  const conn = useRobotConnection()
+  const conn = useSharedRobotConnection()
   const [speed, setSpeed] = useState(0.35)
   const [pan, setPan] = useState(0)
   const [tilt, setTilt] = useState(0)
