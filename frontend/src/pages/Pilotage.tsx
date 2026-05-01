@@ -588,7 +588,6 @@ export default function Pilotage() {
                     onMove={handleMove}
                     onStop={handleStop}
                     connected={connected}
-                    invertY
                   />
                 </div>
                 <div className="absolute right-3 bottom-3 z-20">
@@ -613,7 +612,6 @@ export default function Pilotage() {
                 onMove={handleMove}
                 onStop={handleStop}
                 connected={connected}
-                invertY
               />
               <MobileJoystick
                 label="Caméra"
