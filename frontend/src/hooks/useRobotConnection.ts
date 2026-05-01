@@ -78,7 +78,7 @@ export function useRobotConnection(): RobotConnection {
       wsRef.current = null
     }
     setStatus('connecting')
-    setErrorMessage(getRobotTransportWarning())
+    setErrorMessage(getRobotTransportWarning(robotIp))
 
     const ws = new WebSocket(getRobotWsUrl(robotIp))
     wsRef.current = ws
@@ -112,7 +112,7 @@ export function useRobotConnection(): RobotConnection {
       if (wsRef.current !== ws) return
       setStatus('error')
       setErrorMessage(
-        getRobotTransportWarning() ?? 'Connexion WebSocket au robot impossible.'
+        getRobotTransportWarning(robotIp) ?? 'Connexion WebSocket au robot impossible.'
       )
     }
 
@@ -131,7 +131,7 @@ export function useRobotConnection(): RobotConnection {
 
       setStatus('connecting')
       setErrorMessage(
-        getRobotTransportWarning() ?? 'Connexion perdue, reconnexion automatique...'
+        getRobotTransportWarning(robotIp) ?? 'Connexion perdue, reconnexion automatique...'
       )
 
       const attempt = reconnectAttemptRef.current + 1

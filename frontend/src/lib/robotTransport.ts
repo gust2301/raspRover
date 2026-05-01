@@ -1,30 +1,34 @@
-const HTTP_PORT = 8080
-const HTTPS_PORT = 8443
+const DEFAULT_PORT = 8080
 
-export function getRobotHttpProtocol(): 'http' | 'https' {
-  return window.location.protocol === 'https:' ? 'https' : 'http'
+function isFullUrl(input: string): boolean {
+  return input.startsWith('http://') || input.startsWith('https://')
 }
 
-export function getRobotWsProtocol(): 'ws' | 'wss' {
-  return window.location.protocol === 'https:' ? 'wss' : 'ws'
-}
-
-export function getRobotPort(): number {
-  return window.location.protocol === 'https:' ? HTTPS_PORT : HTTP_PORT
+function parseRobotUrl(robotIp: string): { httpBase: string; wsBase: string } {
+  if (isFullUrl(robotIp)) {
+    const url = new URL(robotIp)
+    const wsProto = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    return {
+      httpBase: robotIp.replace(/\/$/, ''),
+      wsBase: `${wsProto}//${url.host}`,
+    }
+  }
+  return {
+    httpBase: `http://${robotIp}:${DEFAULT_PORT}`,
+    wsBase: `ws://${robotIp}:${DEFAULT_PORT}`,
+  }
 }
 
 export function getRobotStreamUrl(robotIp: string): string {
-  return `${getRobotHttpProtocol()}://${robotIp}:${getRobotPort()}/stream`
+  return `${parseRobotUrl(robotIp).httpBase}/stream`
 }
 
 export function getRobotWsUrl(robotIp: string): string {
-  return `${getRobotWsProtocol()}://${robotIp}:${getRobotPort()}/ws`
+  return `${parseRobotUrl(robotIp).wsBase}/ws`
 }
 
-export function getRobotTransportWarning(): string | null {
-  if (window.location.protocol !== 'https:') {
-    return null
-  }
-
-  return 'Cette app est ouverte en HTTPS. Le robot doit exposer HTTPS/WSS sur le port 8443, avec un certificat approuve par le telephone.'
+export function getRobotTransportWarning(robotIp: string = ''): string | null {
+  if (window.location.protocol !== 'https:') return null
+  if (isFullUrl(robotIp) && robotIp.startsWith('https://')) return null
+  return "App ouverte en HTTPS : entre une URL de tunnel (ex: https://xxx.trycloudflare.com) à la place de l'IP."
 }
