@@ -18,6 +18,7 @@ from modules.control import ESP32Link, LightController, MotorController, PanTilt
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
+from modules.sensors import UltrasonicSensor
 
 from .camera import generate_frames
 
@@ -31,6 +32,7 @@ _pantilt: PanTiltController | None = None
 _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
+_ultrasonic: UltrasonicSensor | None = None
 
 
 def _load_config() -> dict:
@@ -42,7 +44,7 @@ def _load_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt, _lights
+    global _link, _motors, _pantilt, _lights, _ultrasonic
 
     global _mixer
     cfg = _load_config()
@@ -70,9 +72,27 @@ async def lifespan(app: FastAPI):
     )
 
     _lights = LightController(_link)
+
     audio_cfg = cfg.get("audio", {})
     _alert.device = audio_cfg.get("device") or None
     log.info("Audio device : %s", _alert.device or "default")
+
+    # Capteur ultrason — activé si sensors.ultrasonic.enabled: true dans config.yaml
+    sensor_cfg = cfg.get("sensors", {}).get("ultrasonic", {})
+    if sensor_cfg.get("enabled", False):
+        _ultrasonic = UltrasonicSensor(
+            trig_pin=int(sensor_cfg.get("trig_pin", 23)),
+            echo_pin=int(sensor_cfg.get("echo_pin", 24)),
+            obstacle_threshold_cm=float(sensor_cfg.get("obstacle_threshold_cm", 20.0)),
+            max_distance_m=float(sensor_cfg.get("max_distance_m", 4.0)),
+            poll_interval_s=float(sensor_cfg.get("poll_interval_s", 0.2)),
+        )
+        _ultrasonic.start()
+        log.info(
+            "HC-SR04 démarré (TRIG=GPIO%d ECHO=GPIO%d)", _ultrasonic.trig_pin, _ultrasonic.echo_pin
+        )
+    else:
+        log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
 
     _motors.stop()
     _pantilt.center()
@@ -81,6 +101,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    if _ultrasonic:
+        _ultrasonic.stop()
     if _motors:
         _motors.shutdown()
     if _link:
@@ -198,6 +220,22 @@ async def camera_light(body: dict[str, Any]) -> dict:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, lambda enabled=enabled: _lights.set_camera_light(enabled))
     return {"ok": True, **_lights.state}
+
+
+# ---------------------------------------------------------------------------
+# REST — Capteur ultrason
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/distance")
+async def get_distance() -> dict:
+    """Distance mesurée par le HC-SR04. Rafraîchie toutes les 200 ms."""
+    if _ultrasonic is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Capteur ultrason non activé (sensors.ultrasonic.enabled: false)"},
+        )
+    return _ultrasonic.to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -387,8 +425,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     )
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
                     light_state = _lights.state if _lights else {"camera_light": False}
+                    distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
                     await ws.send_json(
-                        {"type": "status", **feedback, "pan": pan, "tilt": tilt, **light_state}
+                        {
+                            "type": "status",
+                            **feedback,
+                            "pan": pan,
+                            "tilt": tilt,
+                            **light_state,
+                            **distance_data,
+                        }
                     )
                 except Exception as exc:  # noqa: BLE001
                     await ws.send_json({"type": "error", "message": str(exc)})

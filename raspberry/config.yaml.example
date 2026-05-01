@@ -56,10 +56,14 @@ camera:
 
 audio:
   # Device ALSA pour la sortie audio (haut-parleur de la caméra).
-  # Laisser vide pour utiliser la sortie par défaut du système.
-  # Trouver le bon device avec : aplay -l
-  # Exemples :
-  #   device: "plughw:1,0"   # première carte USB
-  #   device: "plughw:2,0"   # deuxième carte USB
-  #   device: "default"      # sortie système par défaut
+  # Laisser vide : le code détecte automatiquement la première carte USB (recommandé).
   device: ""
+
+sensors:
+  ultrasonic:
+    enabled: true             # Mettre false pour désactiver le capteur
+    trig_pin: 23              # GPIO BCM pour TRIG
+    echo_pin: 24              # GPIO BCM pour ECHO (via pont diviseur 5V→3.3V)
+    obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
+    max_distance_m: 4.0       # Portée max du HC-SR04
+    poll_interval_s: 0.2      # Rafraîchissement (0.2s = 5 Hz)
