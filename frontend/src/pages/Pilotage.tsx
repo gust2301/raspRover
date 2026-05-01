@@ -466,12 +466,12 @@ export default function Pilotage() {
 
   const handlePanTiltNudge = useCallback((dir: Direction) => {
     const nextPan =
-      dir === 'left' ? pan - 6 :
-      dir === 'right' ? pan + 6 :
+      dir === 'left' ? pan - 15 :
+      dir === 'right' ? pan + 15 :
       pan
     const nextTilt =
-      dir === 'forward' ? tilt + 4 :
-      dir === 'backward' ? tilt - 4 :
+      dir === 'forward' ? tilt + 10 :
+      dir === 'backward' ? tilt - 10 :
       tilt
 
     setPan(nextPan)

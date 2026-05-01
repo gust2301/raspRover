@@ -48,8 +48,8 @@ class PanTiltController:
         link: ESP32Link,
         pan_range: tuple[float, float] = (-90.0, 90.0),
         tilt_range: tuple[float, float] = (-45.0, 60.0),
-        speed: int = 600,
-        accel: int = 50,
+        speed: int = 1500,
+        accel: int = 80,
     ) -> None:
         self._link = link
         self.pan_range = pan_range
