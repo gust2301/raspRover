@@ -111,9 +111,14 @@ def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]
         log.info("Camera stream started via picamera2 (%sx%s @ %sfps)", width, height, framerate)
 
         while True:
-            buffer = io.BytesIO()
-            camera.capture_file(buffer, format="jpeg")
-            yield _multipart_frame(buffer.getvalue())
+            try:
+                buffer = io.BytesIO()
+                camera.capture_file(buffer, format="jpeg")
+                yield _multipart_frame(buffer.getvalue())
+            except GeneratorExit:
+                raise
+            except Exception as exc:
+                log.warning("Frame capture error (skipping): %s", exc)
             time.sleep(delay)
     except GeneratorExit:
         log.info("Camera stream client disconnected")

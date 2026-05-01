@@ -411,6 +411,8 @@ export default function Pilotage() {
   const [tilt, setTilt] = useState(0)
   const [emergency, setEmergency] = useState(false)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
+  const [streamKey, setStreamKey] = useState(0)
+  const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [cameraLight, setCameraLight] = useState(false)
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
@@ -419,6 +421,8 @@ export default function Pilotage() {
 
   useEffect(() => {
     setStreamUnavailable(false)
+    setStreamKey(k => k + 1)
+    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
   }, [conn.robotIp, conn.status])
 
   useEffect(() => {
@@ -527,14 +531,24 @@ export default function Pilotage() {
               <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
             ))}
 
-            {connected && !streamUnavailable && (
+            {connected && (
               <img
-                key={streamUrl}
+                key={`${streamUrl}-${streamKey}`}
                 src={streamUrl}
                 alt="Camera feed"
-                className="w-full h-full object-contain bg-black z-10"
-                onLoad={() => setStreamUnavailable(false)}
-                onError={() => setStreamUnavailable(true)}
+                className={`w-full h-full object-contain bg-black z-10 ${streamUnavailable ? 'hidden' : ''}`}
+                onLoad={() => {
+                  setStreamUnavailable(false)
+                  if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                }}
+                onError={() => {
+                  setStreamUnavailable(true)
+                  if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                  streamRetryRef.current = setTimeout(() => {
+                    setStreamUnavailable(false)
+                    setStreamKey(k => k + 1)
+                  }, 4000)
+                }}
               />
             )}
 
