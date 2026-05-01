@@ -30,7 +30,7 @@ export interface RobotConnection {
 }
 
 const STORAGE_KEY = 'sentryx_robot_ip'
-const DEFAULT_IP = '192.168.1.121'
+const DEFAULT_IP = 'https://rover.sopikeur.sn'
 
 export function useRobotConnection(): RobotConnection {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')

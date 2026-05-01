@@ -10,6 +10,7 @@ import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Pilotage from './pages/Pilotage'
 import { RobotConnectionProvider } from './context/RobotConnectionContext'
+import UpdatePrompt from './components/UpdatePrompt'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      <UpdatePrompt />
     </RobotConnectionProvider>
   )
 }

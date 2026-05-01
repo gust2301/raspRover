@@ -223,7 +223,7 @@ function Dpad({
 }
 
 function MobileJoystick({
-  onMove, onStop, onAction, connected, label, accent = 'blue', actionLabel = 'Stop', invertY = false,
+  onMove, onStop, onAction, connected, label, accent = 'blue', actionLabel = 'Stop', invertY = false, size = 160,
 }: {
   onMove: (dir: Direction) => void
   onStop: () => void
@@ -233,6 +233,7 @@ function MobileJoystick({
   accent?: 'blue' | 'amber'
   actionLabel?: string
   invertY?: boolean
+  size?: number
 }) {
   const baseRef = useRef<HTMLDivElement | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -316,7 +317,8 @@ function MobileJoystick({
         }}
         onPointerUp={stop}
         onPointerCancel={stop}
-        className={`relative w-40 h-40 rounded-full border ${
+        style={{ width: size, height: size }}
+        className={`relative rounded-full border ${
           connected
             ? accent === 'blue'
               ? 'border-blue-500/40 bg-slate-900/80'
@@ -415,13 +417,14 @@ type DriveMode = 'driver' | 'mirror'
 const DRIVE_MODE_KEY = 'sentryx_drive_mode'
 
 function DriveJoystick({
-  onMoveXY, onStop, connected, mode, onModeChange,
+  onMoveXY, onStop, connected, mode, onModeChange, size = 160,
 }: {
   onMoveXY: (x: number, y: number) => void
   onStop: () => void
   connected: boolean
   mode: DriveMode
   onModeChange: (m: DriveMode) => void
+  size?: number
 }) {
   const baseRef = useRef<HTMLDivElement | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -501,7 +504,8 @@ function DriveJoystick({
         onPointerMove={e => { if (e.buttons === 0) return; updateFromPointer(e.clientX, e.clientY) }}
         onPointerUp={stop}
         onPointerCancel={stop}
-        className={`relative w-40 h-40 rounded-full border ${
+        style={{ width: size, height: size }}
+        className={`relative rounded-full border ${
           connected
             ? 'border-blue-500/40 bg-slate-900/80'
             : 'border-slate-800 bg-slate-900/40'
@@ -723,17 +727,19 @@ export default function Pilotage() {
                     connected={connected}
                     mode={driveMode}
                     onModeChange={handleDriveMode}
+                    size={110}
                   />
                 </div>
                 <div className="absolute right-3 bottom-3 z-20">
                   <MobileJoystick
-                    label="Cam�ra"
+                    label="Caméra"
                     accent="amber"
                     onMove={handlePanTiltNudge}
                     onStop={() => {}}
                     onAction={() => handlePanTilt(0, 0)}
                     connected={connected}
                     actionLabel="Recentrer"
+                    size={110}
                   />
                 </div>
               </>
