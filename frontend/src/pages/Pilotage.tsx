@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren,
+  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren, Radar,
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -734,10 +734,23 @@ export default function Pilotage() {
               </div>
             )}
 
+            {/* Obstacle warning overlay */}
+            {conn.lastStatus?.obstacle && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
+                <Radar size={16} className="text-red-400" />
+                <span className="text-red-200 text-sm font-bold">OBSTACLE — {conn.lastStatus.distance_cm?.toFixed(0)} cm</span>
+              </div>
+            )}
+
             {/* Pan/tilt overlay indicator */}
             {conn.status === 'connected' && (
               <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 font-mono text-xs text-slate-300">
                 PAN {pan > 0 ? '+' : ''}{pan}° · TILT {tilt > 0 ? '+' : ''}{tilt}°
+                {conn.lastStatus?.distance_cm != null && (
+                  <span className={`ml-3 ${conn.lastStatus.obstacle ? 'text-red-400' : (conn.lastStatus.distance_cm < 50 ? 'text-amber-400' : 'text-emerald-400')}`}>
+                    · {conn.lastStatus.distance_cm.toFixed(0)} cm
+                  </span>
+                )}
               </div>
             )}
             {isMobileLandscape && (
@@ -902,6 +915,40 @@ export default function Pilotage() {
               </p>
             )}
           </div>
+
+          {/* Distance sensor */}
+          {conn.lastStatus?.distance_cm !== undefined && (
+            <div className={`mx-5 mb-4 rounded-xl border px-4 py-3 transition-colors ${
+              conn.lastStatus.obstacle
+                ? 'border-red-500/60 bg-red-950/40'
+                : (conn.lastStatus.distance_cm ?? 999) < 50
+                  ? 'border-amber-500/40 bg-amber-950/30'
+                  : 'border-slate-700 bg-slate-800/40'
+            }`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Radar size={14} className={conn.lastStatus.obstacle ? 'text-red-400' : 'text-slate-400'} />
+                <span className="text-sm font-medium text-slate-300">Détection obstacle</span>
+              </div>
+              {conn.lastStatus.distance_cm !== null ? (
+                <>
+                  <div className="flex items-end gap-1.5">
+                    <span className={`text-3xl font-bold font-mono ${
+                      conn.lastStatus.obstacle ? 'text-red-400' :
+                      (conn.lastStatus.distance_cm ?? 999) < 50 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {conn.lastStatus.distance_cm?.toFixed(0)}
+                    </span>
+                    <span className="text-slate-500 text-sm mb-1">cm</span>
+                  </div>
+                  {conn.lastStatus.obstacle && (
+                    <p className="text-xs font-bold text-red-400 mt-1 animate-pulse">⚠ OBSTACLE DÉTECTÉ</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">{conn.lastStatus.sensor_error ?? 'Hors portée'}</p>
+              )}
+            </div>
+          )}
 
           {/* Robot status */}
           {conn.lastStatus && (

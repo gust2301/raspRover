@@ -10,6 +10,9 @@ export interface RobotStatus {
   pan?: number
   tilt?: number
   camera_light?: boolean
+  distance_cm?: number | null
+  obstacle?: boolean
+  sensor_error?: string | null
   [key: string]: unknown
 }
 
