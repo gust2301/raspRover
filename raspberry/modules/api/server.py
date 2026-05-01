@@ -259,7 +259,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         left, right = _mixer.mix(x, y)
                         await loop.run_in_executor(
                             None,
-                            lambda l=left, r=right: _motors.drive(l, r),  # type: ignore[union-attr]
+                            lambda left=left, right=right: _motors.drive(left, right),  # type: ignore[union-attr]
                         )
                     else:
                         direction_str = data.get("direction", "forward")

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import enum
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class DriveConfig:
     max_speed: float = 0.5
 
     @classmethod
-    def from_dict(cls, cfg: dict) -> "DriveConfig":
+    def from_dict(cls, cfg: dict) -> DriveConfig:
         return cls(
             control_mode=ControlMode(cfg.get("control_mode", "driver")),
             invert_x=bool(cfg.get("invert_x", False)),
