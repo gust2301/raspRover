@@ -574,8 +574,10 @@ export default function Pilotage() {
 
   const handleMoveXY = useCallback((x: number, y: number) => {
     const s = speed / 0.5
-    conn.sendMoveXY(x * s, y * s)
-  }, [conn, speed])
+    const mx = driveMode === 'mirror' ? -x : x
+    const my = driveMode === 'mirror' ? -y : y
+    conn.sendMoveXY(mx * s, my * s)
+  }, [conn, speed, driveMode])
 
   const handleDriveMode = useCallback((m: DriveMode) => {
     setDriveMode(m)
