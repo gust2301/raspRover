@@ -210,7 +210,7 @@ async def audio_info() -> dict:
     """Diagnostic : indique quel lecteur audio est disponible."""
     return {
         "player": _alert.player_name,
-        "device": _alert.device or "default",
+        "device": _alert.resolved_device,
         "available": _alert.player_available,
         "last_error": _alert.last_error,
     }
