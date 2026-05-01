@@ -1,19 +1,18 @@
 """
-Capteur ultrason HC-SR04 via Arduino Uno (USB série).
+2x HC-SR04 (avant + arrière) via Arduino Uno (USB série).
 
-L'Arduino envoie une ligne JSON toutes les 200 ms sur le port USB :
-  {"distance_cm": 45.3, "obstacle": false}
-  {"distance_cm": null, "obstacle": false, "error": "timeout"}
+L'Arduino envoie une ligne JSON toutes les ~200 ms :
+  {"front_cm":45.3,"front_ok":true,"rear_cm":120.0,"rear_ok":true,
+   "obstacle_front":false,"obstacle_rear":false}
 
 Ce module lit ce flux en arrière-plan et expose la dernière mesure
 via la propriété `reading` (thread-safe).
 
 Câblage Arduino Uno :
-  HC-SR04 TRIG → Pin 9
-  HC-SR04 ECHO → Pin 10
-  HC-SR04 VCC  → 5V   (pas de pont diviseur nécessaire)
-  HC-SR04 GND  → GND
-  Arduino USB  → Pi USB (/dev/ttyACM0 ou /dev/ttyUSB0)
+  Avant  : TRIG → pin 9  / ECHO → pin 10
+  Arrière: TRIG → pin 7  / ECHO → pin 8
+  VCC → 5V  /  GND → GND  (pas de pont diviseur nécessaire)
+  Arduino USB → Pi USB (/dev/ttyACM0 ou /dev/ttyUSB0)
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
 
@@ -38,32 +37,53 @@ except ImportError:
     _SERIAL_AVAILABLE = False
     log.warning("pyserial absent — UltrasonicSensor en mode simulation")
 
+# ---------------------------------------------------------------------------
+# Structures de données
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Résultat d'une mesure
-# ---------------------------------------------------------------------------
+_CANDIDATE_PORTS = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+
+
+@dataclass(frozen=True)
+class SingleReading:
+    """Résultat d'un capteur individuel."""
+
+    distance_cm: float | None  # None si timeout
+    obstacle: bool
+    ok: bool  # False si hors portée / timeout
 
 
 @dataclass(frozen=True)
 class SensorReading:
-    """Résultat d'une mesure ultrason."""
+    """Résultat combiné des deux capteurs avant + arrière."""
 
-    distance_cm: float | None  # None si timeout ou erreur
-    obstacle: bool
-    error: str | None
+    front: SingleReading = field(default_factory=lambda: SingleReading(None, False, False))
+    rear: SingleReading = field(default_factory=lambda: SingleReading(None, False, False))
+    error: str | None = None
+
+    @property
+    def obstacle(self) -> bool:
+        """True si au moins un capteur détecte un obstacle."""
+        return self.front.obstacle or self.rear.obstacle
+
+    @property
+    def distance_cm(self) -> float | None:
+        """Distance minimale valide entre les deux capteurs (ou None)."""
+        vals = [s.distance_cm for s in (self.front, self.rear) if s.distance_cm is not None]
+        return min(vals) if vals else None
 
 
-_NO_READING = SensorReading(distance_cm=None, obstacle=False, error="non démarré")
+_NO_READING = SensorReading(error="non démarré")
 
-# Ports USB à tester dans l'ordre (Linux)
-_CANDIDATE_PORTS = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+
+# ---------------------------------------------------------------------------
+# Auto-détection du port Arduino
+# ---------------------------------------------------------------------------
 
 
 def _auto_detect_port() -> str | None:
-    """Détecte automatiquement le port série de l'Arduino."""
     if not _SERIAL_AVAILABLE:
         return None
-    # Priorité aux ports connus
     for port in _CANDIDATE_PORTS:
         try:
             s = serial.Serial(port, timeout=0.1)
@@ -72,7 +92,6 @@ def _auto_detect_port() -> str | None:
             return port
         except (serial.SerialException, OSError):
             continue
-    # Fallback : cherche dans les ports listés
     for info in serial.tools.list_ports.comports():
         if "ACM" in info.device or "USB" in info.device:
             log.info("Arduino détecté via comports : %s", info.device)
@@ -81,23 +100,22 @@ def _auto_detect_port() -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Capteur
+# Capteur principal
 # ---------------------------------------------------------------------------
 
 
 class UltrasonicSensor:
     """
-    Lit le flux JSON de l'Arduino Uno en arrière-plan.
+    Lit le flux JSON de l'Arduino Uno (2 capteurs) en arrière-plan.
 
     Parameters
     ----------
     port : str | None
-        Port série (ex: '/dev/ttyACM0'). None = auto-détection.
+        Port série. None = auto-détection.
     baudrate : int
-        Vitesse série (doit correspondre au sketch Arduino, défaut 9600).
+        Vitesse série (défaut 9600, doit correspondre au sketch).
     obstacle_threshold_cm : float
-        Seuil obstacle en cm (défaut 20). Utilisé uniquement si l'Arduino
-        n'envoie pas le champ 'obstacle' (compatibilité).
+        Seuil obstacle en cm (défaut 20).
     """
 
     def __init__(
@@ -121,7 +139,6 @@ class UltrasonicSensor:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Ouvre le port série et démarre le thread de lecture."""
         if self._thread and self._thread.is_alive():
             return
 
@@ -130,9 +147,10 @@ class UltrasonicSensor:
         if resolved_port and _SERIAL_AVAILABLE:
             try:
                 self._serial = serial.Serial(resolved_port, self.baudrate, timeout=1.0)
-                # Vide le buffer de démarrage de l'Arduino
                 self._serial.reset_input_buffer()  # type: ignore[union-attr]
-                log.info("Arduino HC-SR04 connecté sur %s (%d baud)", resolved_port, self.baudrate)
+                log.info(
+                    "Arduino 2xHC-SR04 connecté sur %s (%d baud)", resolved_port, self.baudrate
+                )
             except Exception as exc:  # noqa: BLE001
                 log.error("Impossible d'ouvrir %s : %s", resolved_port, exc)
                 self._serial = None
@@ -150,7 +168,6 @@ class UltrasonicSensor:
         self._thread.start()
 
     def stop(self) -> None:
-        """Arrête le thread et ferme le port série."""
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=3.0)
@@ -164,26 +181,30 @@ class UltrasonicSensor:
         log.info("UltrasonicSensor arrêté")
 
     # ------------------------------------------------------------------
-    # Lecture
+    # Accès aux données
     # ------------------------------------------------------------------
 
     @property
     def reading(self) -> SensorReading:
-        """Dernière mesure disponible (thread-safe)."""
         with self._lock:
             return self._latest
 
     def to_dict(self) -> dict:
-        """Sérialise la dernière mesure pour l'API."""
+        """Sérialise pour l'API WebSocket et REST."""
         r = self.reading
         return {
-            "distance_cm": r.distance_cm,
+            "front_cm": r.front.distance_cm,
+            "rear_cm": r.rear.distance_cm,
+            "obstacle_front": r.front.obstacle,
+            "obstacle_rear": r.rear.obstacle,
             "obstacle": r.obstacle,
+            # Compat champ unique utilisé par le frontend
+            "distance_cm": r.distance_cm,
             "sensor_error": r.error,
         }
 
     # ------------------------------------------------------------------
-    # Boucle de lecture série (thread de fond)
+    # Boucle de lecture
     # ------------------------------------------------------------------
 
     def _read_loop(self) -> None:
@@ -193,44 +214,65 @@ class UltrasonicSensor:
                 self._latest = reading
 
     def _read_one(self) -> SensorReading:
-        # Mode simulation (pas de serial)
+        # Mode simulation
         if self._serial is None:
             if not _SERIAL_AVAILABLE:
                 import math
                 import time
 
-                sim_cm = 50.0 + 30.0 * math.sin(time.time() * 0.5)
+                t = time.time()
+                front_cm = 50.0 + 30.0 * math.sin(t * 0.5)
+                rear_cm = 80.0 + 20.0 * math.sin(t * 0.3 + 1.0)
                 return SensorReading(
-                    distance_cm=round(sim_cm, 1),
-                    obstacle=sim_cm < self.obstacle_threshold_cm,
-                    error=None,
+                    front=SingleReading(
+                        round(front_cm, 1),
+                        front_cm < self.obstacle_threshold_cm,
+                        True,
+                    ),
+                    rear=SingleReading(
+                        round(rear_cm, 1),
+                        rear_cm < self.obstacle_threshold_cm,
+                        True,
+                    ),
                 )
             self._stop_event.wait(0.2)
-            return SensorReading(
-                distance_cm=None, obstacle=False, error="port série non disponible"
-            )
+            return SensorReading(error="port série non disponible")
 
         try:
             raw = self._serial.readline()  # type: ignore[union-attr]
             line = raw.decode("ascii", errors="ignore").strip()
             if not line:
-                return SensorReading(distance_cm=None, obstacle=False, error="pas de données")
+                return self._latest  # conserve la dernière valeur
 
             data = json.loads(line)
-            dist = data.get("distance_cm")
-            dist_f = float(dist) if dist is not None else None
-            obstacle = bool(
-                data.get("obstacle", dist_f is not None and dist_f < self.obstacle_threshold_cm)
-            )
-            err = data.get("error")
-            return SensorReading(distance_cm=dist_f, obstacle=obstacle, error=err)
+            return self._parse(data)
 
         except json.JSONDecodeError:
-            log.debug("Ligne série invalide ignorée : %r", line if "line" in dir() else "?")
-            return self._latest  # conserve la dernière valeur valide
+            return self._latest  # ligne corrompue → on garde l'ancienne
         except Exception as exc:  # noqa: BLE001
             log.error("Erreur lecture série : %s", exc)
-            return SensorReading(distance_cm=None, obstacle=False, error=str(exc))
+            return SensorReading(error=str(exc))
+
+    def _parse(self, data: dict) -> SensorReading:
+        """Convertit un dict JSON Arduino en SensorReading."""
+        thr = self.obstacle_threshold_cm
+
+        front_cm_raw = data.get("front_cm")
+        rear_cm_raw = data.get("rear_cm")
+
+        front_cm = float(front_cm_raw) if front_cm_raw is not None else None
+        rear_cm = float(rear_cm_raw) if rear_cm_raw is not None else None
+
+        front_ok = bool(data.get("front_ok", front_cm is not None))
+        rear_ok = bool(data.get("rear_ok", rear_cm is not None))
+
+        obs_front = bool(data.get("obstacle_front", front_cm is not None and front_cm < thr))
+        obs_rear = bool(data.get("obstacle_rear", rear_cm is not None and rear_cm < thr))
+
+        return SensorReading(
+            front=SingleReading(distance_cm=front_cm, obstacle=obs_front, ok=front_ok),
+            rear=SingleReading(distance_cm=rear_cm, obstacle=obs_rear, ok=rear_ok),
+        )
 
     # ------------------------------------------------------------------
     # Context manager
