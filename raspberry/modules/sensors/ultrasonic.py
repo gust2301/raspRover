@@ -41,7 +41,7 @@ except ImportError:
 # Structures de données
 # ---------------------------------------------------------------------------
 
-_CANDIDATE_PORTS = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+_CANDIDATE_PORTS = ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0", "/dev/ttyACM1"]
 
 
 @dataclass(frozen=True)
