@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Square, Camera, CameraOff, Settings2, Activity, Lightbulb,
+  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren,
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -543,6 +543,8 @@ export default function Pilotage() {
   const [driveMode, setDriveMode] = useState<DriveMode>(
     () => (localStorage.getItem(DRIVE_MODE_KEY) as DriveMode) ?? 'driver'
   )
+  const [alertActive, setAlertActive] = useState(false)
+  const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
   const [streamKey, setStreamKey] = useState(0)
   const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -602,6 +604,18 @@ export default function Pilotage() {
     setEmergency(true)
     conn.sendStop()
   }, [conn])
+
+  const handleAlert = useCallback(() => {
+    if (alertActive) {
+      conn.stopAlert()
+      setAlertActive(false)
+      if (alertTimerRef.current) { clearTimeout(alertTimerRef.current); alertTimerRef.current = null }
+    } else {
+      conn.sendAlert()
+      setAlertActive(true)
+      alertTimerRef.current = setTimeout(() => setAlertActive(false), 3500)
+    }
+  }, [alertActive, conn])
 
   const handleCameraLightToggle = useCallback(() => {
     const next = !cameraLight
@@ -742,6 +756,23 @@ export default function Pilotage() {
                     size={110}
                   />
                 </div>
+                {/* Alert button landscape */}
+                <div className="absolute top-3 right-3 z-20">
+                  <button
+                    onClick={handleAlert}
+                    disabled={!connected}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border font-bold text-xs transition-all ${
+                      !connected
+                        ? 'opacity-30 cursor-not-allowed bg-slate-900 border-slate-700 text-slate-500'
+                        : alertActive
+                          ? 'bg-orange-500 text-white border-orange-400 animate-pulse shadow-lg shadow-orange-900/50'
+                          : 'bg-black/60 text-orange-400 border-orange-600/50 backdrop-blur-sm hover:bg-orange-600/20'
+                    }`}
+                  >
+                    <Siren size={14} />
+                    {alertActive ? 'Stop alerte' : 'Alerte'}
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -838,6 +869,24 @@ export default function Pilotage() {
               <span className="text-sm font-medium">
                 {cameraLight ? 'Lampe caméra allumée' : 'Allumer la lampe caméra'}
               </span>
+            </button>
+          </div>
+
+          {/* Alert button */}
+          <div className="px-5 py-4 border-b border-slate-800">
+            <button
+              onClick={handleAlert}
+              disabled={!connected}
+              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold ${
+                !connected
+                  ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
+                  : alertActive
+                    ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-900/40 animate-pulse'
+                    : 'bg-orange-600/10 text-orange-400 border-orange-600/40 hover:bg-orange-600/20 hover:border-orange-500'
+              }`}
+            >
+              <Siren size={18} />
+              <span className="text-sm">{alertActive ? 'Alerte en cours — Arrêter' : 'Déclencher une alerte'}</span>
             </button>
           </div>
 

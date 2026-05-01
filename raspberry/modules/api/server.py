@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from modules.audio import AlertPlayer
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
@@ -29,6 +30,7 @@ _motors: MotorController | None = None
 _pantilt: PanTiltController | None = None
 _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
+_alert: AlertPlayer = AlertPlayer()
 
 
 def _load_config() -> dict:
@@ -79,6 +81,7 @@ async def lifespan(app: FastAPI):
         _motors.shutdown()
     if _link:
         _link.close()
+    _alert.close()
     log.info("RaspRover API arrêtée proprement")
 
 
@@ -307,6 +310,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     lambda enabled=enabled: _lights.set_camera_light(enabled),
                 )
                 await ws.send_json({"type": "light_ack", **_lights.state})
+
+            elif msg_type == "alert":
+                action = data.get("action", "play")
+                if action == "stop":
+                    _alert.stop()
+                else:
+                    await loop.run_in_executor(None, _alert.play)
+                await ws.send_json({"type": "alert_ack", "action": action})
 
             elif msg_type == "status":
                 if _link is None:

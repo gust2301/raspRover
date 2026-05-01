@@ -24,6 +24,8 @@ export interface RobotConnection {
   sendStop: () => void
   sendPanTilt: (pan: number, tilt: number) => void
   sendLight: (enabled: boolean) => void
+  sendAlert: () => void
+  stopAlert: () => void
   lastStatus: RobotStatus | null
   latencyMs: number | null
   errorMessage: string | null
@@ -173,6 +175,14 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'light', enabled })
   }, [send])
 
+  const sendAlert = useCallback(() => {
+    send({ type: 'alert', action: 'play' })
+  }, [send])
+
+  const stopAlert = useCallback(() => {
+    send({ type: 'alert', action: 'stop' })
+  }, [send])
+
   // Ping toutes les 3s pour mesurer la latence et récupérer le statut
   useEffect(() => {
     if (status !== 'connected') return
@@ -201,6 +211,8 @@ export function useRobotConnection(): RobotConnection {
     sendStop,
     sendPanTilt,
     sendLight,
+    sendAlert,
+    stopAlert,
     lastStatus,
     latencyMs,
     errorMessage,
