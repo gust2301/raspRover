@@ -25,3 +25,8 @@ Thumbs.db
 
 # Local agent / workspace metadata
 .claude/
+
+# Config local (ne pas écraser les paramètres de la Pi)
+raspberry/config.yaml
+# Certificats TLS auto-générés
+raspberry/certs/
