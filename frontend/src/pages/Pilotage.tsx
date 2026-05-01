@@ -544,6 +544,7 @@ export default function Pilotage() {
     () => (localStorage.getItem(DRIVE_MODE_KEY) as DriveMode) ?? 'driver'
   )
   const [alertActive, setAlertActive] = useState(false)
+  const [alertError, setAlertError] = useState<string | null>(null)
   const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
   const [streamKey, setStreamKey] = useState(0)
@@ -611,7 +612,12 @@ export default function Pilotage() {
       setAlertActive(false)
       if (alertTimerRef.current) { clearTimeout(alertTimerRef.current); alertTimerRef.current = null }
     } else {
-      conn.sendAlert()
+      setAlertError(null)
+      conn.sendAlert((err) => {
+        setAlertActive(false)
+        setAlertError(err)
+        if (alertTimerRef.current) { clearTimeout(alertTimerRef.current); alertTimerRef.current = null }
+      })
       setAlertActive(true)
       alertTimerRef.current = setTimeout(() => setAlertActive(false), 3500)
     }
@@ -888,6 +894,11 @@ export default function Pilotage() {
               <Siren size={18} />
               <span className="text-sm">{alertActive ? 'Alerte en cours — Arrêter' : 'Déclencher une alerte'}</span>
             </button>
+            {alertError && (
+              <p className="mt-2 text-xs text-red-400 bg-red-900/20 border border-red-700/40 rounded-lg px-3 py-2">
+                ⚠ Audio : {alertError}
+              </p>
+            )}
           </div>
 
           {/* Robot status */}

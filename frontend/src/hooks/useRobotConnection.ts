@@ -24,7 +24,7 @@ export interface RobotConnection {
   sendStop: () => void
   sendPanTilt: (pan: number, tilt: number) => void
   sendLight: (enabled: boolean) => void
-  sendAlert: () => void
+  sendAlert: (onError?: (err: string) => void) => void
   stopAlert: () => void
   lastStatus: RobotStatus | null
   latencyMs: number | null
@@ -48,6 +48,7 @@ export function useRobotConnection(): RobotConnection {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptRef = useRef(0)
   const shouldStayConnectedRef = useRef(false)
+  const onAlertErrorRef = useRef<((err: string) => void) | null>(null)
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -104,6 +105,11 @@ export function useRobotConnection(): RobotConnection {
           if (pingTsRef.current !== null) {
             setLatencyMs(Date.now() - pingTsRef.current)
             pingTsRef.current = null
+          }
+        } else if (data.type === 'alert_ack') {
+          if (!data.ok && data.error) {
+            console.warn('[SENTRYX] Audio error:', data.error)
+            onAlertErrorRef.current?.(data.error as string)
           }
         }
       } catch {
@@ -175,7 +181,8 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'light', enabled })
   }, [send])
 
-  const sendAlert = useCallback(() => {
+  const sendAlert = useCallback((onError?: (err: string) => void) => {
+    onAlertErrorRef.current = onError ?? null
     send({ type: 'alert', action: 'play' })
   }, [send])
 

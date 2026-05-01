@@ -30,7 +30,7 @@ _motors: MotorController | None = None
 _pantilt: PanTiltController | None = None
 _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
-_alert: AlertPlayer = AlertPlayer()
+_alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 
 
 def _load_config() -> dict:
@@ -70,6 +70,10 @@ async def lifespan(app: FastAPI):
     )
 
     _lights = LightController(_link)
+    audio_cfg = cfg.get("audio", {})
+    _alert.device = audio_cfg.get("device") or None
+    log.info("Audio device : %s", _alert.device or "default")
+
     _motors.stop()
     _pantilt.center()
     _lights.set_camera_light(False)
@@ -197,6 +201,37 @@ async def camera_light(body: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — Audio
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/audio/info")
+async def audio_info() -> dict:
+    """Diagnostic : indique quel lecteur audio est disponible."""
+    return {
+        "player": _alert.player_name,
+        "device": _alert.device or "default",
+        "available": _alert.player_available,
+        "last_error": _alert.last_error,
+    }
+
+
+@app.post("/api/audio/test")
+async def audio_test() -> dict:
+    """Déclenche une alerte audio de test (REST, pour diagnostic)."""
+    if not _alert.player_available:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Aucun lecteur audio (aplay/paplay/ffplay)"},
+        )
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _alert.play)
+    await asyncio.sleep(0.3)
+    err = _alert.last_error
+    return {"ok": err is None, "player": _alert.player_name, "error": err}
+
+
+# ---------------------------------------------------------------------------
 # REST — Statut
 # ---------------------------------------------------------------------------
 
@@ -315,9 +350,31 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 action = data.get("action", "play")
                 if action == "stop":
                     _alert.stop()
+                    await ws.send_json({"type": "alert_ack", "action": "stop", "ok": True})
                 else:
-                    await loop.run_in_executor(None, _alert.play)
-                await ws.send_json({"type": "alert_ack", "action": action})
+                    if not _alert.player_available:
+                        await ws.send_json(
+                            {
+                                "type": "alert_ack",
+                                "action": "play",
+                                "ok": False,
+                                "error": "Aucun lecteur audio disponible sur le Pi (aplay/paplay introuvable)",
+                            }
+                        )
+                    else:
+                        await loop.run_in_executor(None, _alert.play)
+                        # Laisse 200ms pour que l'erreur éventuelle remonte
+                        await asyncio.sleep(0.2)
+                        err = _alert.last_error
+                        await ws.send_json(
+                            {
+                                "type": "alert_ack",
+                                "action": "play",
+                                "ok": err is None,
+                                "player": _alert.player_name,
+                                "error": err,
+                            }
+                        )
 
             elif msg_type == "status":
                 if _link is None:
