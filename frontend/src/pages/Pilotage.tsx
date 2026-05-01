@@ -223,10 +223,11 @@ function Dpad({
 }
 
 function MobileJoystick({
-  onMove, onStop, connected, label, accent = 'blue', actionLabel = 'Stop',
+  onMove, onStop, onAction, connected, label, accent = 'blue', actionLabel = 'Stop',
 }: {
   onMove: (dir: Direction) => void
   onStop: () => void
+  onAction?: () => void
   connected: boolean
   label: string
   accent?: 'blue' | 'amber'
@@ -334,7 +335,7 @@ function MobileJoystick({
         />
       </div>
       <button
-        onClick={stop}
+        onClick={onAction ?? stop}
         disabled={!connected}
         className="px-5 py-2 rounded-lg bg-red-600/15 text-red-400 border border-red-600/40 disabled:opacity-40"
       >
@@ -588,7 +589,8 @@ export default function Pilotage() {
                     label="Cam�ra"
                     accent="amber"
                     onMove={handlePanTiltNudge}
-                    onStop={() => handlePanTilt(0, 0)}
+                    onStop={() => {}}
+                    onAction={() => handlePanTilt(0, 0)}
                     connected={connected}
                     actionLabel="Recentrer"
                   />
@@ -609,7 +611,8 @@ export default function Pilotage() {
                 label="Caméra"
                 accent="amber"
                 onMove={handlePanTiltNudge}
-                onStop={() => handlePanTilt(0, 0)}
+                onStop={() => {}}
+                onAction={() => handlePanTilt(0, 0)}
                 connected={connected}
                 actionLabel="Recentrer"
               />

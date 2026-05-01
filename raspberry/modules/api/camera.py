@@ -95,25 +95,55 @@ def _generate_test_frame(width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
-def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]:
+_camera_instance: object | None = None
+_camera_lock = __import__("threading").Lock()
+_camera_clients = 0
+
+
+def _get_camera(width: int, height: int, framerate: int) -> object:
+    global _camera_instance
     assert Picamera2 is not None
-
-    camera = Picamera2()
-    delay = 1 / framerate
-    started = False
-
-    try:
-        config = camera.create_video_configuration(main={"size": (width, height)})
-        camera.configure(config)
-        camera.start()
-        started = True
+    if _camera_instance is None:
+        cam = Picamera2()
+        config = cam.create_video_configuration(main={"size": (width, height)})
+        cam.configure(config)
+        cam.start()
         time.sleep(0.2)
-        log.info("Camera stream started via picamera2 (%sx%s @ %sfps)", width, height, framerate)
+        log.info("Camera singleton started (%sx%s @ %sfps)", width, height, framerate)
+        _camera_instance = cam
+    return _camera_instance
 
+
+def _release_camera() -> None:
+    global _camera_instance
+    if _camera_instance is not None:
+        try:
+            _camera_instance.stop()  # type: ignore[union-attr]
+            _camera_instance.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        _camera_instance = None
+        log.info("Camera singleton released")
+
+
+def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]:
+    global _camera_clients
+    delay = 1 / framerate
+
+    with _camera_lock:
+        _camera_clients += 1
+        try:
+            camera = _get_camera(width, height, framerate)
+        except Exception as exc:
+            _camera_clients -= 1
+            raise exc
+
+    log.info("Camera stream client connected (total=%d)", _camera_clients)
+    try:
         while True:
             try:
                 buffer = io.BytesIO()
-                camera.capture_file(buffer, format="jpeg")
+                camera.capture_file(buffer, format="jpeg")  # type: ignore[union-attr]
                 yield _multipart_frame(buffer.getvalue())
             except GeneratorExit:
                 raise
@@ -124,10 +154,11 @@ def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]
         log.info("Camera stream client disconnected")
         raise
     finally:
-        if started:
-            camera.stop()
-        camera.close()
-        log.info("Camera stream stopped")
+        with _camera_lock:
+            _camera_clients -= 1
+            log.info("Camera clients remaining: %d", _camera_clients)
+            if _camera_clients == 0:
+                _release_camera()
 
 
 def _test_pattern_stream(width: int, height: int, framerate: int) -> Iterator[bytes]:
