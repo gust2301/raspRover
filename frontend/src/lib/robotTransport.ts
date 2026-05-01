@@ -9,7 +9,7 @@ export function getRobotWsProtocol(): 'ws' | 'wss' {
   return window.location.protocol === 'https:' ? 'wss' : 'ws'
 }
 
-function getRobotPort(): number {
+export function getRobotPort(): number {
   return window.location.protocol === 'https:' ? HTTPS_PORT : HTTP_PORT
 }
 
