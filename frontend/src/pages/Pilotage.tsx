@@ -39,7 +39,7 @@ function ConnectionBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
+    <div className="relative z-20 flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
       <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.dot}`} />
       <span className={`text-sm font-medium ${s.text}`}>{s.label}</span>
 
@@ -509,7 +509,7 @@ export default function Pilotage() {
             style={{ background: '#040810' }}
           >
             {/* Grille sci-fi */}
-            <svg className="absolute inset-0 w-full h-full opacity-5">
+            <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none">
               <defs>
                 <pattern id="pgrid" width="50" height="50" patternUnits="userSpaceOnUse">
                   <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#3b82f6" strokeWidth="0.5" />
