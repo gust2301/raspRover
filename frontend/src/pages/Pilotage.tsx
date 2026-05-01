@@ -223,7 +223,7 @@ function Dpad({
 }
 
 function MobileJoystick({
-  onMove, onStop, onAction, connected, label, accent = 'blue', actionLabel = 'Stop',
+  onMove, onStop, onAction, connected, label, accent = 'blue', actionLabel = 'Stop', invertY = false,
 }: {
   onMove: (dir: Direction) => void
   onStop: () => void
@@ -232,6 +232,7 @@ function MobileJoystick({
   label: string
   accent?: 'blue' | 'amber'
   actionLabel?: string
+  invertY?: boolean
 }) {
   const baseRef = useRef<HTMLDivElement | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -288,7 +289,7 @@ function MobileJoystick({
     const dir: Direction =
       Math.abs(rawX) > Math.abs(rawY)
         ? (rawX > 0 ? 'right' : 'left')
-        : (rawY > 0 ? 'backward' : 'forward')
+        : (rawY > 0 ? (invertY ? 'forward' : 'backward') : (invertY ? 'backward' : 'forward'))
 
     if (dir !== active) {
       startDirection(dir)
@@ -587,6 +588,7 @@ export default function Pilotage() {
                     onMove={handleMove}
                     onStop={handleStop}
                     connected={connected}
+                    invertY
                   />
                 </div>
                 <div className="absolute right-3 bottom-3 z-20">
@@ -611,6 +613,7 @@ export default function Pilotage() {
                 onMove={handleMove}
                 onStop={handleStop}
                 connected={connected}
+                invertY
               />
               <MobileJoystick
                 label="Caméra"
