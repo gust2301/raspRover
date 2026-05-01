@@ -20,6 +20,7 @@ export interface RobotConnection {
   connect: () => void
   disconnect: () => void
   sendMove: (direction: string, speed: number) => void
+  sendMoveXY: (x: number, y: number) => void
   sendStop: () => void
   sendPanTilt: (pan: number, tilt: number) => void
   sendLight: (enabled: boolean) => void
@@ -156,6 +157,10 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'move', direction, speed })
   }, [send])
 
+  const sendMoveXY = useCallback((x: number, y: number) => {
+    send({ type: 'move', x, y })
+  }, [send])
+
   const sendStop = useCallback(() => {
     send({ type: 'stop' })
   }, [send])
@@ -192,6 +197,7 @@ export function useRobotConnection(): RobotConnection {
     connect,
     disconnect,
     sendMove,
+    sendMoveXY,
     sendStop,
     sendPanTilt,
     sendLight,

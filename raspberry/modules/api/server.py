@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
+from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 
@@ -27,6 +28,7 @@ _link: ESP32Link | None = None
 _motors: MotorController | None = None
 _pantilt: PanTiltController | None = None
 _lights: LightController | None = None
+_mixer: DriveMixer = DriveMixer()
 
 
 def _load_config() -> dict:
@@ -40,7 +42,9 @@ def _load_config() -> dict:
 async def lifespan(app: FastAPI):
     global _link, _motors, _pantilt, _lights
 
+    global _mixer
     cfg = _load_config()
+    _mixer = DriveMixer(DriveConfig.from_dict(cfg.get("drive", {})))
     ctrl = cfg.get("control", {})
     port = ctrl.get("serial_port", "/dev/ttyAMA0")
     baudrate = ctrl.get("baudrate", 115200)
@@ -248,17 +252,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if _motors is None:
                     await ws.send_json({"type": "error", "message": "not ready"})
                     continue
-                direction_str = data.get("direction", "forward")
-                speed = data.get("speed")
-                speed_f = float(speed) if speed is not None else None
                 try:
-                    direction = Direction(direction_str)
-                    await loop.run_in_executor(
-                        None,
-                        lambda direction=direction, speed_f=speed_f: _motors.from_direction(
-                            direction, speed_f
-                        ),  # type: ignore[union-attr]
-                    )
+                    if "x" in data or "y" in data:
+                        x = float(data.get("x", 0.0))
+                        y = float(data.get("y", 0.0))
+                        left, right = _mixer.mix(x, y)
+                        await loop.run_in_executor(
+                            None,
+                            lambda l=left, r=right: _motors.drive(l, r),  # type: ignore[union-attr]
+                        )
+                    else:
+                        direction_str = data.get("direction", "forward")
+                        speed = data.get("speed")
+                        speed_f = float(speed) if speed is not None else None
+                        direction = Direction(direction_str)
+                        await loop.run_in_executor(
+                            None,
+                            lambda direction=direction, speed_f=speed_f: _motors.from_direction(
+                                direction, speed_f
+                            ),  # type: ignore[union-attr]
+                        )
                 except (ValueError, ControlError) as exc:
                     await ws.send_json({"type": "error", "message": str(exc)})
 

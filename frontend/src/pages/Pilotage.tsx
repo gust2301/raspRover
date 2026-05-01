@@ -408,6 +408,125 @@ function PanTiltControl({
 }
 
 // ---------------------------------------------------------------------------
+// Joystick de déplacement avec mode Conducteur / Miroir
+// ---------------------------------------------------------------------------
+
+type DriveMode = 'driver' | 'mirror'
+const DRIVE_MODE_KEY = 'sentryx_drive_mode'
+
+function DriveJoystick({
+  onMoveXY, onStop, connected, mode, onModeChange,
+}: {
+  onMoveXY: (x: number, y: number) => void
+  onStop: () => void
+  connected: boolean
+  mode: DriveMode
+  onModeChange: (m: DriveMode) => void
+}) {
+  const baseRef = useRef<HTMLDivElement | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const xyRef = useRef({ x: 0, y: 0 })
+  const onMoveXYRef = useRef(onMoveXY)
+  const onStopRef = useRef(onStop)
+  const [stick, setStick] = useState({ x: 0, y: 0 })
+  const [active, setActive] = useState(false)
+
+  useEffect(() => { onMoveXYRef.current = onMoveXY }, [onMoveXY])
+  useEffect(() => { onStopRef.current = onStop }, [onStop])
+
+  const stop = useCallback(() => {
+    setStick({ x: 0, y: 0 })
+    setActive(false)
+    xyRef.current = { x: 0, y: 0 }
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
+    onStopRef.current()
+  }, [])
+
+  const updateFromPointer = useCallback((clientX: number, clientY: number) => {
+    const base = baseRef.current
+    if (!base || !connected) return
+    const rect = base.getBoundingClientRect()
+    const radius = rect.width / 2
+    const rawX = clientX - (rect.left + radius)
+    const rawY = clientY - (rect.top + radius)
+    const distance = Math.hypot(rawX, rawY)
+    const maxOffset = radius * 0.55
+    const ratio = distance > maxOffset ? maxOffset / distance : 1
+    const sx = rawX * ratio
+    const sy = rawY * ratio
+    setStick({ x: sx, y: sy })
+
+    if (distance < radius * 0.15) { stop(); return }
+
+    const nx = rawX / radius
+    const ny = rawY / radius
+    xyRef.current = { x: nx, y: -ny }
+
+    if (!intervalRef.current) {
+      setActive(true)
+      onMoveXYRef.current(nx, -ny)
+      intervalRef.current = setInterval(() => {
+        const { x, y } = xyRef.current
+        onMoveXYRef.current(x, y)
+      }, 80)
+    }
+  }, [connected, stop])
+
+  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-0.5">
+        {(['driver', 'mirror'] as DriveMode[]).map(m => (
+          <button
+            key={m}
+            onClick={() => onModeChange(m)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              mode === m
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {m === 'driver' ? '🎮 Conducteur' : '🪞 Miroir'}
+          </button>
+        ))}
+      </div>
+      <div
+        ref={baseRef}
+        onPointerDown={e => {
+          if (!connected) return
+          e.currentTarget.setPointerCapture(e.pointerId)
+          updateFromPointer(e.clientX, e.clientY)
+        }}
+        onPointerMove={e => { if (e.buttons === 0) return; updateFromPointer(e.clientX, e.clientY) }}
+        onPointerUp={stop}
+        onPointerCancel={stop}
+        className={`relative w-40 h-40 rounded-full border ${
+          connected
+            ? 'border-blue-500/40 bg-slate-900/80'
+            : 'border-slate-800 bg-slate-900/40'
+        } touch-none select-none overflow-hidden`}
+      >
+        <div className="absolute inset-5 rounded-full border border-slate-800" />
+        <div className="absolute inset-1/2 h-px -translate-x-1/2 w-[70%] bg-slate-800" />
+        <div className="absolute inset-1/2 w-px -translate-y-1/2 h-[70%] bg-slate-800" />
+        <div
+          className={`absolute left-1/2 top-1/2 w-14 h-14 -translate-x-1/2 -translate-y-1/2 rounded-full border ${
+            connected
+              ? active ? 'bg-blue-600 border-blue-400 shadow-lg shadow-blue-900/50' : 'bg-slate-800 border-slate-700'
+              : 'bg-slate-800/50 border-slate-800'
+          }`}
+          style={{ transform: `translate(calc(-50% + ${stick.x}px), calc(-50% + ${stick.y}px))` }}
+        />
+      </div>
+      <button onClick={stop} disabled={!connected} className="px-5 py-2 rounded-lg bg-red-600/15 text-red-400 border border-red-600/40 disabled:opacity-40 text-xs">
+        Stop
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page principale
 // ---------------------------------------------------------------------------
 
@@ -417,6 +536,9 @@ export default function Pilotage() {
   const [pan, setPan] = useState(0)
   const [tilt, setTilt] = useState(0)
   const [emergency, setEmergency] = useState(false)
+  const [driveMode, setDriveMode] = useState<DriveMode>(
+    () => (localStorage.getItem(DRIVE_MODE_KEY) as DriveMode) ?? 'driver'
+  )
   const [streamUnavailable, setStreamUnavailable] = useState(false)
   const [streamKey, setStreamKey] = useState(0)
   const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -449,6 +571,16 @@ export default function Pilotage() {
   const handleMove = useCallback((dir: Direction) => {
     conn.sendMove(dir, speed)
   }, [conn, speed])
+
+  const handleMoveXY = useCallback((x: number, y: number) => {
+    const s = speed / 0.5
+    conn.sendMoveXY(x * s, y * s)
+  }, [conn, speed])
+
+  const handleDriveMode = useCallback((m: DriveMode) => {
+    setDriveMode(m)
+    localStorage.setItem(DRIVE_MODE_KEY, m)
+  }, [])
 
   const handleStop = useCallback(() => {
     conn.sendStop()
@@ -583,11 +715,12 @@ export default function Pilotage() {
             {isMobileLandscape && (
               <>
                 <div className="absolute left-3 bottom-3 z-20">
-                  <MobileJoystick
-                    label="D�placement"
-                    onMove={handleMove}
+                  <DriveJoystick
+                    onMoveXY={handleMoveXY}
                     onStop={handleStop}
                     connected={connected}
+                    mode={driveMode}
+                    onModeChange={handleDriveMode}
                   />
                 </div>
                 <div className="absolute right-3 bottom-3 z-20">
@@ -607,11 +740,12 @@ export default function Pilotage() {
 
           <div className={`${isMobileLandscape ? 'hidden' : 'md:hidden'} border-t border-slate-800 px-4 py-5`} style={{ background: '#0a0f1e' }}>
             <div className="grid grid-cols-2 gap-4">
-              <MobileJoystick
-                label="Déplacement"
-                onMove={handleMove}
+              <DriveJoystick
+                onMoveXY={handleMoveXY}
                 onStop={handleStop}
                 connected={connected}
+                mode={driveMode}
+                onModeChange={handleDriveMode}
               />
               <MobileJoystick
                 label="Caméra"

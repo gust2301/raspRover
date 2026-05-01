@@ -22,6 +22,14 @@ control:
     servo_speed: 600          # Vitesse servo ST3215 (0-4096)
     servo_accel: 50           # Accélération servo ST3215 (0-255)
 
+drive:
+  control_mode: "driver"      # driver | mirror
+  invert_x: false
+  invert_y: false
+  invert_left_motor: false
+  invert_right_motor: false
+  max_speed: 0.5
+
 logging:
   level: INFO
   file: logs/rasprover.log
