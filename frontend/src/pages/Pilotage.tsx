@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
-import { getRobotStreamUrl } from '../lib/robotTransport'
+import { getRobotPort, getRobotStreamUrl } from '../lib/robotTransport'
 
 // ---------------------------------------------------------------------------
 // Connection bar
@@ -69,7 +69,7 @@ function ConnectionBar({
           className="flex items-center gap-2 text-slate-400 hover:text-slate-200 text-sm font-mono px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors max-w-full"
         >
           <Settings2 size={13} />
-          <span className="truncate">{robotIp}:{8080}</span>
+          <span className="truncate">{robotIp}:{getRobotPort()}</span>
         </button>
       )}
 
@@ -705,7 +705,7 @@ export default function Pilotage() {
             <div className="px-5 py-6 text-center text-slate-600 text-sm">
               <Wifi size={32} className="mx-auto mb-2 opacity-30" />
               <p>Configure l'IP de ta Pi et connecte-toi</p>
-              <p className="text-xs mt-1 text-slate-700">Port WebSocket : 8080</p>
+              <p className="text-xs mt-1 text-slate-700">Port WebSocket : {getRobotPort()}</p>
             </div>
           )}
 
@@ -752,6 +752,7 @@ export default function Pilotage() {
     </div>
   )
 }
+
 
 
 
