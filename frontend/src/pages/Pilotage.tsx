@@ -553,6 +553,8 @@ export default function Pilotage() {
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
   const connected = conn.status === 'connected' && !emergency
+  // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
+  const canAlert = conn.status === 'connected'
   const streamUrl = getRobotStreamUrl(conn.robotIp)
 
   useEffect(() => {
@@ -766,9 +768,9 @@ export default function Pilotage() {
                 <div className="absolute top-3 right-3 z-20">
                   <button
                     onClick={handleAlert}
-                    disabled={!connected}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border font-bold text-xs transition-all ${
-                      !connected
+                    disabled={!canAlert}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border font-bold text-xs transition-all active:scale-95 ${
+                      !canAlert
                         ? 'opacity-30 cursor-not-allowed bg-slate-900 border-slate-700 text-slate-500'
                         : alertActive
                           ? 'bg-orange-500 text-white border-orange-400 animate-pulse shadow-lg shadow-orange-900/50'
@@ -882,9 +884,9 @@ export default function Pilotage() {
           <div className="px-5 py-4 border-b border-slate-800">
             <button
               onClick={handleAlert}
-              disabled={!connected}
-              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold ${
-                !connected
+              disabled={!canAlert}
+              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold active:scale-95 ${
+                !canAlert
                   ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
                   : alertActive
                     ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-900/40 animate-pulse'

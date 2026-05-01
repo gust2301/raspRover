@@ -183,6 +183,11 @@ export function useRobotConnection(): RobotConnection {
 
   const sendAlert = useCallback((onError?: (err: string) => void) => {
     onAlertErrorRef.current = onError ?? null
+    const wsReady = wsRef.current?.readyState === WebSocket.OPEN
+    if (!wsReady) {
+      onError?.('WebSocket non connecté — reconnecte-toi au robot')
+      return
+    }
     send({ type: 'alert', action: 'play' })
   }, [send])
 
