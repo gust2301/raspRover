@@ -1,23 +1,24 @@
 """
-Capteur ultrason HC-SR04 — mesure de distance en continu.
+Capteur ultrason HC-SR04 via Arduino Uno (USB série).
 
-Câblage :
-  VCC  → 5 V
-  GND  → GND
-  TRIG → GPIO23  (sortie)
-  ECHO → GPIO24  (entrée, signal 5 V → diviseur résistif → 3.3 V)
+L'Arduino envoie une ligne JSON toutes les 200 ms sur le port USB :
+  {"distance_cm": 45.3, "obstacle": false}
+  {"distance_cm": null, "obstacle": false, "error": "timeout"}
 
-Le capteur est géré dans un thread de fond qui rafraîchit la mesure
-toutes les POLL_INTERVAL_S secondes. L'accès à la dernière valeur
-est thread-safe via SensorReading (dataclass immuable).
+Ce module lit ce flux en arrière-plan et expose la dernière mesure
+via la propriété `reading` (thread-safe).
 
-Compatibilité Pi 5 : gpiozero avec le backend lgpio (RP1 GPIO chip).
-Si gpiozero/lgpio est absent (ex : CI), le module bascule en mode
-simulation et retourne des distances fictives sans erreur.
+Câblage Arduino Uno :
+  HC-SR04 TRIG → Pin 9
+  HC-SR04 ECHO → Pin 10
+  HC-SR04 VCC  → 5V   (pas de pont diviseur nécessaire)
+  HC-SR04 GND  → GND
+  Arduino USB  → Pi USB (/dev/ttyACM0 ou /dev/ttyUSB0)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -25,17 +26,17 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Import GPIO — dégradé si absent (CI, dev PC)
+# Import pyserial — dégradé si absent (CI)
 # ---------------------------------------------------------------------------
 
 try:
-    from gpiozero import DistanceSensor  # type: ignore[import-not-found]
-    from gpiozero.pins.lgpio import LGPIOFactory  # type: ignore[import-not-found]
+    import serial  # type: ignore[import-not-found]
+    import serial.tools.list_ports  # type: ignore[import-not-found]
 
-    _GPIO_AVAILABLE = True
+    _SERIAL_AVAILABLE = True
 except ImportError:
-    _GPIO_AVAILABLE = False
-    log.warning("gpiozero/lgpio absent — UltrasonicSensor en mode simulation")
+    _SERIAL_AVAILABLE = False
+    log.warning("pyserial absent — UltrasonicSensor en mode simulation")
 
 
 # ---------------------------------------------------------------------------
@@ -48,11 +49,35 @@ class SensorReading:
     """Résultat d'une mesure ultrason."""
 
     distance_cm: float | None  # None si timeout ou erreur
-    obstacle: bool  # True si distance < seuil configuré
-    error: str | None  # Message d'erreur, None si OK
+    obstacle: bool
+    error: str | None
 
 
 _NO_READING = SensorReading(distance_cm=None, obstacle=False, error="non démarré")
+
+# Ports USB à tester dans l'ordre (Linux)
+_CANDIDATE_PORTS = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+
+
+def _auto_detect_port() -> str | None:
+    """Détecte automatiquement le port série de l'Arduino."""
+    if not _SERIAL_AVAILABLE:
+        return None
+    # Priorité aux ports connus
+    for port in _CANDIDATE_PORTS:
+        try:
+            s = serial.Serial(port, timeout=0.1)
+            s.close()
+            log.info("Arduino détecté sur %s", port)
+            return port
+        except (serial.SerialException, OSError):
+            continue
+    # Fallback : cherche dans les ports listés
+    for info in serial.tools.list_ports.comports():
+        if "ACM" in info.device or "USB" in info.device:
+            log.info("Arduino détecté via comports : %s", info.device)
+            return info.device
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -62,88 +87,80 @@ _NO_READING = SensorReading(distance_cm=None, obstacle=False, error="non démarr
 
 class UltrasonicSensor:
     """
-    Gère un HC-SR04 dans un thread de fond.
+    Lit le flux JSON de l'Arduino Uno en arrière-plan.
 
     Parameters
     ----------
-    trig_pin : int
-        Numéro de pin BCM pour TRIG (défaut 23).
-    echo_pin : int
-        Numéro de pin BCM pour ECHO (défaut 24).
+    port : str | None
+        Port série (ex: '/dev/ttyACM0'). None = auto-détection.
+    baudrate : int
+        Vitesse série (doit correspondre au sketch Arduino, défaut 9600).
     obstacle_threshold_cm : float
-        Distance en cm en dessous de laquelle on signale un obstacle (défaut 20).
-    max_distance_m : float
-        Portée maximale déclarée à gpiozero (défaut 4 m).
-    poll_interval_s : float
-        Intervalle entre deux mesures (défaut 0.2 s = 5 Hz).
+        Seuil obstacle en cm (défaut 20). Utilisé uniquement si l'Arduino
+        n'envoie pas le champ 'obstacle' (compatibilité).
     """
 
     def __init__(
         self,
-        trig_pin: int = 23,
-        echo_pin: int = 24,
+        port: str | None = None,
+        baudrate: int = 9600,
         obstacle_threshold_cm: float = 20.0,
-        max_distance_m: float = 4.0,
-        poll_interval_s: float = 0.2,
     ) -> None:
-        self.trig_pin = trig_pin
-        self.echo_pin = echo_pin
+        self.port = port
+        self.baudrate = baudrate
         self.obstacle_threshold_cm = obstacle_threshold_cm
-        self.max_distance_m = max_distance_m
-        self.poll_interval_s = poll_interval_s
 
         self._lock = threading.Lock()
         self._latest: SensorReading = _NO_READING
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._sensor: object | None = None  # instance gpiozero
+        self._serial: object | None = None
 
     # ------------------------------------------------------------------
     # Cycle de vie
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Démarre le thread de polling."""
+        """Ouvre le port série et démarre le thread de lecture."""
         if self._thread and self._thread.is_alive():
             return
 
-        if _GPIO_AVAILABLE:
+        resolved_port = self.port or _auto_detect_port()
+
+        if resolved_port and _SERIAL_AVAILABLE:
             try:
-                factory = LGPIOFactory()
-                self._sensor = DistanceSensor(
-                    echo=self.echo_pin,
-                    trigger=self.trig_pin,
-                    max_distance=self.max_distance_m,
-                    pin_factory=factory,
-                )
-                log.info(
-                    "HC-SR04 initialisé — TRIG=GPIO%d ECHO=GPIO%d seuil=%.0f cm",
-                    self.trig_pin,
-                    self.echo_pin,
-                    self.obstacle_threshold_cm,
-                )
+                self._serial = serial.Serial(resolved_port, self.baudrate, timeout=1.0)
+                # Vide le buffer de démarrage de l'Arduino
+                self._serial.reset_input_buffer()  # type: ignore[union-attr]
+                log.info("Arduino HC-SR04 connecté sur %s (%d baud)", resolved_port, self.baudrate)
             except Exception as exc:  # noqa: BLE001
-                log.error("Impossible d'initialiser le HC-SR04 : %s", exc)
-                self._sensor = None
+                log.error("Impossible d'ouvrir %s : %s", resolved_port, exc)
+                self._serial = None
         else:
-            self._sensor = None
+            self._serial = None
+            if not _SERIAL_AVAILABLE:
+                log.info("Mode simulation (pyserial absent)")
+            else:
+                log.warning("Aucun port Arduino trouvé — mode simulation")
 
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="ultrasonic-poll")
+        self._thread = threading.Thread(
+            target=self._read_loop, daemon=True, name="ultrasonic-serial"
+        )
         self._thread.start()
 
     def stop(self) -> None:
-        """Arrête le thread et libère le GPIO."""
+        """Arrête le thread et ferme le port série."""
         self._stop_event.set()
         if self._thread:
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=3.0)
             self._thread = None
-        if self._sensor is not None:
+        if self._serial is not None:
             try:
-                self._sensor.close()  # type: ignore[union-attr]
+                self._serial.close()  # type: ignore[union-attr]
             except Exception:  # noqa: BLE001
                 pass
-            self._sensor = None
+            self._serial = None
         log.info("UltrasonicSensor arrêté")
 
     # ------------------------------------------------------------------
@@ -166,45 +183,53 @@ class UltrasonicSensor:
         }
 
     # ------------------------------------------------------------------
-    # Boucle de polling (thread de fond)
+    # Boucle de lecture série (thread de fond)
     # ------------------------------------------------------------------
 
-    def _poll_loop(self) -> None:
-        while not self._stop_event.wait(self.poll_interval_s):
-            reading = self._measure()
+    def _read_loop(self) -> None:
+        while not self._stop_event.is_set():
+            reading = self._read_one()
             with self._lock:
                 self._latest = reading
 
-    def _measure(self) -> SensorReading:
-        """Effectue une mesure et retourne un SensorReading."""
-        # Mode simulation (pas de GPIO)
-        if self._sensor is None:
-            if not _GPIO_AVAILABLE:
+    def _read_one(self) -> SensorReading:
+        # Mode simulation (pas de serial)
+        if self._serial is None:
+            if not _SERIAL_AVAILABLE:
                 import math
-                import time as _t
+                import time
 
-                sim_cm = 50.0 + 30.0 * math.sin(_t.time() * 0.5)
+                sim_cm = 50.0 + 30.0 * math.sin(time.time() * 0.5)
                 return SensorReading(
                     distance_cm=round(sim_cm, 1),
                     obstacle=sim_cm < self.obstacle_threshold_cm,
                     error=None,
                 )
-            return SensorReading(distance_cm=None, obstacle=False, error="GPIO non disponible")
+            self._stop_event.wait(0.2)
+            return SensorReading(
+                distance_cm=None, obstacle=False, error="port série non disponible"
+            )
 
         try:
-            dist_m = self._sensor.distance  # type: ignore[union-attr]
+            raw = self._serial.readline()  # type: ignore[union-attr]
+            line = raw.decode("ascii", errors="ignore").strip()
+            if not line:
+                return SensorReading(distance_cm=None, obstacle=False, error="pas de données")
 
-            if dist_m is None or dist_m >= self.max_distance_m:
-                # Hors portée — gpiozero retourne max_distance en cas de timeout
-                return SensorReading(
-                    distance_cm=None, obstacle=False, error="hors portée / timeout"
-                )
+            data = json.loads(line)
+            dist = data.get("distance_cm")
+            dist_f = float(dist) if dist is not None else None
+            obstacle = bool(
+                data.get("obstacle", dist_f is not None and dist_f < self.obstacle_threshold_cm)
+            )
+            err = data.get("error")
+            return SensorReading(distance_cm=dist_f, obstacle=obstacle, error=err)
 
-            dist_cm = round(dist_m * 100, 1)
-            obstacle = dist_cm < self.obstacle_threshold_cm
-            return SensorReading(distance_cm=dist_cm, obstacle=obstacle, error=None)
-
+        except json.JSONDecodeError:
+            log.debug("Ligne série invalide ignorée : %r", line if "line" in dir() else "?")
+            return self._latest  # conserve la dernière valeur valide
         except Exception as exc:  # noqa: BLE001
+            log.error("Erreur lecture série : %s", exc)
             return SensorReading(distance_cm=None, obstacle=False, error=str(exc))
 
     # ------------------------------------------------------------------

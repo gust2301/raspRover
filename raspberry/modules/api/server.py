@@ -77,20 +77,16 @@ async def lifespan(app: FastAPI):
     _alert.device = audio_cfg.get("device") or None
     log.info("Audio device : %s", _alert.device or "default")
 
-    # Capteur ultrason — activé si sensors.ultrasonic.enabled: true dans config.yaml
+    # Capteur ultrason — via Arduino Uno (USB série)
     sensor_cfg = cfg.get("sensors", {}).get("ultrasonic", {})
     if sensor_cfg.get("enabled", False):
         _ultrasonic = UltrasonicSensor(
-            trig_pin=int(sensor_cfg.get("trig_pin", 23)),
-            echo_pin=int(sensor_cfg.get("echo_pin", 24)),
+            port=sensor_cfg.get("port") or None,
+            baudrate=int(sensor_cfg.get("baudrate", 9600)),
             obstacle_threshold_cm=float(sensor_cfg.get("obstacle_threshold_cm", 20.0)),
-            max_distance_m=float(sensor_cfg.get("max_distance_m", 4.0)),
-            poll_interval_s=float(sensor_cfg.get("poll_interval_s", 0.2)),
         )
         _ultrasonic.start()
-        log.info(
-            "HC-SR04 démarré (TRIG=GPIO%d ECHO=GPIO%d)", _ultrasonic.trig_pin, _ultrasonic.echo_pin
-        )
+        log.info("HC-SR04 (Arduino) démarré")
     else:
         log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
 

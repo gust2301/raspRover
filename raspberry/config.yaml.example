@@ -62,8 +62,6 @@ audio:
 sensors:
   ultrasonic:
     enabled: true             # Mettre false pour désactiver le capteur
-    trig_pin: 23              # GPIO BCM pour TRIG
-    echo_pin: 24              # GPIO BCM pour ECHO (via pont diviseur 5V→3.3V)
+    # port: "/dev/ttyACM0"   # Laisser vide = auto-détection du port Arduino
+    baudrate: 9600            # Doit correspondre au sketch Arduino
     obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
-    max_distance_m: 4.0       # Portée max du HC-SR04
-    poll_interval_s: 0.2      # Rafraîchissement (0.2s = 5 Hz)

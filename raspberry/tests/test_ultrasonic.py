@@ -1,4 +1,4 @@
-"""Tests pour UltrasonicSensor — s'exécutent sans GPIO réel (mode simulation)."""
+"""Tests pour UltrasonicSensor (Arduino série) — sans matériel réel."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from modules.sensors.ultrasonic import _GPIO_AVAILABLE, SensorReading, UltrasonicSensor
+from modules.sensors.ultrasonic import _SERIAL_AVAILABLE, SensorReading, UltrasonicSensor
 
 # ---------------------------------------------------------------------------
 # SensorReading
@@ -33,29 +33,27 @@ def test_sensor_reading_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# UltrasonicSensor (mode simulation sans GPIO)
+# UltrasonicSensor en mode simulation (pyserial absent ou port None)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(_GPIO_AVAILABLE, reason="Test simulation uniquement (pas de GPIO réel)")
+@pytest.mark.skipif(_SERIAL_AVAILABLE, reason="Test simulation uniquement (pas de port réel)")
 def test_sensor_start_stop_simulation() -> None:
-    sensor = UltrasonicSensor(obstacle_threshold_cm=20.0, poll_interval_s=0.05)
+    sensor = UltrasonicSensor(obstacle_threshold_cm=20.0)
     sensor.start()
-    time.sleep(0.15)  # laisse 2-3 cycles se produire
+    time.sleep(0.5)
     r = sensor.reading
     sensor.stop()
 
-    # En simulation, distance_cm est toujours non-None
     assert r.distance_cm is not None
     assert r.error is None
 
 
-@pytest.mark.skipif(_GPIO_AVAILABLE, reason="Test simulation uniquement (pas de GPIO réel)")
-def test_sensor_obstacle_detection_simulation() -> None:
-    """Le simulateur oscille entre ~20 et ~80 cm — vérifie juste que le flag est cohérent."""
-    sensor = UltrasonicSensor(obstacle_threshold_cm=20.0, poll_interval_s=0.05)
+@pytest.mark.skipif(_SERIAL_AVAILABLE, reason="Test simulation uniquement (pas de port réel)")
+def test_sensor_obstacle_coherence() -> None:
+    sensor = UltrasonicSensor(obstacle_threshold_cm=20.0)
     sensor.start()
-    time.sleep(0.3)
+    time.sleep(0.5)
     r = sensor.reading
     sensor.stop()
 
@@ -63,11 +61,11 @@ def test_sensor_obstacle_detection_simulation() -> None:
     assert r.obstacle == (r.distance_cm < 20.0)
 
 
-@pytest.mark.skipif(_GPIO_AVAILABLE, reason="Test simulation uniquement (pas de GPIO réel)")
+@pytest.mark.skipif(_SERIAL_AVAILABLE, reason="Test simulation uniquement (pas de port réel)")
 def test_sensor_to_dict() -> None:
-    sensor = UltrasonicSensor(poll_interval_s=0.05)
+    sensor = UltrasonicSensor()
     sensor.start()
-    time.sleep(0.15)
+    time.sleep(0.5)
     d = sensor.to_dict()
     sensor.stop()
 
@@ -76,20 +74,20 @@ def test_sensor_to_dict() -> None:
     assert "sensor_error" in d
 
 
-@pytest.mark.skipif(_GPIO_AVAILABLE, reason="Test simulation uniquement (pas de GPIO réel)")
+@pytest.mark.skipif(_SERIAL_AVAILABLE, reason="Test simulation uniquement (pas de port réel)")
 def test_sensor_context_manager() -> None:
-    with UltrasonicSensor(poll_interval_s=0.05) as sensor:
-        time.sleep(0.15)
+    with UltrasonicSensor() as sensor:
+        time.sleep(0.5)
         r = sensor.reading
     assert r.distance_cm is not None
 
 
-@pytest.mark.skipif(_GPIO_AVAILABLE, reason="Test simulation uniquement (pas de GPIO réel)")
+@pytest.mark.skipif(_SERIAL_AVAILABLE, reason="Test simulation uniquement (pas de port réel)")
 def test_sensor_threshold_configurable() -> None:
     """Avec un seuil très haut, tout est obstacle."""
-    sensor = UltrasonicSensor(obstacle_threshold_cm=999.0, poll_interval_s=0.05)
+    sensor = UltrasonicSensor(obstacle_threshold_cm=999.0)
     sensor.start()
-    time.sleep(0.15)
+    time.sleep(0.5)
     r = sensor.reading
     sensor.stop()
     assert r.obstacle is True
