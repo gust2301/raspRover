@@ -72,7 +72,7 @@ class AlertPlayer:
                     stderr=subprocess.DEVNULL,
                 )
                 self._proc.stdin.write(_ALERT_WAV)  # type: ignore[union-attr]
-                self._proc.stdin.close()             # type: ignore[union-attr]
+                self._proc.stdin.close()  # type: ignore[union-attr]
             except FileNotFoundError:
                 log.warning("aplay introuvable — audio non disponible sur ce système")
             except Exception as exc:  # noqa: BLE001
