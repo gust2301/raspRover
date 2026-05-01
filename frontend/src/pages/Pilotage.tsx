@@ -235,8 +235,13 @@ function MobileJoystick({
 }) {
   const baseRef = useRef<HTMLDivElement | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onMoveRef = useRef(onMove)
+  const onStopRef = useRef(onStop)
   const [stick, setStick] = useState({ x: 0, y: 0 })
   const [active, setActive] = useState<Direction | null>(null)
+
+  useEffect(() => { onMoveRef.current = onMove }, [onMove])
+  useEffect(() => { onStopRef.current = onStop }, [onStop])
 
   const stop = useCallback(() => {
     setStick({ x: 0, y: 0 })
@@ -245,17 +250,17 @@ function MobileJoystick({
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
-    onStop()
-  }, [onStop])
+    onStopRef.current()
+  }, [])
 
   const startDirection = useCallback((dir: Direction) => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
     }
     setActive(dir)
-    onMove(dir)
-    intervalRef.current = setInterval(() => onMove(dir), 150)
-  }, [onMove])
+    onMoveRef.current(dir)
+    intervalRef.current = setInterval(() => onMoveRef.current(dir), 150)
+  }, [])
 
   const updateFromPointer = useCallback((clientX: number, clientY: number) => {
     const base = baseRef.current
