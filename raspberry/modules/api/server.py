@@ -19,9 +19,15 @@ from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 from modules.control.patrol import PatrolController
-from modules.sensors import UltrasonicSensor
+from modules.sensors import UltrasonicSensor, VisionObstacleDetector
 
-from .camera import generate_frames
+from .camera import (
+    generate_frames,
+    register_frame_callback,
+    start_standalone_vision_producer,
+    stop_standalone_vision_producer,
+    unregister_frame_callback,
+)
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +40,7 @@ _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
+_vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
 
 
@@ -46,7 +53,7 @@ def _load_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt, _lights, _ultrasonic, _patrol
+    global _link, _motors, _pantilt, _lights, _ultrasonic, _vision, _patrol
 
     global _mixer
     cfg = _load_config()
@@ -92,14 +99,31 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
 
+    # Détecteur vision (OpenCV) — complément au HC-SR04
+    vision_cfg = cfg.get("sensors", {}).get("vision", {})
+    if vision_cfg.get("enabled", True):
+        _vision = VisionObstacleDetector(
+            edge_threshold=float(vision_cfg.get("edge_threshold", 0.08)),
+            history=int(vision_cfg.get("history", 3)),
+            uniform_std_max=float(vision_cfg.get("uniform_std_max", 18.0)),
+        )
+        _vision.start()
+        register_frame_callback(_vision.push_frame)
+        start_standalone_vision_producer()
+        log.info("VisionObstacleDetector démarré")
+    else:
+        log.info("Détecteur vision désactivé (sensors.vision.enabled: false)")
+
     # Contrôleur de patrouille
     patrol_cfg = cfg.get("patrol", {})
     _patrol = PatrolController(
         motors=_motors,
         ultrasonic=_ultrasonic,
+        vision=_vision,
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
         turn_duration=float(patrol_cfg.get("turn_duration", 0.8)),
+        stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
     )
 
     _motors.stop()
@@ -112,6 +136,10 @@ async def lifespan(app: FastAPI):
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
         await _patrol.stop(loop)
+    if _vision:
+        stop_standalone_vision_producer()
+        unregister_frame_callback(_vision.push_frame)
+        _vision.stop()
     if _ultrasonic:
         _ultrasonic.stop()
     if _motors:
@@ -120,6 +148,13 @@ async def lifespan(app: FastAPI):
         _link.close()
     _alert.close()
     log.info("RaspRover API arrêtée proprement")
+
+
+def _obstacle_front() -> bool:
+    """Obstacle devant ? Combine ultrason ET détection vision."""
+    us = _ultrasonic.reading.front.obstacle if _ultrasonic else False
+    vis = _vision.obstacle if _vision else False
+    return us or vis
 
 
 app = FastAPI(title="RaspRover Control API", version="1.0.0", lifespan=lifespan)
@@ -247,6 +282,17 @@ async def get_distance() -> dict:
             content={"error": "Capteur ultrason non activé (sensors.ultrasonic.enabled: false)"},
         )
     return _ultrasonic.to_dict()
+
+
+@app.get("/api/vision")
+async def get_vision() -> dict:
+    """État de la détection vision (OpenCV). Rafraîchi à ~5 fps."""
+    if _vision is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Détecteur vision non activé (sensors.vision.enabled: false)"},
+        )
+    return _vision.to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +427,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     if "x" in data or "y" in data:
                         x = float(data.get("x", 0.0))
                         y = float(data.get("y", 0.0))
-                        # Sécurité : bloque l'avance si obstacle devant
-                        if y > 0.1 and _ultrasonic and _ultrasonic.reading.front.obstacle:
+                        # Sécurité : bloque l'avance si obstacle devant (ultrason OU vision)
+                        if y > 0.1 and _obstacle_front():
                             await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
                             await ws.send_json(
                                 {
@@ -401,12 +447,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         speed = data.get("speed")
                         speed_f = float(speed) if speed is not None else None
                         direction = Direction(direction_str)
-                        # Sécurité : bloque l'avance si obstacle devant
-                        if (
-                            direction == Direction.FORWARD
-                            and _ultrasonic
-                            and _ultrasonic.reading.front.obstacle
-                        ):
+                        # Sécurité : bloque l'avance si obstacle devant (ultrason OU vision)
+                        if direction == Direction.FORWARD and _obstacle_front():
                             await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
                             await ws.send_json(
                                 {
@@ -510,6 +552,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
                     light_state = _lights.state if _lights else {"camera_light": False}
                     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
+                    vision_data = _vision.to_dict() if _vision else {}
                     patrol_data = (
                         _patrol.to_dict()
                         if _patrol
@@ -523,6 +566,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             "tilt": tilt,
                             **light_state,
                             **distance_data,
+                            **vision_data,
                             **patrol_data,
                         }
                     )

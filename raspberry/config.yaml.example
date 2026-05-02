@@ -65,3 +65,20 @@ sensors:
     # port: "/dev/ttyACM0"   # Laisser vide = auto-détection du port Arduino
     baudrate: 9600            # Doit correspondre au sketch Arduino
     obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
+
+  vision:
+    enabled: true             # Détection d'obstacles par caméra (OpenCV dual-méthode)
+                              # Nécessite : sudo apt install python3-opencv
+    edge_threshold: 0.08      # Méthode A — Canny : densité d'arêtes (0-1) déclenchant "obstacle"
+                              # Pour obstacles texturés : chaises, câbles, personnes…
+    uniform_std_max: 28.0     # Méthode B — Surface lisse : écart-type max du ROI
+                              # Pour obstacles lisses : murs blancs, meubles, portes…
+                              # Réduire (ex: 12) si faux positifs sur sol uniforme
+    history: 3                # Nombre de frames pour le vote majoritaire (lissage)
+
+patrol:
+  speed: 0.3           # Vitesse d'avance (0-1)
+  obstacle_cm: 40      # Distance en cm déclenchant l'évitement (ultrason)
+  turn_duration: 0.8   # Durée rotation évitement normal (secondes)
+  stuck_timeout: 3.5   # Secondes en FORWARD sans obstacle détecté → robot coincé (angle mort)
+                       # Réduire (ex: 2.0) dans les espaces étroits, augmenter dans les grands espaces
