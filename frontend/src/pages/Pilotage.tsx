@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren, Radar, Bot,
+  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren, Radar,
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -553,7 +553,6 @@ export default function Pilotage() {
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
   const patrolActive = conn.lastStatus?.patrol_active ?? false
-  const patrolState = conn.lastStatus?.patrol_state ?? 'idle'
   const connected = conn.status === 'connected' && !emergency && !patrolActive
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
   const canAlert = conn.status === 'connected'
@@ -744,16 +743,6 @@ export default function Pilotage() {
               </div>
             )}
 
-            {/* Patrol state overlay */}
-            {patrolActive && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-blue-900/90 border border-blue-500 rounded-xl px-4 py-2 backdrop-blur-sm">
-                <Bot size={14} className="text-blue-300" />
-                <span className="text-blue-200 text-xs font-bold">
-                  {patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE'}
-                </span>
-              </div>
-            )}
-
             {/* Obstacle blocked flash */}
             {conn.obstacleBlocked && (
               <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-900/90 border border-amber-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
@@ -936,32 +925,23 @@ export default function Pilotage() {
             )}
           </div>
 
-          {/* Patrol button */}
-          <div className="px-5 py-4 border-b border-slate-800">
-            <button
-              onClick={() => patrolActive ? conn.stopPatrol() : conn.startPatrol()}
-              disabled={conn.status !== 'connected' || emergency}
-              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold active:scale-95 ${
-                conn.status !== 'connected' || emergency
-                  ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
-                  : patrolActive
-                    ? 'bg-blue-500 text-white border-blue-400 shadow-lg shadow-blue-900/40 animate-pulse'
-                    : 'bg-blue-600/10 text-blue-400 border-blue-600/40 hover:bg-blue-600/20 hover:border-blue-500'
-              }`}
-            >
-              <Bot size={18} />
-              <span className="text-sm">
-                {patrolActive
-                  ? patrolState === 'avoiding' ? '↩ En évitement…' : '▶ Patrouille active — Arrêter'
-                  : 'Lancer la patrouille'}
-              </span>
-            </button>
-            {conn.obstacleBlocked && (
-              <p className="mt-2 text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 animate-pulse">
+          {/* Obstacle blocked warning */}
+          {conn.obstacleBlocked && (
+            <div className="px-5 pt-4">
+              <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 animate-pulse">
                 ⚠ Obstacle détecté — avance bloquée
               </p>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Patrol active warning */}
+          {patrolActive && (
+            <div className="px-5 pt-4">
+              <p className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
+                🤖 Patrouille active — contrôle manuel désactivé. Gérez la patrouille depuis la page <strong>Patrouilles</strong>.
+              </p>
+            </div>
+          )}
 
           {/* Distance sensor */}
           {conn.lastStatus?.distance_cm !== undefined && (
