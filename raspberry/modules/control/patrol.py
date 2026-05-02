@@ -3,20 +3,22 @@ Contrôleur de patrouille autonome.
 
 Comportement :
   - Avance en continu jusqu'à détection d'obstacle (pas de limite de durée).
-  - Surveillance ultrason + caméra 3 zones toutes les 50 ms pendant le mouvement.
+  - Surveillance ultrason + caméra zones G/D toutes les 50 ms.
   - À la détection d'un obstacle :
       * Gauche uniquement  → tourne droite
       * Droite uniquement  → tourne gauche
-      * Centre / frontal   → recul + tourne (alternance G/D)
+      * Centre / frontal   → recul + tourne (direction choisie intelligemment)
   - Reprend l'avance immédiatement après l'évitement.
 
-Détection de blocage :
-  - Si le robot enchaîne plusieurs évitements rapides sans progresser
-    (_STUCK_SCAN_THRESHOLD évitements avec < _MIN_FREE_SECS de libre entre eux),
-    un scan pan-tilt est déclenché pour trouver la direction la plus dégagée.
-  - Le scan pan-tilt ne se déclenche que sur blocage, jamais en avance libre.
+Navigation intelligente sans lidar (dead reckoning) :
+  - Estime le cap courant à partir de la durée des rotations.
+  - Mémorise les N derniers caps parcourus.
+  - Choisit toujours la direction de rotation qui explore le cap
+    le plus éloigné des caps déjà visités → évite de revenir sur ses pas.
 
-Pas de « steps » ni de SCANNING systématique : le mouvement est fluide.
+Détection de blocage :
+  - Après _STUCK_SCAN_THRESHOLD évitements rapides consécutifs,
+    déclenche un scan pan-tilt pour trouver la sortie la plus dégagée.
 """
 
 from __future__ import annotations
@@ -48,16 +50,31 @@ _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
 _MOTOR_KEEPALIVE = 0.4  # s (watchdog = 1 s → on rafraîchit à 0.4 s)
 
 # Vision latérale (zones G/D uniquement — l'US gère le centre)
-# Délai avant d'activer la vision après le démarrage FORWARD :
-# la caméra peut avoir du lag ou pointer vers un obstacle obsolète.
-_VISION_WARMUP = 1.5  # s de délai avant de commencer à lire la vision
+_VISION_WARMUP = 1.5  # s avant d'activer la vision après FORWARD (vote stabilisé)
+
+# Dead reckoning — estimation du cap courant
+# Vitesse angulaire estimée à _TURN_SPEED. Calibrer en observant les rotations :
+# si le robot tourne de ~90° en 0.90 s → 100 °/s. Ajuster selon le modèle.
+_TURN_DEG_PER_SEC = 100.0  # °/s à _TURN_SPEED (approximation, calibrable)
+_HEADING_HISTORY_SIZE = 8  # nombre de caps récents mémorisés
 
 # Détection de blocage → scan pan-tilt
-_MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (secondes de libre)
+_MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (s)
 _STUCK_SCAN_THRESHOLD = 3  # évitements rapides consécutifs avant scan pan-tilt
-_SCAN_ANGLES = (-50, 0, 50)  # angles pan pour le scan (°) : gauche / centre / droite
-_SCAN_SETTLE = 0.6  # temps de stabilisation servo avant lecture (s)
+_SCAN_ANGLES = (-50, 0, 50)  # angles pan pour le scan (°)
+_SCAN_SETTLE = 0.6  # stabilisation servo avant lecture (s)
 _SCAN_READ_SECS = 0.5  # durée de lecture des capteurs par position (s)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _angular_dist(a: float, b: float) -> float:
+    """Distance angulaire minimale entre deux caps (0–180°)."""
+    diff = abs(a - b) % 360
+    return min(diff, 360.0 - diff)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +86,7 @@ class PatrolState(str, Enum):
     IDLE = "idle"
     FORWARD = "forward"
     AVOIDING = "avoiding"
-    STUCK = "stuck"  # gardé pour compatibilité UI, non utilisé en automatique
+    STUCK = "stuck"
 
 
 # ---------------------------------------------------------------------------
@@ -79,19 +96,18 @@ class PatrolState(str, Enum):
 
 class PatrolController:
     """
-    Patrouille autonome : avance librement, évite les obstacles détectés.
+    Patrouille autonome avec dead reckoning : avance librement, évite les
+    obstacles en choisissant toujours la direction la moins explorée.
 
     Parameters
     ----------
     motors       : MotorController
     ultrasonic   : UltrasonicSensor | None
     vision       : VisionObstacleDetector | None
-    pantilt      : PanTiltController | None  (utilisé pour le scan de déblocage)
+    pantilt      : PanTiltController | None  (scan de déblocage)
     speed        : float  vitesse d'avance (0-1)
     obstacle_cm  : float  seuil ultrason déclenchant l'évitement (cm)
-    step_duration: ignoré
-    scan_with_pantilt : ignoré (scan déclenché automatiquement sur blocage)
-    stuck_timeout: ignoré (pas de limite de durée en avance libre)
+    step_duration, scan_with_pantilt, stuck_timeout : ignorés (rétrocompat)
     """
 
     def __init__(
@@ -115,10 +131,13 @@ class PatrolController:
 
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._state: PatrolState = PatrolState.IDLE
-        self._avoidance_count: int = 0
 
-        # Compteur de blocage pour le scan pan-tilt
-        self._short_move_count: int = 0  # évitements rapides consécutifs
+        # Dead reckoning
+        self._heading: float = 0.0  # cap estimé (0-360°, arbitraire)
+        self._heading_history: list[float] = []
+
+        # Compteur de blocage
+        self._short_move_count: int = 0
 
     # ------------------------------------------------------------------
     # Propriétés
@@ -142,7 +161,8 @@ class PatrolController:
     async def start(self, loop: asyncio.AbstractEventLoop) -> None:
         if self.active:
             return
-        self._avoidance_count = 0
+        self._heading = 0.0
+        self._heading_history = []
         self._short_move_count = 0
         self._task = asyncio.create_task(self._run(loop))
         log.info("Patrouille démarrée (speed=%.2f obstacle_cm=%.0f)", self.speed, self.obstacle_cm)
@@ -171,14 +191,20 @@ class PatrolController:
                 # ── Avance en continu ──────────────────────────────────
                 self._state = PatrolState.FORWARD
                 spd = self.speed
+
+                # Enregistre le cap actuel avant de partir
+                self._record_heading()
+
                 await loop.run_in_executor(
                     None, lambda s=spd: self._motors.from_direction(Direction.FORWARD, s)
                 )
-                log.info("Patrol: FORWARD (vitesse=%.2f)", spd)
+                log.info(
+                    "Patrol: FORWARD cap=%.0f° (vitesse=%.2f)",
+                    self._heading,
+                    spd,
+                )
 
                 t_free_start = time.monotonic()
-
-                # Surveillance obstacle pendant l'avance (keepalive moteur inclus)
                 obstacle = await self._monitor_until_obstacle(loop, Direction.FORWARD, spd)
 
                 # ── Évitement ─────────────────────────────────────────
@@ -187,12 +213,12 @@ class PatrolController:
                     self._state = PatrolState.AVOIDING
                     await loop.run_in_executor(None, self._motors.stop)
                     log.info(
-                        "Patrol: OBSTACLE — %s (libre=%.1fs)",
+                        "Patrol: OBSTACLE — %s (libre=%.1fs cap=%.0f°)",
                         obstacle,
                         free_secs,
+                        self._heading,
                     )
 
-                    # Suivi de blocage : progression courte → incrémente le compteur
                     if free_secs < _MIN_FREE_SECS:
                         self._short_move_count += 1
                         log.info(
@@ -209,7 +235,6 @@ class PatrolController:
                             )
                         self._short_move_count = 0
 
-                    # Si bloqué trop souvent → scan pan-tilt pour trouver une sortie
                     if self._short_move_count >= _STUCK_SCAN_THRESHOLD and self._pantilt:
                         log.warning(
                             "Patrol: BLOQUÉ (%d évitements rapides) → scan pan-tilt",
@@ -219,10 +244,9 @@ class PatrolController:
                         self._short_move_count = 0
                         best_dir = await self._pantilt_scan(loop, Direction)
                         if best_dir is not None:
-                            await self._turn(loop, best_dir, _TURN_FRONT, "sortie scan pan-tilt")
+                            await self._turn(loop, best_dir, _TURN_FRONT, "sortie scan")
                     else:
                         await self._avoid(loop, Direction, obstacle)
-                    # Reprend l'avance au prochain tour de boucle
 
         except asyncio.CancelledError:
             await loop.run_in_executor(None, self._motors.stop)
@@ -240,17 +264,12 @@ class PatrolController:
         fwd_speed: float,
     ) -> str | None:
         """
-        Surveille les capteurs toutes les _POLL secondes pendant l'avance.
-
-        Envoie périodiquement la commande moteur pour éviter l'arrêt par le
-        watchdog interne du MotorController (timeout 1 s sans commande).
-
-        Vision : uniquement les zones gauche/droite, après un délai de
-        _VISION_WARMUP secondes (laisse le vote se stabiliser et évite les
-        faux positifs au démarrage).
+        Surveille les capteurs toutes les _POLL secondes.
+        Rafraîchit la commande moteur toutes les _MOTOR_KEEPALIVE secondes
+        pour éviter l'arrêt par le watchdog du MotorController (timeout 1 s).
         """
         t_start = time.monotonic()
-        t_last_keepalive = t_start  # déjà envoyé juste avant d'entrer ici
+        t_last_keepalive = t_start
 
         while True:
             now = time.monotonic()
@@ -270,27 +289,19 @@ class PatrolController:
                 cm = r.front.distance_cm
                 if (cm is not None and cm < self.obstacle_cm) or (cm is None and r.front.obstacle):
                     us_str = f"{cm:.0f}cm" if cm is not None else "proche"
-                    log.info(
-                        "Patrol US: obstacle frontal %s après %.1fs",
-                        us_str,
-                        elapsed,
-                    )
+                    log.info("Patrol US: obstacle frontal %s après %.1fs", us_str, elapsed)
                     return f"ultrason {us_str}"
 
-            # ── Vision latérale G/D (priorité basse) ─────────────
-            # Ignorée pendant _VISION_WARMUP : caméra pas encore stabilisée,
-            # vote majoritaire peut refléter la position précédente du robot.
-            # Le centre est délibérément ignoré : l'ultrason le couvre mieux.
+            # ── Vision latérale G/D ───────────────────────────────
+            # Ignorée pendant _VISION_WARMUP (vote stabilisé, pas de lag caméra).
+            # Centre intentionnellement ignoré : l'ultrason le couvre mieux.
             if self._vision and elapsed >= _VISION_WARMUP:
                 zones = self._vision.zones
                 left = zones.get("left", False)
                 right = zones.get("right", False)
 
                 if left and right:
-                    log.info(
-                        "Patrol cam: obstacle G+D après %.1fs",
-                        elapsed,
-                    )
+                    log.info("Patrol cam: obstacle G+D après %.1fs", elapsed)
                     return "vision:center"
                 if left:
                     log.info("Patrol cam: obstacle GAUCHE après %.1fs", elapsed)
@@ -302,116 +313,68 @@ class PatrolController:
             await asyncio.sleep(_POLL)
 
     # ------------------------------------------------------------------
+    # Dead reckoning — suivi de cap
+    # ------------------------------------------------------------------
+
+    def _record_heading(self) -> None:
+        """Mémorise le cap courant dans l'historique des caps explorés."""
+        self._heading_history.append(self._heading)
+        if len(self._heading_history) > _HEADING_HISTORY_SIZE:
+            self._heading_history.pop(0)
+
+    def _apply_turn(self, turn_dir, duration: float) -> None:
+        """Met à jour l'estimation de cap après une rotation."""
+        delta = _TURN_DEG_PER_SEC * duration
+        if turn_dir.value == "right":
+            self._heading = (self._heading + delta) % 360.0
+        else:
+            self._heading = (self._heading - delta) % 360.0
+
+    def _best_turn_dir(self, Direction, duration: float):
+        """
+        Choisit la direction de rotation qui explore le cap le moins visité.
+
+        Score d'un cap candidat = distance angulaire minimale à tous les caps
+        déjà mémorisés. On choisit le score le plus élevé (cap le plus nouveau).
+        En cas d'égalité, préfère la droite (convention arbitraire stable).
+        """
+        delta = _TURN_DEG_PER_SEC * duration
+        h_right = (self._heading + delta) % 360.0
+        h_left = (self._heading - delta) % 360.0
+
+        if not self._heading_history:
+            return Direction.RIGHT  # premier évitement : droite par défaut
+
+        def score(h: float) -> float:
+            return min(_angular_dist(h, prev) for prev in self._heading_history)
+
+        s_right = score(h_right)
+        s_left = score(h_left)
+
+        log.info(
+            "Patrol heading: cap=%.0f° | →droite %.0f°(score=%.0f°) | →gauche %.0f°(score=%.0f°) | choix=%s",
+            self._heading,
+            h_right,
+            s_right,
+            h_left,
+            s_left,
+            "droite" if s_right >= s_left else "gauche",
+        )
+
+        return Direction.RIGHT if s_right >= s_left else Direction.LEFT
+
+    # ------------------------------------------------------------------
     # Évitement directionnel
     # ------------------------------------------------------------------
 
-    def _next_turn_dir(self, Direction):
-        """Alterne gauche/droite pour les évitements frontaux."""
-        self._avoidance_count += 1
-        return Direction.LEFT if self._avoidance_count % 2 == 0 else Direction.RIGHT
-
-    # ------------------------------------------------------------------
-    # Scan pan-tilt (uniquement en cas de blocage)
-    # ------------------------------------------------------------------
-
-    async def _pantilt_scan(self, loop: asyncio.AbstractEventLoop, Direction):
-        """
-        Balaye les angles pan (gauche / centre / droite) et évalue chaque direction.
-        Retourne Direction.LEFT, Direction.RIGHT, ou None (si centre dégagé).
-
-        Appelé UNIQUEMENT lorsque le robot est bloqué (_short_move_count dépassé).
-        """
-        log.info("Patrol scan: balayage pan-tilt %s", _SCAN_ANGLES)
-        scores: dict[int, float] = {}  # angle → score de dégagement (plus haut = plus libre)
-
-        for angle in _SCAN_ANGLES:
-            # Oriente le pan (tilt à 0° pour ne pas fausser l'ultrason)
-            try:
-                await loop.run_in_executor(None, lambda a=angle: self._pantilt.goto(a, 0.0))
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Patrol scan: erreur goto(%d): %s", angle, exc)
-                continue
-
-            await asyncio.sleep(_SCAN_SETTLE)
-
-            # Lecture sur _SCAN_READ_SECS
-            t0 = time.monotonic()
-            us_readings: list[float] = []
-            vision_clears: list[bool] = []
-
-            while time.monotonic() - t0 < _SCAN_READ_SECS:
-                if self._ultrasonic:
-                    r = self._ultrasonic.reading
-                    cm = r.front.distance_cm
-                    if cm is not None:
-                        us_readings.append(cm)
-
-                if self._vision:
-                    zones = self._vision.zones
-                    vision_clears.append(not zones.get("center", False))
-
-                await asyncio.sleep(_POLL)
-
-            # Score = distance US moyenne (si dispo), sinon fraction de frames libres
-            if us_readings:
-                score = sum(us_readings) / len(us_readings)
-            elif vision_clears:
-                score = (sum(vision_clears) / len(vision_clears)) * 300.0
-            else:
-                score = 0.0
-
-            log.info(
-                "Patrol scan: angle=%d° → score=%.1f (us=%d lectures, vis=%d frames)",
-                angle,
-                score,
-                len(us_readings),
-                len(vision_clears),
-            )
-            scores[angle] = score
-
-        # Recentre la caméra
-        try:
-            await loop.run_in_executor(None, self._pantilt.center)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Patrol scan: erreur recentrage: %s", exc)
-
-        if not scores:
-            log.warning("Patrol scan: aucune mesure — évitement par défaut")
-            return Direction.RIGHT
-
-        best_angle = max(scores, key=lambda a: scores[a])
-        best_score = scores[best_angle]
-        log.info("Patrol scan: meilleure direction angle=%d° score=%.1f", best_angle, best_score)
-
-        if best_score < self.obstacle_cm * 0.5:
-            # Même la meilleure direction est très encombrée
-            log.warning("Patrol scan: toutes directions bloquées (score max=%.1f)", best_score)
-            # On recule et tourne quand même
-            return Direction.LEFT if self._avoidance_count % 2 == 0 else Direction.RIGHT
-
-        if best_angle < -10:
-            return Direction.LEFT
-        if best_angle > 10:
-            return Direction.RIGHT
-        return None  # centre dégagé → pas de rotation, reprend l'avance
-
-    async def _avoid(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        Direction,
-        obstacle: str,
-    ) -> None:
+    async def _avoid(self, loop: asyncio.AbstractEventLoop, Direction, obstacle: str) -> None:
         if obstacle.startswith("vision:left"):
-            # Obstacle à gauche → tourne droite
             await self._turn(loop, Direction.RIGHT, _TURN_LATERAL, "obstacle gauche → droite")
-
         elif obstacle.startswith("vision:right"):
-            # Obstacle à droite → tourne gauche
             await self._turn(loop, Direction.LEFT, _TURN_LATERAL, "obstacle droite → gauche")
-
         else:
-            # Obstacle frontal (ultrason ou centre caméra) → recul + tourne
-            turn_dir = self._next_turn_dir(Direction)
+            # Obstacle frontal : choisit la direction qui explore du nouveau terrain
+            turn_dir = self._best_turn_dir(Direction, _TURN_FRONT)
             await self._reverse_and_turn(loop, Direction, turn_dir, obstacle)
 
     async def _turn(
@@ -428,6 +391,7 @@ class PatrolController:
         await asyncio.sleep(duration)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
+        self._apply_turn(turn_dir, duration)
 
     async def _reverse_and_turn(
         self,
@@ -456,3 +420,80 @@ class PatrolController:
         await asyncio.sleep(_TURN_FRONT)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
+        self._apply_turn(turn_dir, _TURN_FRONT)
+
+    # ------------------------------------------------------------------
+    # Scan pan-tilt (uniquement en cas de blocage)
+    # ------------------------------------------------------------------
+
+    async def _pantilt_scan(self, loop: asyncio.AbstractEventLoop, Direction):
+        """
+        Balaye les angles pan et évalue chaque direction.
+        Retourne Direction.LEFT, Direction.RIGHT, ou None (centre dégagé).
+        Appelé UNIQUEMENT lorsque le robot est bloqué.
+        """
+        log.info("Patrol scan: balayage pan-tilt %s", _SCAN_ANGLES)
+        scores: dict[int, float] = {}
+
+        for angle in _SCAN_ANGLES:
+            try:
+                await loop.run_in_executor(None, lambda a=angle: self._pantilt.goto(a, 0.0))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Patrol scan: erreur goto(%d): %s", angle, exc)
+                continue
+
+            await asyncio.sleep(_SCAN_SETTLE)
+
+            t0 = time.monotonic()
+            us_readings: list[float] = []
+            vision_clears: list[bool] = []
+
+            while time.monotonic() - t0 < _SCAN_READ_SECS:
+                if self._ultrasonic:
+                    r = self._ultrasonic.reading
+                    cm = r.front.distance_cm
+                    if cm is not None:
+                        us_readings.append(cm)
+                if self._vision:
+                    zones = self._vision.zones
+                    vision_clears.append(not zones.get("center", False))
+                await asyncio.sleep(_POLL)
+
+            if us_readings:
+                score = sum(us_readings) / len(us_readings)
+            elif vision_clears:
+                score = (sum(vision_clears) / len(vision_clears)) * 300.0
+            else:
+                score = 0.0
+
+            log.info(
+                "Patrol scan: angle=%d° → score=%.1f (us=%d, vis=%d)",
+                angle,
+                score,
+                len(us_readings),
+                len(vision_clears),
+            )
+            scores[angle] = score
+
+        try:
+            await loop.run_in_executor(None, self._pantilt.center)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Patrol scan: erreur recentrage: %s", exc)
+
+        if not scores:
+            log.warning("Patrol scan: aucune mesure — best_turn_dir par défaut")
+            return self._best_turn_dir(Direction, _TURN_FRONT)
+
+        best_angle = max(scores, key=lambda a: scores[a])
+        best_score = scores[best_angle]
+        log.info("Patrol scan: meilleure direction angle=%d° score=%.1f", best_angle, best_score)
+
+        if best_score < self.obstacle_cm * 0.5:
+            log.warning("Patrol scan: toutes directions bloquées → best_turn_dir")
+            return self._best_turn_dir(Direction, _TURN_FRONT)
+
+        if best_angle < -10:
+            return Direction.LEFT
+        if best_angle > 10:
+            return Direction.RIGHT
+        return None  # centre dégagé → reprend l'avance sans tourner
