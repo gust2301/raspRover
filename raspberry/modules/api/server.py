@@ -99,6 +99,7 @@ async def lifespan(app: FastAPI):
         _vision = VisionObstacleDetector(
             edge_threshold=float(vision_cfg.get("edge_threshold", 0.08)),
             history=int(vision_cfg.get("history", 3)),
+            uniform_std_max=float(vision_cfg.get("uniform_std_max", 18.0)),
         )
         _vision.start()
         register_frame_callback(_vision.push_frame)

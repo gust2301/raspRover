@@ -22,6 +22,7 @@ export interface RobotStatus {
   vision_obstacle?: boolean
   vision_confidence?: number
   vision_available?: boolean
+  vision_method?: 'canny' | 'uniform' | 'none'
   [key: string]: unknown
 }
 

@@ -57,6 +57,7 @@ export default function Patrols() {
   const visionObstacle    = conn.lastStatus?.vision_obstacle ?? false
   const visionConfidence  = conn.lastStatus?.vision_confidence ?? 0
   const visionAvailable   = conn.lastStatus?.vision_available ?? false
+  const visionMethod      = conn.lastStatus?.vision_method ?? 'none'
   const stateInfo         = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
   const isConnected       = conn.status === 'connected'
 
@@ -179,7 +180,9 @@ export default function Patrols() {
                   <span className="text-red-200 text-xs font-bold">
                     {obstacle
                       ? `OBSTACLE — ${frontCm?.toFixed(0)} cm`
-                      : 'OBSTACLE VISUEL'}
+                      : visionMethod === 'uniform'
+                        ? 'MUR / MEUBLE DÉTECTÉ'
+                        : 'OBSTACLE VISUEL'}
                   </span>
                 </div>
               )}
@@ -292,7 +295,20 @@ export default function Patrols() {
                     ? 'bg-slate-800/40 border-slate-700 text-slate-400'
                     : 'bg-slate-800/20 border-slate-800 text-slate-600'
               }`}>
-                <span>{visionObstacle ? '⚠ Obstacle visuel' : visionAvailable ? 'Voie dégagée' : 'Non disponible'}</span>
+                <span>
+                  {visionObstacle
+                    ? visionMethod === 'uniform'
+                      ? '⚠ Surface lisse détectée'
+                      : '⚠ Obstacle visuel'
+                    : visionAvailable
+                      ? 'Voie dégagée'
+                      : 'Non disponible'}
+                </span>
+                {visionAvailable && visionObstacle && (
+                  <span className="font-mono text-slate-500 ml-2 text-[10px] uppercase tracking-wide">
+                    {visionMethod === 'uniform' ? 'mur/meuble' : 'contours'}
+                  </span>
+                )}
                 {visionAvailable && (
                   <span className="font-mono text-slate-500">{Math.round(visionConfidence * 100)}%</span>
                 )}
