@@ -275,6 +275,17 @@ async def get_distance() -> dict:
     return _ultrasonic.to_dict()
 
 
+@app.get("/api/vision")
+async def get_vision() -> dict:
+    """État de la détection vision (OpenCV). Rafraîchi à ~5 fps."""
+    if _vision is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Détecteur vision non activé (sensors.vision.enabled: false)"},
+        )
+    return _vision.to_dict()
+
+
 # ---------------------------------------------------------------------------
 # REST — Patrouille
 # ---------------------------------------------------------------------------
