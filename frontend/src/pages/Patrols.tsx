@@ -12,7 +12,6 @@ import { getRobotStreamUrl } from '../lib/robotTransport'
 
 const STATE_LABEL: Record<string, { text: string; color: string; pulse: boolean }> = {
   idle:     { text: 'En attente',         color: 'text-slate-400',   pulse: false },
-  scanning: { text: 'Scan L/C/D…',        color: 'text-blue-300',    pulse: true  },
   forward:  { text: 'En déplacement',     color: 'text-emerald-400', pulse: true  },
   avoiding: { text: 'Évitement…',         color: 'text-amber-400',   pulse: true  },
   stuck:    { text: 'Coincé — recul…',    color: 'text-orange-400',  pulse: true  },
