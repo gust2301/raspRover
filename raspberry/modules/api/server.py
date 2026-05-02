@@ -115,11 +115,14 @@ async def lifespan(app: FastAPI):
         log.info("Détecteur vision désactivé (sensors.vision.enabled: false)")
 
     # Contrôleur de patrouille
+    # La vision N'est PAS passée au patrol : trop de faux positifs (sol, reflets)
+    # qui empêchent d'avancer. L'ultrason seul gère les obstacles en patrol.
+    # La vision reste active pour l'affichage temps réel et la future détection latérale.
     patrol_cfg = cfg.get("patrol", {})
     _patrol = PatrolController(
         motors=_motors,
         ultrasonic=_ultrasonic,
-        vision=_vision,
+        vision=None,
         pantilt=_pantilt,
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
