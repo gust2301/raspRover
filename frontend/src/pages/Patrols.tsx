@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Bot, Radar, Wifi, WifiOff, Settings2, Play, Square,
-  ChevronDown, ChevronUp, AlertTriangle,
+  ChevronDown, ChevronUp, AlertTriangle, Eye,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
@@ -11,9 +11,10 @@ import { getRobotStreamUrl } from '../lib/robotTransport'
 // ---------------------------------------------------------------------------
 
 const STATE_LABEL: Record<string, { text: string; color: string; pulse: boolean }> = {
-  idle:     { text: 'En attente',       color: 'text-slate-400',   pulse: false },
-  forward:  { text: 'En déplacement',   color: 'text-emerald-400', pulse: true  },
-  avoiding: { text: 'Évitement…',       color: 'text-amber-400',   pulse: true  },
+  idle:     { text: 'En attente',         color: 'text-slate-400',   pulse: false },
+  forward:  { text: 'En déplacement',     color: 'text-emerald-400', pulse: true  },
+  avoiding: { text: 'Évitement…',         color: 'text-amber-400',   pulse: true  },
+  stuck:    { text: 'Coincé — recul…',    color: 'text-orange-400',  pulse: true  },
 }
 
 function DistanceBar({ cm, label }: { cm: number | null | undefined; label: string }) {
@@ -50,12 +51,16 @@ export default function Patrols() {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(conn.robotIp)
 
-  const patrolActive = conn.lastStatus?.patrol_active ?? false
-  const patrolState  = conn.lastStatus?.patrol_state ?? 'idle'
-  const frontCm      = conn.lastStatus?.front_cm
-  const obstacle     = conn.lastStatus?.obstacle_front ?? false
-  const stateInfo    = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
-  const isConnected  = conn.status === 'connected'
+  const patrolActive      = conn.lastStatus?.patrol_active ?? false
+  const patrolState       = conn.lastStatus?.patrol_state ?? 'idle'
+  const frontCm           = conn.lastStatus?.front_cm
+  const obstacle          = conn.lastStatus?.obstacle_front ?? false
+  const visionObstacle    = conn.lastStatus?.vision_obstacle ?? false
+  const visionConfidence  = conn.lastStatus?.vision_confidence ?? 0
+  const visionAvailable   = conn.lastStatus?.vision_available ?? false
+  const visionMethod      = conn.lastStatus?.vision_method ?? 'none'
+  const stateInfo         = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
+  const isConnected       = conn.status === 'connected'
 
   useEffect(() => {
     setStreamUnavailable(false)
@@ -157,19 +162,35 @@ export default function Patrols() {
 
               {/* Patrol state overlay */}
               {patrolActive && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-blue-900/90 border border-blue-500 rounded-xl px-4 py-2 backdrop-blur-sm">
-                  <Bot size={14} className="text-blue-300" />
-                  <span className="text-blue-200 text-xs font-bold">
-                    {patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE ACTIVE'}
+                <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl px-4 py-2 backdrop-blur-sm border ${
+                  patrolState === 'stuck'
+                    ? 'bg-orange-900/90 border-orange-500'
+                    : patrolState === 'avoiding'
+                      ? 'bg-amber-900/90 border-amber-500'
+                      : 'bg-blue-900/90 border-blue-500'
+                }`}>
+                  <Bot size={14} className={patrolState === 'stuck' ? 'text-orange-300' : patrolState === 'avoiding' ? 'text-amber-300' : 'text-blue-300'} />
+                  <span className={`text-xs font-bold ${patrolState === 'stuck' ? 'text-orange-200' : patrolState === 'avoiding' ? 'text-amber-200' : 'text-blue-200'}`}>
+                    {patrolState === 'stuck' ? '⚠ COINCÉ — RECUL EN COURS' : patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE ACTIVE'}
                   </span>
                 </div>
               )}
 
               {/* Obstacle overlay */}
-              {obstacle && (
+              {(obstacle || visionObstacle) && (
                 <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
-                  <Radar size={14} className="text-red-400" />
-                  <span className="text-red-200 text-xs font-bold">OBSTACLE — {frontCm?.toFixed(0)} cm</span>
+                  {visionObstacle && !obstacle ? (
+                    <Eye size={14} className="text-red-400" />
+                  ) : (
+                    <Radar size={14} className="text-red-400" />
+                  )}
+                  <span className="text-red-200 text-xs font-bold">
+                    {obstacle
+                      ? `OBSTACLE — ${frontCm?.toFixed(0)} cm`
+                      : visionMethod === 'uniform'
+                        ? 'MUR / MEUBLE DÉTECTÉ'
+                        : 'OBSTACLE VISUEL'}
+                  </span>
                 </div>
               )}
 
@@ -233,9 +254,10 @@ export default function Patrols() {
                 <div className="mt-3 space-y-2 text-xs text-slate-400 border border-slate-800 rounded-lg px-4 py-3">
                   <p className="text-slate-500">Ces paramètres se configurent dans <code className="text-blue-400">config.yaml</code> sur le Pi :</p>
                   <pre className="text-slate-400 bg-slate-900 rounded p-2 text-[11px] leading-relaxed">{`patrol:
-  speed: 0.3         # 0-1
-  obstacle_cm: 40    # cm
-  turn_duration: 0.8 # s`}</pre>
+  speed: 0.3           # 0-1
+  obstacle_cm: 40      # cm
+  turn_duration: 0.8   # s (évitement normal)
+  stuck_timeout: 3.5   # s avant recul (angle mort)`}</pre>
                 </div>
               )}
             </div>
@@ -244,7 +266,7 @@ export default function Patrols() {
             <div className="rounded-xl border border-slate-800 p-5" style={{ background: '#0f1629' }}>
               <div className="flex items-center gap-2 mb-4">
                 <Radar size={16} className="text-blue-400" />
-                <h2 className="text-white font-semibold text-sm">Capteurs ultrason</h2>
+                <h2 className="text-white font-semibold text-sm">Détection d'obstacles</h2>
               </div>
 
               {conn.lastStatus?.sensor_error ? (
@@ -256,14 +278,53 @@ export default function Patrols() {
                 <p className="text-xs text-slate-600 mb-4">Données indisponibles</p>
               ) : null}
 
-              <div className="space-y-5">
+              {/* Ultrason */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <Radar size={11} className="text-slate-500" />
+                <span className="text-xs text-slate-500 uppercase tracking-wide">Ultrason</span>
+              </div>
+              <div className="space-y-3 mb-4">
                 <DistanceBar cm={conn.lastStatus?.front_cm} label="Avant" />
                 <DistanceBar cm={conn.lastStatus?.rear_cm}  label="Arrière" />
               </div>
 
+              {/* Vision */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <Eye size={11} className="text-slate-500" />
+                <span className="text-xs text-slate-500 uppercase tracking-wide">Caméra (vision)</span>
+                {isConnected && !visionAvailable && (
+                  <span className="ml-auto text-xs text-amber-500/70">OpenCV absent</span>
+                )}
+              </div>
+              <div className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs mb-4 ${
+                visionObstacle
+                  ? 'bg-red-950/50 border-red-700/50 text-red-300'
+                  : visionAvailable
+                    ? 'bg-slate-800/40 border-slate-700 text-slate-400'
+                    : 'bg-slate-800/20 border-slate-800 text-slate-600'
+              }`}>
+                <span>
+                  {visionObstacle
+                    ? visionMethod === 'uniform'
+                      ? '⚠ Surface lisse détectée'
+                      : '⚠ Obstacle visuel'
+                    : visionAvailable
+                      ? 'Voie dégagée'
+                      : 'Non disponible'}
+                </span>
+                {visionAvailable && visionObstacle && (
+                  <span className="font-mono text-slate-500 ml-2 text-[10px] uppercase tracking-wide">
+                    {visionMethod === 'uniform' ? 'mur/meuble' : 'contours'}
+                  </span>
+                )}
+                {visionAvailable && (
+                  <span className="font-mono text-slate-500">{Math.round(visionConfidence * 100)}%</span>
+                )}
+              </div>
+
               {/* Combined obstacle */}
               {conn.lastStatus && (
-                <div className={`mt-4 px-3 py-2 rounded-lg text-center text-xs font-bold transition-colors ${
+                <div className={`px-3 py-2 rounded-lg text-center text-xs font-bold transition-colors ${
                   conn.lastStatus.obstacle
                     ? 'bg-red-950/60 border border-red-700/50 text-red-400 animate-pulse'
                     : 'bg-slate-800/40 border border-slate-700 text-slate-500'

@@ -7,8 +7,9 @@ import io
 import logging
 import pathlib
 import sys
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import yaml
 
@@ -96,8 +97,83 @@ def _generate_test_frame(width: int, height: int) -> bytes:
 
 
 _camera_instance: object | None = None
-_camera_lock = __import__("threading").Lock()
+_camera_lock = threading.Lock()
 _camera_clients = 0
+
+# ---------------------------------------------------------------------------
+# Partage de frames avec le détecteur vision
+# ---------------------------------------------------------------------------
+
+_frame_callbacks: list[Callable[[bytes], None]] = []
+_frame_counter = 0
+_VISION_SAMPLE_EVERY = 5  # 1 frame sur 5 envoyée au détecteur vision (~5fps à 24fps)
+
+# Thread de capture autonome pour la vision (actif quand aucun client MJPEG)
+_vision_producer_thread: threading.Thread | None = None
+_vision_producer_stop = threading.Event()
+_VISION_STANDALONE_FPS = 5  # fps de capture en mode autonome
+
+
+def register_frame_callback(cb: Callable[[bytes], None]) -> None:
+    """Enregistre un callback appelé avec les bytes JPEG toutes les N frames."""
+    _frame_callbacks.append(cb)
+
+
+def unregister_frame_callback(cb: Callable[[bytes], None]) -> None:
+    if cb in _frame_callbacks:
+        _frame_callbacks.remove(cb)
+
+
+def start_standalone_vision_producer() -> None:
+    """Démarre un thread de capture bas-débit pour la vision quand aucun client MJPEG."""
+    global _vision_producer_thread
+    if _vision_producer_thread and _vision_producer_thread.is_alive():
+        return
+    _vision_producer_stop.clear()
+    _vision_producer_thread = threading.Thread(
+        target=_standalone_frame_loop,
+        daemon=True,
+        name="vision-frame-producer",
+    )
+    _vision_producer_thread.start()
+    log.info("Vision frame producer démarré (%d fps)", _VISION_STANDALONE_FPS)
+
+
+def stop_standalone_vision_producer() -> None:
+    """Arrête le thread de capture autonome."""
+    _vision_producer_stop.set()
+    if _vision_producer_thread:
+        _vision_producer_thread.join(timeout=2.0)
+    log.info("Vision frame producer arrêté")
+
+
+def _standalone_frame_loop() -> None:
+    """
+    Capture des frames à bas débit pour le détecteur vision.
+    Ne capture que si aucun client MJPEG n'est connecté (ils gèrent déjà les callbacks).
+    """
+    delay = 1.0 / _VISION_STANDALONE_FPS
+    width, height, _ = _camera_settings()
+
+    while not _vision_producer_stop.is_set():
+        # Si des clients MJPEG sont actifs, les callbacks sont déjà appelés via eux
+        if _camera_clients > 0 or not _frame_callbacks or Picamera2 is None:
+            time.sleep(delay)
+            continue
+        try:
+            with _camera_lock:
+                cam = _get_camera(width, height, _VISION_STANDALONE_FPS)
+            buf = io.BytesIO()
+            cam.capture_file(buf, format="jpeg")  # type: ignore[union-attr]
+            frame = buf.getvalue()
+            for cb in list(_frame_callbacks):
+                try:
+                    cb(frame)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Standalone vision capture error: %s", exc)
+        time.sleep(delay)
 
 
 def _get_camera(width: int, height: int, framerate: int) -> object:
@@ -144,7 +220,18 @@ def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]
             try:
                 buffer = io.BytesIO()
                 camera.capture_file(buffer, format="jpeg")  # type: ignore[union-attr]
-                yield _multipart_frame(buffer.getvalue())
+                frame_bytes = buffer.getvalue()
+                yield _multipart_frame(frame_bytes)
+
+                # Partage avec le détecteur vision (toutes les N frames)
+                global _frame_counter
+                _frame_counter += 1
+                if _frame_callbacks and _frame_counter % _VISION_SAMPLE_EVERY == 0:
+                    for cb in _frame_callbacks:
+                        try:
+                            cb(frame_bytes)
+                        except Exception:  # noqa: BLE001
+                            pass
             except GeneratorExit:
                 raise
             except Exception as exc:
