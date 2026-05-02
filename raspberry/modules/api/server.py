@@ -153,10 +153,14 @@ async def lifespan(app: FastAPI):
 
 
 def _obstacle_front() -> bool:
-    """Obstacle devant ? Combine ultrason ET détection vision."""
-    us = _ultrasonic.reading.front.obstacle if _ultrasonic else False
-    vis = _vision.obstacle if _vision else False
-    return us or vis
+    """
+    Obstacle devant pour la sécurité anti-collision (pilotage manuel).
+
+    On se base uniquement sur l'ultrason : fiable, seuil calibré (obstacle_threshold_cm).
+    La vision n'est PAS utilisée ici — trop de faux positifs (sol, reflets, zones G/D)
+    qui bloqueraient l'avance à tort. La vision est gérée dans la logique de patrouille.
+    """
+    return _ultrasonic.reading.front.obstacle if _ultrasonic else False
 
 
 app = FastAPI(title="RaspRover Control API", version="1.0.0", lifespan=lifespan)
