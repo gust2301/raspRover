@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
-  Bot, Radar, Wifi, WifiOff, Settings2, Play, Square,
-  ChevronDown, ChevronUp, AlertTriangle, Eye,
+  Bot, Radar, Play, Square,
+  ChevronDown, ChevronUp, AlertTriangle, Eye, Camera, CameraOff,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
+import { ConnectionBar } from '../components/ConnectionBar'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,9 +48,9 @@ export default function Patrols() {
   const conn = useSharedRobotConnection()
   const streamUrl = getRobotStreamUrl(conn.robotIp)
   const [streamUnavailable, setStreamUnavailable] = useState(false)
+  const [streamKey, setStreamKey] = useState(0)
+  const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showSettings, setShowSettings] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(conn.robotIp)
 
   const patrolActive      = conn.lastStatus?.patrol_active ?? false
   const patrolState       = conn.lastStatus?.patrol_state ?? 'idle'
@@ -67,99 +68,93 @@ export default function Patrols() {
 
   useEffect(() => {
     setStreamUnavailable(false)
+    setStreamKey(k => k + 1)
+    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
   }, [conn.robotIp, conn.status])
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-0" style={{ background: '#070d1a' }}>
 
       {/* ---- Barre de connexion ---- */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 flex-shrink-0" style={{ background: '#0a0f1e' }}>
-        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isConnected ? 'bg-emerald-400 animate-pulse' : conn.status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'}`} />
-        <span className={`text-sm font-medium ${isConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
-          {isConnected ? 'Connecté' : conn.status === 'connecting' ? 'Connexion…' : 'Déconnecté'}
-        </span>
-        {isConnected && conn.latencyMs !== null && (
-          <span className="text-xs text-slate-500 font-mono">{conn.latencyMs} ms</span>
-        )}
-        <div className="flex-1" />
-
-        {/* IP editor */}
-        {editing ? (
-          <div className="flex items-center gap-2">
-            <input
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { conn.setRobotIp(draft); setEditing(false) } }}
-              className="bg-slate-800 border border-slate-600 text-white text-sm px-3 py-1 rounded-lg font-mono w-44 focus:outline-none focus:border-blue-500"
-              autoFocus
-            />
-            <button onClick={() => { conn.setRobotIp(draft); setEditing(false) }} className="text-xs text-blue-400 px-2">OK</button>
-            <button onClick={() => setEditing(false)} className="text-xs text-slate-500 px-1">✕</button>
-          </div>
-        ) : (
-          <button
-            onClick={() => { setDraft(conn.robotIp); setEditing(true) }}
-            className="flex items-center gap-2 text-slate-400 hover:text-slate-200 text-sm font-mono px-3 py-1 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors"
-          >
-            <Settings2 size={13} />
-            <span className="truncate max-w-[160px]">{conn.robotIp}</span>
-          </button>
-        )}
-
-        {isConnected ? (
-          <button onClick={conn.disconnect} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700">
-            <WifiOff size={14} className="inline mr-1.5" />Déconnecter
-          </button>
-        ) : (
-          <button onClick={conn.connect} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500">
-            <Wifi size={14} className="inline mr-1.5" />Connecter
-          </button>
-        )}
-      </div>
+      <ConnectionBar
+        status={conn.status}
+        robotIp={conn.robotIp}
+        setRobotIp={conn.setRobotIp}
+        connect={conn.connect}
+        disconnect={conn.disconnect}
+        latencyMs={conn.latencyMs}
+        errorMessage={conn.errorMessage}
+      />
 
       {/* ---- Corps ---- */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
 
           {/* Video feed */}
-          <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800">
-              <h2 className="text-white font-semibold text-sm">Flux vidéo — Patrouille</h2>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
-                <span className={`text-xs ${isConnected ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {isConnected ? 'En direct' : 'Hors ligne'}
-                </span>
-              </div>
+          <div className="rounded-xl border border-slate-800 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
+              <span className="text-sm font-medium text-slate-300">Flux caméra — Patrouille</span>
+              {isConnected && (
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-xs text-red-400">EN DIRECT</span>
+                </div>
+              )}
             </div>
 
-            <div className="relative aspect-video bg-slate-950 flex items-center justify-center overflow-hidden">
-              {/* Grid background */}
-              <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, #0a0f1e 0%, #111827 60%, #1e293b 100%)' }}>
-                <svg className="absolute inset-0 w-full h-full opacity-10" xmlns="http://www.w3.org/2000/svg">
-                  <defs>
-                    <pattern id="pg" width="60" height="60" patternUnits="userSpaceOnUse">
-                      <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#3b82f6" strokeWidth="0.5" />
-                    </pattern>
-                  </defs>
-                  <rect width="100%" height="100%" fill="url(#pg)" />
-                </svg>
-              </div>
+            <div className="relative aspect-video flex items-center justify-center overflow-hidden" style={{ background: '#040810' }}>
+              {/* Sci-fi grid */}
+              <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none">
+                <defs>
+                  <pattern id="pgrid-patrol" width="50" height="50" patternUnits="userSpaceOnUse">
+                    <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#3b82f6" strokeWidth="0.5" />
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#pgrid-patrol)" />
+              </svg>
+              {/* Scan lines */}
+              <div className="absolute inset-0 pointer-events-none opacity-[0.03]"
+                style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, #3b82f6 3px, #3b82f6 4px)' }} />
 
-              {isConnected && !streamUnavailable && (
+              {/* Corner brackets */}
+              {(['top-4 left-4 border-t-2 border-l-2 rounded-tl', 'top-4 right-4 border-t-2 border-r-2 rounded-tr',
+                'bottom-4 left-4 border-b-2 border-l-2 rounded-bl', 'bottom-4 right-4 border-b-2 border-r-2 rounded-br'] as const).map((cls, i) => (
+                <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
+              ))}
+
+              {isConnected && (
                 <img
-                  key={streamUrl}
+                  key={`${streamUrl}-${streamKey}`}
                   src={streamUrl}
                   alt="Camera feed"
-                  className="absolute inset-0 w-full h-full object-contain bg-black z-10"
-                  onLoad={() => setStreamUnavailable(false)}
-                  onError={() => setStreamUnavailable(true)}
+                  className={`w-full h-full object-contain bg-black z-10 ${streamUnavailable ? 'hidden' : ''}`}
+                  onLoad={() => {
+                    setStreamUnavailable(false)
+                    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                  }}
+                  onError={() => {
+                    setStreamUnavailable(true)
+                    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                    streamRetryRef.current = setTimeout(() => {
+                      setStreamUnavailable(false)
+                      setStreamKey(k => k + 1)
+                    }, 4000)
+                  }}
                 />
               )}
 
               {(!isConnected || streamUnavailable) && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 text-slate-600 text-xs opacity-40">
-                  {isConnected ? 'Flux indisponible' : 'Connectez-vous pour voir le flux'}
+                <div className="text-center z-10 px-6">
+                  {streamUnavailable ? (
+                    <CameraOff size={48} className="mx-auto mb-3 text-slate-700" />
+                  ) : (
+                    <Camera size={48} className="mx-auto mb-3 text-slate-700" />
+                  )}
+                  <p className="text-slate-600 text-sm">
+                    {!isConnected
+                      ? 'Connecte-toi au robot pour voir le flux'
+                      : 'Flux caméra indisponible'}
+                  </p>
                 </div>
               )}
 
@@ -202,12 +197,6 @@ export default function Patrols() {
                   </span>
                 </div>
               )}
-
-              {/* Corner decorations */}
-              <div className="absolute top-3 left-3 w-5 h-5 border-t-2 border-l-2 border-blue-500/50 rounded-tl z-20" />
-              <div className="absolute top-3 right-3 w-5 h-5 border-t-2 border-r-2 border-blue-500/50 rounded-tr z-20" />
-              <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-blue-500/50 rounded-bl z-20" />
-              <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-blue-500/50 rounded-br z-20" />
             </div>
           </div>
 
