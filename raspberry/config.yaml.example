@@ -75,3 +75,10 @@ sensors:
                               # Pour obstacles lisses : murs blancs, meubles, portes…
                               # Réduire (ex: 12) si faux positifs sur sol uniforme
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
+
+patrol:
+  speed: 0.3           # Vitesse d'avance (0-1)
+  obstacle_cm: 40      # Distance en cm déclenchant l'évitement (ultrason)
+  turn_duration: 0.8   # Durée rotation évitement normal (secondes)
+  stuck_timeout: 3.5   # Secondes en FORWARD sans obstacle détecté → robot coincé (angle mort)
+                       # Réduire (ex: 2.0) dans les espaces étroits, augmenter dans les grands espaces

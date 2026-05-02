@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI):
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
         turn_duration=float(patrol_cfg.get("turn_duration", 0.8)),
+        stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
     )
 
     _motors.stop()

@@ -11,9 +11,10 @@ import { getRobotStreamUrl } from '../lib/robotTransport'
 // ---------------------------------------------------------------------------
 
 const STATE_LABEL: Record<string, { text: string; color: string; pulse: boolean }> = {
-  idle:     { text: 'En attente',       color: 'text-slate-400',   pulse: false },
-  forward:  { text: 'En déplacement',   color: 'text-emerald-400', pulse: true  },
-  avoiding: { text: 'Évitement…',       color: 'text-amber-400',   pulse: true  },
+  idle:     { text: 'En attente',         color: 'text-slate-400',   pulse: false },
+  forward:  { text: 'En déplacement',     color: 'text-emerald-400', pulse: true  },
+  avoiding: { text: 'Évitement…',         color: 'text-amber-400',   pulse: true  },
+  stuck:    { text: 'Coincé — recul…',    color: 'text-orange-400',  pulse: true  },
 }
 
 function DistanceBar({ cm, label }: { cm: number | null | undefined; label: string }) {
@@ -161,10 +162,16 @@ export default function Patrols() {
 
               {/* Patrol state overlay */}
               {patrolActive && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-blue-900/90 border border-blue-500 rounded-xl px-4 py-2 backdrop-blur-sm">
-                  <Bot size={14} className="text-blue-300" />
-                  <span className="text-blue-200 text-xs font-bold">
-                    {patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE ACTIVE'}
+                <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl px-4 py-2 backdrop-blur-sm border ${
+                  patrolState === 'stuck'
+                    ? 'bg-orange-900/90 border-orange-500'
+                    : patrolState === 'avoiding'
+                      ? 'bg-amber-900/90 border-amber-500'
+                      : 'bg-blue-900/90 border-blue-500'
+                }`}>
+                  <Bot size={14} className={patrolState === 'stuck' ? 'text-orange-300' : patrolState === 'avoiding' ? 'text-amber-300' : 'text-blue-300'} />
+                  <span className={`text-xs font-bold ${patrolState === 'stuck' ? 'text-orange-200' : patrolState === 'avoiding' ? 'text-amber-200' : 'text-blue-200'}`}>
+                    {patrolState === 'stuck' ? '⚠ COINCÉ — RECUL EN COURS' : patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE ACTIVE'}
                   </span>
                 </div>
               )}
@@ -247,9 +254,10 @@ export default function Patrols() {
                 <div className="mt-3 space-y-2 text-xs text-slate-400 border border-slate-800 rounded-lg px-4 py-3">
                   <p className="text-slate-500">Ces paramètres se configurent dans <code className="text-blue-400">config.yaml</code> sur le Pi :</p>
                   <pre className="text-slate-400 bg-slate-900 rounded p-2 text-[11px] leading-relaxed">{`patrol:
-  speed: 0.3         # 0-1
-  obstacle_cm: 40    # cm
-  turn_duration: 0.8 # s`}</pre>
+  speed: 0.3           # 0-1
+  obstacle_cm: 40      # cm
+  turn_duration: 0.8   # s (évitement normal)
+  stuck_timeout: 3.5   # s avant recul (angle mort)`}</pre>
                 </div>
               )}
             </div>
