@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from enum import Enum
 
@@ -40,7 +41,8 @@ _OBSTACLE_CM = 40.0  # seuil ultrason (cm)
 _POLL = 0.05  # intervalle de surveillance pendant l'avance (s)
 
 _TURN_LATERAL = 0.75  # rotation pour obstacle latéral (s)
-_TURN_FRONT = 0.90  # rotation pour obstacle frontal (s)
+_TURN_FRONT = 0.90  # rotation pour obstacle frontal (s) — durée de base
+_TURN_FRONT_JITTER = 0.35  # ±variation aléatoire (s) — brise la périodicité
 _REVERSE_FRONT = 0.4  # recul avant rotation frontale (s)
 
 _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
@@ -57,6 +59,9 @@ _VISION_WARMUP = 1.5  # s avant d'activer la vision après FORWARD (vote stabili
 # si le robot tourne de ~90° en 0.90 s → 100 °/s. Ajuster selon le modèle.
 _TURN_DEG_PER_SEC = 100.0  # °/s à _TURN_SPEED (approximation, calibrable)
 _HEADING_HISTORY_SIZE = 8  # nombre de caps récents mémorisés
+# Seuil d'égalité : si les deux candidats ont un score < _TIE_THRESHOLD degrés
+# d'écart, on choisit aléatoirement pour briser les boucles périodiques.
+_TIE_THRESHOLD = 20.0  # °
 
 # Détection de blocage → scan pan-tilt
 _MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (s)
@@ -334,16 +339,20 @@ class PatrolController:
         """
         Choisit la direction de rotation qui explore le cap le moins visité.
 
-        Score d'un cap candidat = distance angulaire minimale à tous les caps
-        déjà mémorisés. On choisit le score le plus élevé (cap le plus nouveau).
-        En cas d'égalité, préfère la droite (convention arbitraire stable).
+        Score = distance angulaire minimale aux caps déjà mémorisés.
+        On maximise ce score (cap candidat le plus éloigné de l'historique).
+
+        Si les deux candidats sont proches en score (< _TIE_THRESHOLD°),
+        on choisit aléatoirement pour briser les boucles périodiques
+        (sinon le robot tourne toujours du même côté et fait des cercles).
         """
         delta = _TURN_DEG_PER_SEC * duration
         h_right = (self._heading + delta) % 360.0
         h_left = (self._heading - delta) % 360.0
 
         if not self._heading_history:
-            return Direction.RIGHT  # premier évitement : droite par défaut
+            # Premier évitement : choix aléatoire pour ne pas créer de biais
+            return random.choice([Direction.LEFT, Direction.RIGHT])
 
         def score(h: float) -> float:
             return min(_angular_dist(h, prev) for prev in self._heading_history)
@@ -351,17 +360,22 @@ class PatrolController:
         s_right = score(h_right)
         s_left = score(h_left)
 
+        # Bris d'égalité aléatoire quand les scores sont trop proches
+        if abs(s_right - s_left) < _TIE_THRESHOLD:
+            chosen = random.choice([Direction.LEFT, Direction.RIGHT])
+        else:
+            chosen = Direction.RIGHT if s_right > s_left else Direction.LEFT
+
         log.info(
-            "Patrol heading: cap=%.0f° | →droite %.0f°(score=%.0f°) | →gauche %.0f°(score=%.0f°) | choix=%s",
+            "Patrol heading: cap=%.0f° | →droite %.0f°(%.0f°) →gauche %.0f°(%.0f°) | %s",
             self._heading,
             h_right,
             s_right,
             h_left,
             s_left,
-            "droite" if s_right >= s_left else "gauche",
+            chosen.value,
         )
-
-        return Direction.RIGHT if s_right >= s_left else Direction.LEFT
+        return chosen
 
     # ------------------------------------------------------------------
     # Évitement directionnel
@@ -373,9 +387,12 @@ class PatrolController:
         elif obstacle.startswith("vision:right"):
             await self._turn(loop, Direction.LEFT, _TURN_LATERAL, "obstacle droite → gauche")
         else:
-            # Obstacle frontal : choisit la direction qui explore du nouveau terrain
-            turn_dir = self._best_turn_dir(Direction, _TURN_FRONT)
-            await self._reverse_and_turn(loop, Direction, turn_dir, obstacle)
+            # Obstacle frontal : direction intelligente + durée variée pour briser
+            # toute périodicité (évite que le robot refasse exactement le même chemin)
+            jitter = random.uniform(-_TURN_FRONT_JITTER, _TURN_FRONT_JITTER)
+            duration = max(0.4, _TURN_FRONT + jitter)
+            turn_dir = self._best_turn_dir(Direction, duration)
+            await self._reverse_and_turn(loop, Direction, turn_dir, duration, obstacle)
 
     async def _turn(
         self,
@@ -398,13 +415,14 @@ class PatrolController:
         loop: asyncio.AbstractEventLoop,
         Direction,
         turn_dir,
+        duration: float,
         reason: str,
     ) -> None:
         log.info(
             "Patrol avoid: recul %.2fs + rotation %s %.2fs | %s",
             _REVERSE_FRONT,
             turn_dir.value,
-            _TURN_FRONT,
+            duration,
             reason,
         )
         spd = self.speed
@@ -417,10 +435,10 @@ class PatrolController:
         await loop.run_in_executor(
             None, lambda d=turn_dir: self._motors.from_direction(d, _TURN_SPEED)
         )
-        await asyncio.sleep(_TURN_FRONT)
+        await asyncio.sleep(duration)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
-        self._apply_turn(turn_dir, _TURN_FRONT)
+        self._apply_turn(turn_dir, duration)
 
     # ------------------------------------------------------------------
     # Scan pan-tilt (uniquement en cas de blocage)
