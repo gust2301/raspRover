@@ -44,11 +44,11 @@ _REVERSE_FRONT = 0.4  # recul avant rotation frontale (s)
 _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
 
 # Détection de blocage → scan pan-tilt
-_MIN_FREE_SECS = 1.5        # seuil de « progression réelle » (secondes de libre)
-_STUCK_SCAN_THRESHOLD = 3   # évitements rapides consécutifs avant scan pan-tilt
-_SCAN_ANGLES = (-50, 0, 50) # angles pan pour le scan (°) : gauche / centre / droite
-_SCAN_SETTLE = 0.6          # temps de stabilisation servo avant lecture (s)
-_SCAN_READ_SECS = 0.5       # durée de lecture des capteurs par position (s)
+_MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (secondes de libre)
+_STUCK_SCAN_THRESHOLD = 3  # évitements rapides consécutifs avant scan pan-tilt
+_SCAN_ANGLES = (-50, 0, 50)  # angles pan pour le scan (°) : gauche / centre / droite
+_SCAN_SETTLE = 0.6  # temps de stabilisation servo avant lecture (s)
+_SCAN_READ_SECS = 0.5  # durée de lecture des capteurs par position (s)
 
 
 # ---------------------------------------------------------------------------
