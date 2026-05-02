@@ -73,7 +73,7 @@ export default function Patrols() {
   }, [conn.robotIp, conn.status])
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-0" style={{ background: '#070d1a' }}>
+    <div className="-m-3 sm:-m-4 lg:-m-6 flex flex-col min-h-full" style={{ background: '#070d1a' }}>
 
       {/* ---- Barre de connexion ---- */}
       <ConnectionBar
@@ -86,122 +86,125 @@ export default function Patrols() {
         errorMessage={conn.errorMessage}
       />
 
-      {/* ---- Corps ---- */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
+      {/* ---- Corps : caméra gauche + contrôles droite (identique à Pilotage) ---- */}
+      <div className="flex flex-col xl:flex-row flex-1 overflow-hidden">
 
-          {/* Video feed */}
-          <div className="rounded-xl border border-slate-800 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-800" style={{ background: '#0a0f1e' }}>
-              <span className="text-sm font-medium text-slate-300">Flux caméra — Patrouille</span>
-              {isConnected && (
-                <div className="flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-xs text-red-400">EN DIRECT</span>
-                </div>
-              )}
-            </div>
-
-            <div className="relative aspect-video flex items-center justify-center overflow-hidden" style={{ background: '#040810' }}>
-              {/* Sci-fi grid */}
-              <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none">
-                <defs>
-                  <pattern id="pgrid-patrol" width="50" height="50" patternUnits="userSpaceOnUse">
-                    <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#3b82f6" strokeWidth="0.5" />
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#pgrid-patrol)" />
-              </svg>
-              {/* Scan lines */}
-              <div className="absolute inset-0 pointer-events-none opacity-[0.03]"
-                style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, #3b82f6 3px, #3b82f6 4px)' }} />
-
-              {/* Corner brackets */}
-              {(['top-4 left-4 border-t-2 border-l-2 rounded-tl', 'top-4 right-4 border-t-2 border-r-2 rounded-tr',
-                'bottom-4 left-4 border-b-2 border-l-2 rounded-bl', 'bottom-4 right-4 border-b-2 border-r-2 rounded-br'] as const).map((cls, i) => (
-                <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
-              ))}
-
-              {isConnected && (
-                <img
-                  key={`${streamUrl}-${streamKey}`}
-                  src={streamUrl}
-                  alt="Camera feed"
-                  className={`w-full h-full object-contain bg-black z-10 ${streamUnavailable ? 'hidden' : ''}`}
-                  onLoad={() => {
-                    setStreamUnavailable(false)
-                    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
-                  }}
-                  onError={() => {
-                    setStreamUnavailable(true)
-                    if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
-                    streamRetryRef.current = setTimeout(() => {
-                      setStreamUnavailable(false)
-                      setStreamKey(k => k + 1)
-                    }, 4000)
-                  }}
-                />
-              )}
-
-              {(!isConnected || streamUnavailable) && (
-                <div className="text-center z-10 px-6">
-                  {streamUnavailable ? (
-                    <CameraOff size={48} className="mx-auto mb-3 text-slate-700" />
-                  ) : (
-                    <Camera size={48} className="mx-auto mb-3 text-slate-700" />
-                  )}
-                  <p className="text-slate-600 text-sm">
-                    {!isConnected
-                      ? 'Connecte-toi au robot pour voir le flux'
-                      : 'Flux caméra indisponible'}
-                  </p>
-                </div>
-              )}
-
-              {/* Patrol state overlay */}
-              {patrolActive && (
-                <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl px-4 py-2 backdrop-blur-sm border ${
-                  patrolState === 'stuck'    ? 'bg-orange-900/90 border-orange-500' :
-                  patrolState === 'avoiding' ? 'bg-amber-900/90 border-amber-500'  :
-                                               'bg-blue-900/90 border-blue-500'
-                }`}>
-                  <Bot size={14} className={
-                    patrolState === 'stuck'    ? 'text-orange-300' :
-                    patrolState === 'avoiding' ? 'text-amber-300'  : 'text-blue-300'
-                  } />
-                  <span className={`text-xs font-bold ${
-                    patrolState === 'stuck'    ? 'text-orange-200' :
-                    patrolState === 'avoiding' ? 'text-amber-200'  : 'text-blue-200'
-                  }`}>
-                    {patrolState === 'stuck'    ? '⚠ SCAN DÉBLOCAGE…'    :
-                     patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' :
-                                                  '▶ PATROUILLE ACTIVE'}
-                  </span>
-                </div>
-              )}
-
-              {/* Obstacle overlay */}
-              {(obstacle || visionObstacle) && (
-                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
-                  {visionObstacle && !obstacle ? (
-                    <Eye size={14} className="text-red-400" />
-                  ) : (
-                    <Radar size={14} className="text-red-400" />
-                  )}
-                  <span className="text-red-200 text-xs font-bold">
-                    {obstacle
-                      ? `OBSTACLE — ${frontCm?.toFixed(0)} cm`
-                      : visionMethod === 'uniform'
-                        ? 'MUR / MEUBLE DÉTECTÉ'
-                        : 'OBSTACLE VISUEL'}
-                  </span>
-                </div>
-              )}
-            </div>
+        {/* ── Caméra (flex-1, prend toute la hauteur) ── */}
+        <div className="flex-1 flex flex-col xl:border-r border-slate-800 min-w-0 min-h-[45vh] xl:min-h-0">
+          <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-800">
+            <span className="text-sm font-medium text-slate-300">Flux caméra — Patrouille</span>
+            {isConnected && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs text-red-400">EN DIRECT</span>
+              </div>
+            )}
           </div>
 
-          {/* Controls + Sensors */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div
+            className="flex-1 flex items-center justify-center relative min-h-[40vh] xl:min-h-0"
+            style={{ background: '#040810' }}
+          >
+            {/* Sci-fi grid */}
+            <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none">
+              <defs>
+                <pattern id="pgrid-patrol" width="50" height="50" patternUnits="userSpaceOnUse">
+                  <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#3b82f6" strokeWidth="0.5" />
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#pgrid-patrol)" />
+            </svg>
+            {/* Scan lines */}
+            <div className="absolute inset-0 pointer-events-none opacity-[0.03]"
+              style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, #3b82f6 3px, #3b82f6 4px)' }} />
+
+            {/* Corner brackets */}
+            {(['top-4 left-4 border-t-2 border-l-2 rounded-tl', 'top-4 right-4 border-t-2 border-r-2 rounded-tr',
+              'bottom-4 left-4 border-b-2 border-l-2 rounded-bl', 'bottom-4 right-4 border-b-2 border-r-2 rounded-br'] as const).map((cls, i) => (
+              <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
+            ))}
+
+            {isConnected && (
+              <img
+                key={`${streamUrl}-${streamKey}`}
+                src={streamUrl}
+                alt="Camera feed"
+                className={`w-full h-full object-contain bg-black z-10 ${streamUnavailable ? 'hidden' : ''}`}
+                onLoad={() => {
+                  setStreamUnavailable(false)
+                  if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                }}
+                onError={() => {
+                  setStreamUnavailable(true)
+                  if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
+                  streamRetryRef.current = setTimeout(() => {
+                    setStreamUnavailable(false)
+                    setStreamKey(k => k + 1)
+                  }, 4000)
+                }}
+              />
+            )}
+
+            {(!isConnected || streamUnavailable) && (
+              <div className="text-center z-10 px-6">
+                {streamUnavailable ? (
+                  <CameraOff size={48} className="mx-auto mb-3 text-slate-700" />
+                ) : (
+                  <Camera size={48} className="mx-auto mb-3 text-slate-700" />
+                )}
+                <p className="text-slate-600 text-sm">
+                  {!isConnected
+                    ? 'Connecte-toi au robot pour voir le flux'
+                    : 'Flux caméra indisponible'}
+                </p>
+              </div>
+            )}
+
+            {/* Patrol state overlay */}
+            {patrolActive && (
+              <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl px-4 py-2 backdrop-blur-sm border ${
+                patrolState === 'stuck'    ? 'bg-orange-900/90 border-orange-500' :
+                patrolState === 'avoiding' ? 'bg-amber-900/90 border-amber-500'  :
+                                             'bg-blue-900/90 border-blue-500'
+              }`}>
+                <Bot size={14} className={
+                  patrolState === 'stuck'    ? 'text-orange-300' :
+                  patrolState === 'avoiding' ? 'text-amber-300'  : 'text-blue-300'
+                } />
+                <span className={`text-xs font-bold ${
+                  patrolState === 'stuck'    ? 'text-orange-200' :
+                  patrolState === 'avoiding' ? 'text-amber-200'  : 'text-blue-200'
+                }`}>
+                  {patrolState === 'stuck'    ? '⚠ SCAN DÉBLOCAGE…'    :
+                   patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' :
+                                                '▶ PATROUILLE ACTIVE'}
+                </span>
+              </div>
+            )}
+
+            {/* Obstacle overlay */}
+            {(obstacle || visionObstacle) && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
+                {visionObstacle && !obstacle ? (
+                  <Eye size={14} className="text-red-400" />
+                ) : (
+                  <Radar size={14} className="text-red-400" />
+                )}
+                <span className="text-red-200 text-xs font-bold">
+                  {obstacle
+                    ? `OBSTACLE — ${frontCm?.toFixed(0)} cm`
+                    : visionMethod === 'uniform'
+                      ? 'MUR / MEUBLE DÉTECTÉ'
+                      : 'OBSTACLE VISUEL'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Contrôles droite (colonne fixe, scrollable) ── */}
+        <div className="w-full xl:w-96 flex-shrink-0 overflow-y-auto" style={{ background: '#0a0f1e' }}>
+          <div className="px-5 py-5 space-y-4">
 
             {/* Patrol controls */}
             <div className="rounded-xl border border-slate-800 p-5" style={{ background: '#0f1629' }}>
@@ -295,7 +298,6 @@ export default function Patrols() {
                   <span className="ml-auto text-xs text-amber-500/70">OpenCV absent</span>
                 )}
               </div>
-              {/* Zone bars */}
               <div className="grid grid-cols-3 gap-1.5 mb-3">
                 {([['G', visionLeft], ['C', visionCenter], ['D', visionRight]] as [string, boolean][]).map(([label, obs]) => (
                   <div key={label} className={`flex flex-col items-center py-2 rounded-lg border text-xs font-bold transition-colors ${
@@ -327,6 +329,7 @@ export default function Patrols() {
                 </div>
               )}
             </div>
+
           </div>
         </div>
       </div>
