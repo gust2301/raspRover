@@ -71,7 +71,7 @@ sensors:
                               # Nécessite : sudo apt install python3-opencv
     edge_threshold: 0.08      # Méthode A — Canny : densité d'arêtes (0-1) déclenchant "obstacle"
                               # Pour obstacles texturés : chaises, câbles, personnes…
-    uniform_std_max: 18.0     # Méthode B — Surface lisse : écart-type max du ROI
+    uniform_std_max: 28.0     # Méthode B — Surface lisse : écart-type max du ROI
                               # Pour obstacles lisses : murs blancs, meubles, portes…
                               # Réduire (ex: 12) si faux positifs sur sol uniforme
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)

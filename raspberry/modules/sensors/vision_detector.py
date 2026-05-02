@@ -52,9 +52,11 @@ _BLUR_KERNEL = (5, 5)  # noyau de flou gaussien
 # Si l'écart-type du ROI est < _UNIFORM_STD_MAX → surface lisse = obstacle potentiel
 # On split le ROI en 3 bandes horizontales et on analyse chacune séparément
 # pour éviter les faux positifs (sol qui peut être partiellement uniforme).
-_UNIFORM_STD_MAX = 18.0  # écart-type max pour considérer une surface uniforme
-_UNIFORM_BANDS = 3  # nombre de bandes verticales analysées
+_UNIFORM_STD_MAX = 28.0  # écart-type max pour considérer une surface uniforme
+_UNIFORM_BANDS = 3  # nombre de bandes horizontales analysées
 _UNIFORM_BAND_THRESH = 2  # nombre de bandes uniformes pour déclencher obstacle
+# Luminosité minimale pour le critère uniforme (évite de confondre mur blanc et sol sombre)
+_UNIFORM_MEAN_MIN = 130  # mean >= 130 → surface suffisamment claire
 
 
 # ---------------------------------------------------------------------------
@@ -239,14 +241,27 @@ class VisionObstacleDetector:
                 y1 = y0 + band_h if i < _UNIFORM_BANDS - 1 else roi_h
                 band = roi[y0:y1, :]
                 std = float(np.std(band))
-                if std < self._uniform_std_max:
+                mean = float(np.mean(band))
+                # Surface uniforme ET suffisamment claire (évite sol sombre)
+                if std < self._uniform_std_max and mean >= _UNIFORM_MEAN_MIN:
                     uniform_count += 1
 
             if uniform_count >= _UNIFORM_BAND_THRESH:
                 # Confiance proportionnelle : plus de bandes uniformes = plus sûr
                 confidence = uniform_count / _UNIFORM_BANDS
+                log.debug(
+                    "Vision [uniform] obstacle=True bands=%d/%d",
+                    uniform_count,
+                    _UNIFORM_BANDS,
+                )
                 return True, confidence, "uniform"
 
+            log.debug(
+                "Vision clear — canny=%.3f uniform_bands=%d/%d",
+                density,
+                uniform_count,
+                _UNIFORM_BANDS,
+            )
             return False, density, "none"
 
         except Exception as exc:  # noqa: BLE001

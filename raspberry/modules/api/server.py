@@ -21,7 +21,13 @@ from modules.control.motor_controller import Direction
 from modules.control.patrol import PatrolController
 from modules.sensors import UltrasonicSensor, VisionObstacleDetector
 
-from .camera import generate_frames, register_frame_callback, unregister_frame_callback
+from .camera import (
+    generate_frames,
+    register_frame_callback,
+    start_standalone_vision_producer,
+    stop_standalone_vision_producer,
+    unregister_frame_callback,
+)
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +109,7 @@ async def lifespan(app: FastAPI):
         )
         _vision.start()
         register_frame_callback(_vision.push_frame)
+        start_standalone_vision_producer()
         log.info("VisionObstacleDetector démarré")
     else:
         log.info("Détecteur vision désactivé (sensors.vision.enabled: false)")
@@ -129,6 +136,7 @@ async def lifespan(app: FastAPI):
         loop = asyncio.get_event_loop()
         await _patrol.stop(loop)
     if _vision:
+        stop_standalone_vision_producer()
         unregister_frame_callback(_vision.push_frame)
         _vision.stop()
     if _ultrasonic:
