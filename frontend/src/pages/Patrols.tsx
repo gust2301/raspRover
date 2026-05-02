@@ -168,22 +168,18 @@ export default function Patrols() {
                 <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl px-4 py-2 backdrop-blur-sm border ${
                   patrolState === 'stuck'    ? 'bg-orange-900/90 border-orange-500' :
                   patrolState === 'avoiding' ? 'bg-amber-900/90 border-amber-500'  :
-                  patrolState === 'scanning' ? 'bg-indigo-900/90 border-indigo-500' :
                                                'bg-blue-900/90 border-blue-500'
                 }`}>
                   <Bot size={14} className={
-                    patrolState === 'stuck' ? 'text-orange-300' :
-                    patrolState === 'avoiding' ? 'text-amber-300' :
-                    patrolState === 'scanning' ? 'text-indigo-300' : 'text-blue-300'
+                    patrolState === 'stuck'    ? 'text-orange-300' :
+                    patrolState === 'avoiding' ? 'text-amber-300'  : 'text-blue-300'
                   } />
                   <span className={`text-xs font-bold ${
-                    patrolState === 'stuck' ? 'text-orange-200' :
-                    patrolState === 'avoiding' ? 'text-amber-200' :
-                    patrolState === 'scanning' ? 'text-indigo-200' : 'text-blue-200'
+                    patrolState === 'stuck'    ? 'text-orange-200' :
+                    patrolState === 'avoiding' ? 'text-amber-200'  : 'text-blue-200'
                   }`}>
-                    {patrolState === 'stuck'    ? '⚠ COINCÉ — RECUL EN COURS'  :
-                     patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS'        :
-                     patrolState === 'scanning' ? '⟳ SCAN L/C/D…'              :
+                    {patrolState === 'stuck'    ? '⚠ SCAN DÉBLOCAGE…'    :
+                     patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' :
                                                   '▶ PATROUILLE ACTIVE'}
                   </span>
                 </div>
