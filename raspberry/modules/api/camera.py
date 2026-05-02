@@ -7,8 +7,9 @@ import io
 import logging
 import pathlib
 import sys
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import yaml
 
@@ -96,8 +97,26 @@ def _generate_test_frame(width: int, height: int) -> bytes:
 
 
 _camera_instance: object | None = None
-_camera_lock = __import__("threading").Lock()
+_camera_lock = threading.Lock()
 _camera_clients = 0
+
+# ---------------------------------------------------------------------------
+# Partage de frames avec le détecteur vision
+# ---------------------------------------------------------------------------
+
+_frame_callbacks: list[Callable[[bytes], None]] = []
+_frame_counter = 0
+_VISION_SAMPLE_EVERY = 5  # 1 frame sur 5 envoyée au détecteur vision (~5fps à 24fps)
+
+
+def register_frame_callback(cb: Callable[[bytes], None]) -> None:
+    """Enregistre un callback appelé avec les bytes JPEG toutes les N frames."""
+    _frame_callbacks.append(cb)
+
+
+def unregister_frame_callback(cb: Callable[[bytes], None]) -> None:
+    if cb in _frame_callbacks:
+        _frame_callbacks.remove(cb)
 
 
 def _get_camera(width: int, height: int, framerate: int) -> object:
@@ -144,7 +163,18 @@ def _picamera_stream(width: int, height: int, framerate: int) -> Iterator[bytes]
             try:
                 buffer = io.BytesIO()
                 camera.capture_file(buffer, format="jpeg")  # type: ignore[union-attr]
-                yield _multipart_frame(buffer.getvalue())
+                frame_bytes = buffer.getvalue()
+                yield _multipart_frame(frame_bytes)
+
+                # Partage avec le détecteur vision (toutes les N frames)
+                global _frame_counter
+                _frame_counter += 1
+                if _frame_callbacks and _frame_counter % _VISION_SAMPLE_EVERY == 0:
+                    for cb in _frame_callbacks:
+                        try:
+                            cb(frame_bytes)
+                        except Exception:  # noqa: BLE001
+                            pass
             except GeneratorExit:
                 raise
             except Exception as exc:

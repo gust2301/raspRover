@@ -19,6 +19,9 @@ export interface RobotStatus {
   obstacle_rear?: boolean
   patrol_active?: boolean
   patrol_state?: 'idle' | 'forward' | 'avoiding'
+  vision_obstacle?: boolean
+  vision_confidence?: number
+  vision_available?: boolean
   [key: string]: unknown
 }
 

@@ -65,3 +65,10 @@ sensors:
     # port: "/dev/ttyACM0"   # Laisser vide = auto-détection du port Arduino
     baudrate: 9600            # Doit correspondre au sketch Arduino
     obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
+
+  vision:
+    enabled: true             # Détection d'obstacles par caméra (OpenCV/Canny)
+                              # Nécessite : sudo apt install python3-opencv
+    edge_threshold: 0.08      # Densité d'arêtes (0-1) déclenchant "obstacle"
+                              # Réduire si trop de faux positifs, augmenter si manque
+    history: 3                # Nombre de frames pour le vote majoritaire (lissage)

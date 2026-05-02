@@ -43,6 +43,7 @@ class PatrolController:
     ----------
     motors : MotorController
     ultrasonic : UltrasonicSensor | None
+    vision : VisionObstacleDetector | None
     speed : float
         Vitesse d'avance normalisée (0-1).
     obstacle_cm : float
@@ -55,12 +56,14 @@ class PatrolController:
         self,
         motors,
         ultrasonic=None,
+        vision=None,
         speed: float = _SPEED,
         obstacle_cm: float = _OBSTACLE_CM,
         turn_duration: float = _TURN_DURATION,
     ) -> None:
         self._motors = motors
         self._ultrasonic = ultrasonic
+        self._vision = vision
         self.speed = speed
         self.obstacle_cm = obstacle_cm
         self.turn_duration = turn_duration
@@ -148,9 +151,15 @@ class PatrolController:
     # ------------------------------------------------------------------
 
     def _obstacle_detected(self) -> bool:
-        if self._ultrasonic is None:
-            return False
-        r = self._ultrasonic.reading
-        if r.front.distance_cm is not None:
-            return r.front.distance_cm < self.obstacle_cm
-        return r.front.obstacle
+        """Obstacle devant ? Combine ultrason ET vision."""
+        us_detected = False
+        if self._ultrasonic is not None:
+            r = self._ultrasonic.reading
+            if r.front.distance_cm is not None:
+                us_detected = r.front.distance_cm < self.obstacle_cm
+            else:
+                us_detected = r.front.obstacle
+
+        vis_detected = self._vision.obstacle if self._vision is not None else False
+
+        return us_detected or vis_detected
