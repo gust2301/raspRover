@@ -43,9 +43,14 @@ _REVERSE_FRONT = 0.4  # recul avant rotation frontale (s)
 
 _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
 
-# Vision : confirmation par ultrason avant d'agir sur la zone centre
-# Si l'US voit plus loin que ce seuil, la vision centre est ignorée (faux positif probable)
-_VISION_US_CONFIRM_CM = 90.0  # cm
+# Keepalive moteur : le MotorController coupe les moteurs après watchdog_s (1 s)
+# si aucune commande n'est reçue. On renouvelle la commande FORWARD avant l'expiry.
+_MOTOR_KEEPALIVE = 0.4  # s (watchdog = 1 s → on rafraîchit à 0.4 s)
+
+# Vision latérale (zones G/D uniquement — l'US gère le centre)
+# Délai avant d'activer la vision après le démarrage FORWARD :
+# la caméra peut avoir du lag ou pointer vers un obstacle obsolète.
+_VISION_WARMUP = 1.5  # s de délai avant de commencer à lire la vision
 
 # Détection de blocage → scan pan-tilt
 _MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (secondes de libre)
@@ -173,8 +178,8 @@ class PatrolController:
 
                 t_free_start = time.monotonic()
 
-                # Surveillance obstacle pendant l'avance
-                obstacle = await self._monitor_until_obstacle(loop)
+                # Surveillance obstacle pendant l'avance (keepalive moteur inclus)
+                obstacle = await self._monitor_until_obstacle(loop, Direction.FORWARD, spd)
 
                 # ── Évitement ─────────────────────────────────────────
                 if obstacle:
@@ -228,53 +233,70 @@ class PatrolController:
     # Surveillance pendant l'avance
     # ------------------------------------------------------------------
 
-    async def _monitor_until_obstacle(self, loop: asyncio.AbstractEventLoop) -> str | None:
+    async def _monitor_until_obstacle(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        fwd_direction,
+        fwd_speed: float,
+    ) -> str | None:
         """
-        Surveille les capteurs toutes les _POLL secondes.
-        Retourne une description de l'obstacle dès qu'il est détecté, ou None si annulé.
+        Surveille les capteurs toutes les _POLL secondes pendant l'avance.
+
+        Envoie périodiquement la commande moteur pour éviter l'arrêt par le
+        watchdog interne du MotorController (timeout 1 s sans commande).
+
+        Vision : uniquement les zones gauche/droite, après un délai de
+        _VISION_WARMUP secondes (laisse le vote se stabiliser et évite les
+        faux positifs au démarrage).
         """
         t_start = time.monotonic()
+        t_last_keepalive = t_start  # déjà envoyé juste avant d'entrer ici
+
         while True:
-            # — Ultrason (priorité haute) —
+            now = time.monotonic()
+            elapsed = now - t_start
+
+            # ── Keepalive moteur ──────────────────────────────────
+            if now - t_last_keepalive >= _MOTOR_KEEPALIVE:
+                await loop.run_in_executor(
+                    None,
+                    lambda d=fwd_direction, s=fwd_speed: self._motors.from_direction(d, s),
+                )
+                t_last_keepalive = now
+
+            # ── Ultrason (priorité haute — gère le centre) ────────
             if self._ultrasonic:
                 r = self._ultrasonic.reading
                 cm = r.front.distance_cm
                 if (cm is not None and cm < self.obstacle_cm) or (cm is None and r.front.obstacle):
-                    us_str = f"{cm:.0f}cm" if cm else "proche"
+                    us_str = f"{cm:.0f}cm" if cm is not None else "proche"
                     log.info(
                         "Patrol US: obstacle frontal %s après %.1fs",
                         us_str,
-                        time.monotonic() - t_start,
+                        elapsed,
                     )
                     return f"ultrason {us_str}"
 
-            # — Vision 3 zones (priorité basse) —
-            if self._vision:
+            # ── Vision latérale G/D (priorité basse) ─────────────
+            # Ignorée pendant _VISION_WARMUP : caméra pas encore stabilisée,
+            # vote majoritaire peut refléter la position précédente du robot.
+            # Le centre est délibérément ignoré : l'ultrason le couvre mieux.
+            if self._vision and elapsed >= _VISION_WARMUP:
                 zones = self._vision.zones
                 left = zones.get("left", False)
-                center = zones.get("center", False)
                 right = zones.get("right", False)
 
-                # Centre : si l'ultrason voit loin, la vision est probablement un faux positif
-                # (sol, reflet, JPEG artifact…). On ne la prend en compte que si l'US
-                # est trop proche pour être fiable ou confirme un obstacle proche.
-                if center and self._ultrasonic:
-                    r2 = self._ultrasonic.reading
-                    cm2 = r2.front.distance_cm
-                    if cm2 is not None and cm2 > _VISION_US_CONFIRM_CM:
-                        center = False  # US dit voie libre → ignore vision center
-
-                if center:
-                    log.info("Patrol cam: obstacle CENTRE après %.1fs", time.monotonic() - t_start)
-                    return "vision:center"
                 if left and right:
-                    log.info("Patrol cam: obstacle G+D après %.1fs", time.monotonic() - t_start)
+                    log.info(
+                        "Patrol cam: obstacle G+D après %.1fs",
+                        elapsed,
+                    )
                     return "vision:center"
                 if left:
-                    log.info("Patrol cam: obstacle GAUCHE après %.1fs", time.monotonic() - t_start)
+                    log.info("Patrol cam: obstacle GAUCHE après %.1fs", elapsed)
                     return "vision:left"
                 if right:
-                    log.info("Patrol cam: obstacle DROITE après %.1fs", time.monotonic() - t_start)
+                    log.info("Patrol cam: obstacle DROITE après %.1fs", elapsed)
                     return "vision:right"
 
             await asyncio.sleep(_POLL)
