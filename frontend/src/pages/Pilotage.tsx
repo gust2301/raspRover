@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, WifiOff, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren, Radar,
+  Square, Camera, CameraOff, Settings2, Activity, Lightbulb, Siren, Radar, Bot,
 } from 'lucide-react'
 import { type ConnectionStatus } from '../hooks/useRobotConnection'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -552,7 +552,9 @@ export default function Pilotage() {
   const [cameraLight, setCameraLight] = useState(false)
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
-  const connected = conn.status === 'connected' && !emergency
+  const patrolActive = conn.lastStatus?.patrol_active ?? false
+  const patrolState = conn.lastStatus?.patrol_state ?? 'idle'
+  const connected = conn.status === 'connected' && !emergency && !patrolActive
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
   const canAlert = conn.status === 'connected'
   const streamUrl = getRobotStreamUrl(conn.robotIp)
@@ -742,6 +744,24 @@ export default function Pilotage() {
               </div>
             )}
 
+            {/* Patrol state overlay */}
+            {patrolActive && (
+              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-blue-900/90 border border-blue-500 rounded-xl px-4 py-2 backdrop-blur-sm">
+                <Bot size={14} className="text-blue-300" />
+                <span className="text-blue-200 text-xs font-bold">
+                  {patrolState === 'avoiding' ? '↩ ÉVITEMENT EN COURS' : '▶ PATROUILLE'}
+                </span>
+              </div>
+            )}
+
+            {/* Obstacle blocked flash */}
+            {conn.obstacleBlocked && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-900/90 border border-amber-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
+                <Radar size={14} className="text-amber-300" />
+                <span className="text-amber-200 text-xs font-bold">AVANCE BLOQUÉE</span>
+              </div>
+            )}
+
             {/* Pan/tilt overlay indicator */}
             {conn.status === 'connected' && (
               <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 font-mono text-xs text-slate-300">
@@ -912,6 +932,33 @@ export default function Pilotage() {
             {alertError && (
               <p className="mt-2 text-xs text-red-400 bg-red-900/20 border border-red-700/40 rounded-lg px-3 py-2">
                 ⚠ Audio : {alertError}
+              </p>
+            )}
+          </div>
+
+          {/* Patrol button */}
+          <div className="px-5 py-4 border-b border-slate-800">
+            <button
+              onClick={() => patrolActive ? conn.stopPatrol() : conn.startPatrol()}
+              disabled={conn.status !== 'connected' || emergency}
+              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold active:scale-95 ${
+                conn.status !== 'connected' || emergency
+                  ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
+                  : patrolActive
+                    ? 'bg-blue-500 text-white border-blue-400 shadow-lg shadow-blue-900/40 animate-pulse'
+                    : 'bg-blue-600/10 text-blue-400 border-blue-600/40 hover:bg-blue-600/20 hover:border-blue-500'
+              }`}
+            >
+              <Bot size={18} />
+              <span className="text-sm">
+                {patrolActive
+                  ? patrolState === 'avoiding' ? '↩ En évitement…' : '▶ Patrouille active — Arrêter'
+                  : 'Lancer la patrouille'}
+              </span>
+            </button>
+            {conn.obstacleBlocked && (
+              <p className="mt-2 text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 animate-pulse">
+                ⚠ Obstacle détecté — avance bloquée
               </p>
             )}
           </div>

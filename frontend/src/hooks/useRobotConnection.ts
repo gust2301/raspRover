@@ -13,6 +13,12 @@ export interface RobotStatus {
   distance_cm?: number | null
   obstacle?: boolean
   sensor_error?: string | null
+  front_cm?: number | null
+  rear_cm?: number | null
+  obstacle_front?: boolean
+  obstacle_rear?: boolean
+  patrol_active?: boolean
+  patrol_state?: 'idle' | 'forward' | 'avoiding'
   [key: string]: unknown
 }
 
@@ -29,6 +35,9 @@ export interface RobotConnection {
   sendLight: (enabled: boolean) => void
   sendAlert: (onError?: (err: string) => void) => void
   stopAlert: () => void
+  startPatrol: () => void
+  stopPatrol: () => void
+  obstacleBlocked: boolean
   lastStatus: RobotStatus | null
   latencyMs: number | null
   errorMessage: string | null
@@ -45,6 +54,8 @@ export function useRobotConnection(): RobotConnection {
   const [lastStatus, setLastStatus] = useState<RobotStatus | null>(null)
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [obstacleBlocked, setObstacleBlocked] = useState(false)
+  const obstacleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const pingTsRef = useRef<number | null>(null)
@@ -109,6 +120,12 @@ export function useRobotConnection(): RobotConnection {
             setLatencyMs(Date.now() - pingTsRef.current)
             pingTsRef.current = null
           }
+        } else if (data.type === 'patrol_ack') {
+          setLastStatus(prev => prev ? { ...prev, ...data } : data as RobotStatus)
+        } else if (data.type === 'obstacle_blocked') {
+          setObstacleBlocked(true)
+          if (obstacleTimerRef.current) clearTimeout(obstacleTimerRef.current)
+          obstacleTimerRef.current = setTimeout(() => setObstacleBlocked(false), 2000)
         } else if (data.type === 'alert_ack') {
           if (!data.ok && data.error) {
             console.warn('[SENTRYX] Audio error:', data.error)
@@ -198,6 +215,14 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'alert', action: 'stop' })
   }, [send])
 
+  const startPatrol = useCallback(() => {
+    send({ type: 'patrol', action: 'start' })
+  }, [send])
+
+  const stopPatrol = useCallback(() => {
+    send({ type: 'patrol', action: 'stop' })
+  }, [send])
+
   // Ping toutes les 3s pour mesurer la latence et récupérer le statut
   useEffect(() => {
     if (status !== 'connected') return
@@ -228,6 +253,9 @@ export function useRobotConnection(): RobotConnection {
     sendLight,
     sendAlert,
     stopAlert,
+    startPatrol,
+    stopPatrol,
+    obstacleBlocked,
     lastStatus,
     latencyMs,
     errorMessage,
