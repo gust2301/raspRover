@@ -20,6 +20,9 @@ export interface RobotStatus {
   patrol_active?: boolean
   patrol_state?: 'idle' | 'forward' | 'avoiding' | 'stuck'
   vision_obstacle?: boolean
+  vision_left?: boolean
+  vision_center?: boolean
+  vision_right?: boolean
   vision_confidence?: number
   vision_available?: boolean
   vision_method?: 'canny' | 'uniform' | 'none'

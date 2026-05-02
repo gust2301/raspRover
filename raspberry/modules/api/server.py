@@ -120,9 +120,11 @@ async def lifespan(app: FastAPI):
         motors=_motors,
         ultrasonic=_ultrasonic,
         vision=_vision,
+        pantilt=_pantilt,
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
-        turn_duration=float(patrol_cfg.get("turn_duration", 0.8)),
+        step_duration=float(patrol_cfg.get("step_duration", 0.7)),
+        scan_with_pantilt=bool(patrol_cfg.get("scan_with_pantilt", False)),
         stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
     )
 
