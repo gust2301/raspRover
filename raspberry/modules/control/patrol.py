@@ -43,6 +43,10 @@ _REVERSE_FRONT = 0.4  # recul avant rotation frontale (s)
 
 _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
 
+# Vision : confirmation par ultrason avant d'agir sur la zone centre
+# Si l'US voit plus loin que ce seuil, la vision centre est ignorée (faux positif probable)
+_VISION_US_CONFIRM_CM = 90.0  # cm
+
 # Détection de blocage → scan pan-tilt
 _MIN_FREE_SECS = 1.5  # seuil de « progression réelle » (secondes de libre)
 _STUCK_SCAN_THRESHOLD = 3  # évitements rapides consécutifs avant scan pan-tilt
@@ -250,6 +254,15 @@ class PatrolController:
                 left = zones.get("left", False)
                 center = zones.get("center", False)
                 right = zones.get("right", False)
+
+                # Centre : si l'ultrason voit loin, la vision est probablement un faux positif
+                # (sol, reflet, JPEG artifact…). On ne la prend en compte que si l'US
+                # est trop proche pour être fiable ou confirme un obstacle proche.
+                if center and self._ultrasonic:
+                    r2 = self._ultrasonic.reading
+                    cm2 = r2.front.distance_cm
+                    if cm2 is not None and cm2 > _VISION_US_CONFIRM_CM:
+                        center = False  # US dit voie libre → ignore vision center
 
                 if center:
                     log.info("Patrol cam: obstacle CENTRE après %.1fs", time.monotonic() - t_start)
