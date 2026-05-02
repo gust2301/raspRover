@@ -552,7 +552,8 @@ export default function Pilotage() {
   const [cameraLight, setCameraLight] = useState(false)
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
-  const connected = conn.status === 'connected' && !emergency
+  const patrolActive = conn.lastStatus?.patrol_active ?? false
+  const connected = conn.status === 'connected' && !emergency && !patrolActive
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
   const canAlert = conn.status === 'connected'
   const streamUrl = getRobotStreamUrl(conn.robotIp)
@@ -742,6 +743,14 @@ export default function Pilotage() {
               </div>
             )}
 
+            {/* Obstacle blocked flash */}
+            {conn.obstacleBlocked && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-900/90 border border-amber-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
+                <Radar size={14} className="text-amber-300" />
+                <span className="text-amber-200 text-xs font-bold">AVANCE BLOQUÉE</span>
+              </div>
+            )}
+
             {/* Pan/tilt overlay indicator */}
             {conn.status === 'connected' && (
               <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 font-mono text-xs text-slate-300">
@@ -915,6 +924,24 @@ export default function Pilotage() {
               </p>
             )}
           </div>
+
+          {/* Obstacle blocked warning */}
+          {conn.obstacleBlocked && (
+            <div className="px-5 pt-4">
+              <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 animate-pulse">
+                ⚠ Obstacle détecté — avance bloquée
+              </p>
+            </div>
+          )}
+
+          {/* Patrol active warning */}
+          {patrolActive && (
+            <div className="px-5 pt-4">
+              <p className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
+                🤖 Patrouille active — contrôle manuel désactivé. Gérez la patrouille depuis la page <strong>Patrouilles</strong>.
+              </p>
+            </div>
+          )}
 
           {/* Distance sensor */}
           {conn.lastStatus?.distance_cm !== undefined && (

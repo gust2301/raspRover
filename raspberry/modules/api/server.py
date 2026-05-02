@@ -18,6 +18,7 @@ from modules.control import ESP32Link, LightController, MotorController, PanTilt
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
+from modules.control.patrol import PatrolController
 from modules.sensors import UltrasonicSensor
 
 from .camera import generate_frames
@@ -33,6 +34,7 @@ _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
+_patrol: PatrolController | None = None
 
 
 def _load_config() -> dict:
@@ -44,7 +46,7 @@ def _load_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt, _lights, _ultrasonic
+    global _link, _motors, _pantilt, _lights, _ultrasonic, _patrol
 
     global _mixer
     cfg = _load_config()
@@ -90,6 +92,16 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
 
+    # Contrôleur de patrouille
+    patrol_cfg = cfg.get("patrol", {})
+    _patrol = PatrolController(
+        motors=_motors,
+        ultrasonic=_ultrasonic,
+        speed=float(patrol_cfg.get("speed", 0.3)),
+        obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
+        turn_duration=float(patrol_cfg.get("turn_duration", 0.8)),
+    )
+
     _motors.stop()
     _pantilt.center()
     _lights.set_camera_light(False)
@@ -97,6 +109,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    if _patrol and _patrol.active:
+        loop = asyncio.get_event_loop()
+        await _patrol.stop(loop)
     if _ultrasonic:
         _ultrasonic.stop()
     if _motors:
@@ -235,6 +250,38 @@ async def get_distance() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — Patrouille
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/patrol/start")
+async def patrol_start() -> dict:
+    """Démarre la patrouille autonome."""
+    if _patrol is None or _motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
+    loop = asyncio.get_running_loop()
+    await _patrol.start(loop)
+    return {"ok": True, **_patrol.to_dict()}
+
+
+@app.post("/api/patrol/stop")
+async def patrol_stop() -> dict:
+    """Arrête la patrouille autonome."""
+    if _patrol is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
+    loop = asyncio.get_running_loop()
+    await _patrol.stop(loop)
+    return {"ok": True, **_patrol.to_dict()}
+
+
+@app.get("/api/patrol/status")
+async def patrol_status() -> dict:
+    if _patrol is None:
+        return {"patrol_active": False, "patrol_state": "idle"}
+    return _patrol.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # REST — Audio
 # ---------------------------------------------------------------------------
 
@@ -324,10 +371,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if _motors is None:
                     await ws.send_json({"type": "error", "message": "not ready"})
                     continue
+                # Patrouille active → ignore les commandes manuelles
+                if _patrol and _patrol.active:
+                    await ws.send_json(
+                        {"type": "error", "message": "Patrouille active — arrête-la d'abord"}
+                    )
+                    continue
                 try:
                     if "x" in data or "y" in data:
                         x = float(data.get("x", 0.0))
                         y = float(data.get("y", 0.0))
+                        # Sécurité : bloque l'avance si obstacle devant
+                        if y > 0.1 and _ultrasonic and _ultrasonic.reading.front.obstacle:
+                            await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
+                            await ws.send_json(
+                                {
+                                    "type": "obstacle_blocked",
+                                    "message": "Obstacle détecté à l'avant",
+                                }
+                            )
+                            continue
                         left, right = _mixer.mix(x, y)
                         await loop.run_in_executor(
                             None,
@@ -338,6 +401,20 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         speed = data.get("speed")
                         speed_f = float(speed) if speed is not None else None
                         direction = Direction(direction_str)
+                        # Sécurité : bloque l'avance si obstacle devant
+                        if (
+                            direction == Direction.FORWARD
+                            and _ultrasonic
+                            and _ultrasonic.reading.front.obstacle
+                        ):
+                            await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
+                            await ws.send_json(
+                                {
+                                    "type": "obstacle_blocked",
+                                    "message": "Obstacle détecté à l'avant",
+                                }
+                            )
+                            continue
                         await loop.run_in_executor(
                             None,
                             lambda direction=direction, speed_f=speed_f: _motors.from_direction(
@@ -410,6 +487,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             }
                         )
 
+            elif msg_type == "patrol":
+                if _patrol is None or _motors is None:
+                    await ws.send_json({"type": "error", "message": "not ready"})
+                    continue
+                action = data.get("action", "start")
+                if action == "start":
+                    await _patrol.start(loop)
+                else:
+                    await _patrol.stop(loop)
+                await ws.send_json({"type": "patrol_ack", **_patrol.to_dict()})
+
             elif msg_type == "status":
                 if _link is None:
                     await ws.send_json({"type": "error", "message": "not ready"})
@@ -422,6 +510,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
                     light_state = _lights.state if _lights else {"camera_light": False}
                     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
+                    patrol_data = (
+                        _patrol.to_dict()
+                        if _patrol
+                        else {"patrol_active": False, "patrol_state": "idle"}
+                    )
                     await ws.send_json(
                         {
                             "type": "status",
@@ -430,6 +523,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             "tilt": tilt,
                             **light_state,
                             **distance_data,
+                            **patrol_data,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
