@@ -120,6 +120,7 @@ class PatrolController:
         self._state: PatrolState = PatrolState.IDLE
         self._avoidance_count: int = 0  # alternance G/D
         self._short_move_count: int = 0  # compteur blocage
+        self._last_turn_dir = None  # Direction | None — conservé entre évitements
 
     # ------------------------------------------------------------------
     # Propriétés
@@ -145,6 +146,7 @@ class PatrolController:
             return
         self._avoidance_count = 0
         self._short_move_count = 0
+        self._last_turn_dir = None
         self._task = asyncio.create_task(self._run(loop))
         log.info("Patrouille démarrée (speed=%.2f obstacle_cm=%.0f)", self.speed, self.obstacle_cm)
 
@@ -206,7 +208,7 @@ class PatrolController:
                             dur = random.uniform(_TURN_FRONT_MIN, _TURN_FRONT_MAX)
                             await self._turn(loop, best_dir, dur, "sortie scan")
                     else:
-                        await self._avoid(loop, Direction, obstacle)
+                        await self._avoid(loop, Direction, obstacle, free_secs)
 
         except asyncio.CancelledError:
             await loop.run_in_executor(None, self._motors.stop)
@@ -279,22 +281,47 @@ class PatrolController:
     # Évitement directionnel
     # ------------------------------------------------------------------
 
-    def _next_turn_dir(self, Direction):
-        """Alterne gauche/droite à chaque évitement frontal."""
+    def _next_turn_dir(self, Direction, consecutive: bool = False):
+        """
+        consecutive=True  → déplacement court avant l'obstacle : garder la même
+                            direction (ne pas revenir en arrière) + angle max.
+        consecutive=False → déplacement suffisant : alterner G/D normalement.
+        """
+        if consecutive and self._last_turn_dir is not None:
+            log.info(
+                "Patrol avoid: mouvement court → même direction %s (pas d'alternance)",
+                self._last_turn_dir.value,
+            )
+            return self._last_turn_dir
         self._avoidance_count += 1
-        return Direction.LEFT if self._avoidance_count % 2 == 0 else Direction.RIGHT
+        d = Direction.LEFT if self._avoidance_count % 2 == 0 else Direction.RIGHT
+        self._last_turn_dir = d
+        return d
 
-    async def _avoid(self, loop: asyncio.AbstractEventLoop, Direction, obstacle: str) -> None:
+    async def _avoid(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        Direction,
+        obstacle: str,
+        free_secs: float = 999.0,
+    ) -> None:
+        consecutive = free_secs < _MIN_FREE_SECS
+
         if obstacle.startswith("vision:left"):
+            self._last_turn_dir = Direction.RIGHT
             await self._turn(loop, Direction.RIGHT, _TURN_LATERAL, "obstacle gauche → droite")
 
         elif obstacle.startswith("vision:right"):
+            self._last_turn_dir = Direction.LEFT
             await self._turn(loop, Direction.LEFT, _TURN_LATERAL, "obstacle droite → gauche")
 
         else:
-            # Frontal : alternance G/D + angle aléatoire pour ne pas boucler
-            turn_dir = self._next_turn_dir(Direction)
-            duration = random.uniform(_TURN_FRONT_MIN, _TURN_FRONT_MAX)
+            # Frontal
+            turn_dir = self._next_turn_dir(Direction, consecutive)
+            # Déplacement court → angle maximum pour sortir du coin sans demi-tour
+            duration = (
+                _TURN_FRONT_MAX if consecutive else random.uniform(_TURN_FRONT_MIN, _TURN_FRONT_MAX)
+            )
             await self._reverse_and_turn(loop, Direction, turn_dir, duration, obstacle)
 
     async def _turn(
@@ -308,7 +335,17 @@ class PatrolController:
         await loop.run_in_executor(
             None, lambda d=turn_dir: self._motors.from_direction(d, _TURN_SPEED)
         )
-        await asyncio.sleep(duration)
+        # Surveille l'ultrason pendant la rotation : stoppe dès qu'un obstacle
+        # est très proche (robot en train de pousser contre un mur).
+        t_end = time.monotonic() + duration
+        while time.monotonic() < t_end:
+            if self._ultrasonic:
+                r = self._ultrasonic.reading
+                cm = r.front.distance_cm
+                if cm is not None and cm < self.obstacle_cm * 0.5:
+                    log.info("Patrol turn: obstacle proche (%.0f cm) → rotation écourtée", cm)
+                    break
+            await asyncio.sleep(_POLL)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
 
@@ -328,16 +365,28 @@ class PatrolController:
             reason,
         )
         spd = self.speed
+        # Phase recul — durée fixe, pas de check capteur (obstacle est devant)
         await loop.run_in_executor(
             None, lambda s=spd: self._motors.from_direction(Direction.BACKWARD, s)
         )
         await asyncio.sleep(_REVERSE_FRONT)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
+        # Phase rotation — stoppe si l'US détecte quelque chose de très proche
         await loop.run_in_executor(
             None, lambda d=turn_dir: self._motors.from_direction(d, _TURN_SPEED)
         )
-        await asyncio.sleep(duration)
+        t_end = time.monotonic() + duration
+        while time.monotonic() < t_end:
+            if self._ultrasonic:
+                r = self._ultrasonic.reading
+                cm = r.front.distance_cm
+                if cm is not None and cm < self.obstacle_cm * 0.5:
+                    log.info(
+                        "Patrol reverse+turn: obstacle proche (%.0f cm) → rotation écourtée", cm
+                    )
+                    break
+            await asyncio.sleep(_POLL)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
 
