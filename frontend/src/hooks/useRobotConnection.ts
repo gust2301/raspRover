@@ -124,19 +124,23 @@ export function useRobotConnection(): RobotConnection {
         const data = JSON.parse(event.data as string) as Record<string, unknown>
         if (data.type === 'status') {
           // Rétrocompatibilité : si le serveur Pi n'a pas encore _enrich_feedback,
-          // il envoie 'v' (tension brute) mais pas 'battery'. On le calcule ici.
+          // il envoie 'v' brut (centivolts Waveshare, ex: 1134 = 11.34V) sans 'battery'.
+          // Le JS officiel Waveshare fait data['v']/100 — on fait pareil ici.
           if (data.battery == null) {
             const rawV = data.v ?? data.voltage
             if (rawV != null) {
-              const v = Number(rawV)
-              if (!isNaN(v) && v > 0) {
+              const raw = Number(rawV)
+              if (!isNaN(raw) && raw > 0) {
+                // Centivolts si > 30, sinon déjà en volts
+                const v = raw > 30 ? raw / 100 : raw
                 data.battery = Math.max(0, Math.min(100, Math.round((v - 9.6) / 3.0 * 100)))
               }
             }
           }
-          // Normalise 'v' → 'voltage' si absent (idem rétrocompat)
+          // Normalise 'v' (centivolts) → 'voltage' (volts) si absent
           if (data.voltage == null && data.v != null) {
-            data.voltage = Number(data.v)
+            const raw = Number(data.v)
+            data.voltage = raw > 30 ? raw / 100 : raw
           }
           setLastStatus(data as RobotStatus)
           if (pingTsRef.current !== null) {

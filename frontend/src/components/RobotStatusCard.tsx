@@ -5,7 +5,8 @@ import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 // Conversion tension → pourcentage (batterie LiPo 3S : 10.0V–12.6V)
 // ---------------------------------------------------------------------------
 
-const BATTERY_MIN_V = 10.0
+// 3S LiPo : 9.6 V (vide) → 12.6 V (plein) — seuils officiels Waveshare
+const BATTERY_MIN_V = 9.6
 const BATTERY_MAX_V = 12.6
 
 function voltageToPercent(v: number): number {
