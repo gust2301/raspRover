@@ -891,10 +891,17 @@ export default function Pilotage() {
                 <span className="text-sm font-medium text-slate-300">Données robot</span>
               </div>
               <div className="space-y-2">
-                {conn.lastStatus.battery !== undefined && (
+                {conn.lastStatus.voltage !== undefined && (
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Batterie</span>
-                    <span className="text-emerald-400 font-medium">{conn.lastStatus.battery} V</span>
+                    <span className={`font-medium ${
+                      (conn.lastStatus.battery ?? 100) < 20 ? 'text-red-400' :
+                      (conn.lastStatus.battery ?? 100) < 40 ? 'text-amber-400' :
+                      'text-emerald-400'
+                    }`}>
+                      {conn.lastStatus.voltage.toFixed(1)} V
+                      {conn.lastStatus.battery !== undefined && ` · ${conn.lastStatus.battery}%`}
+                    </span>
                   </div>
                 )}
                 {conn.lastStatus.speed_l !== undefined && (

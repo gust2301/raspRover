@@ -4,7 +4,8 @@ import { getRobotTransportWarning, getRobotWsUrl } from '../lib/robotTransport'
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export interface RobotStatus {
-  battery?: number
+  voltage?: number   // tension brute en V (depuis ESP32 T=130)
+  battery?: number   // pourcentage calculé depuis voltage (0-100)
   speed_l?: number
   speed_r?: number
   pan?: number
