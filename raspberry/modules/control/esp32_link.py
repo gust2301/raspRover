@@ -245,7 +245,9 @@ class ESP32Link:
 
     @staticmethod
     def _looks_like_feedback(candidate: dict[str, Any]) -> bool:
+        # Le firmware Waveshare envoie 'v' pour la tension (pas 'voltage')
+        # Exemple réel : {'T':1001,'L':0,'R':0,'r':0,'p':0,'v':11,'pan':0,'tilt':0}
         return any(
             key in candidate
-            for key in ("voltage", "x", "y", "yaw", "imu", "roll", "pitch", "pan", "tilt")
+            for key in ("v", "voltage", "x", "y", "yaw", "imu", "roll", "pitch", "pan", "tilt")
         )
