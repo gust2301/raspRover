@@ -152,6 +152,34 @@ async def lifespan(app: FastAPI):
     log.info("RaspRover API arrêtée proprement")
 
 
+def _compute_battery_pct(voltage: float) -> int:
+    """
+    Convertit la tension 3S LiPo en pourcentage (0-100).
+    Plage : 9.6 V (vide, 3.2 V/cell) → 12.6 V (plein, 4.2 V/cell).
+    """
+    pct = (voltage - 9.6) / (12.6 - 9.6) * 100.0
+    return max(0, min(100, round(pct)))
+
+
+def _enrich_feedback(feedback: dict) -> dict:
+    """
+    Enrichit le dict brut de l'ESP32 :
+      - Calcule battery (%) depuis voltage (V) si disponible
+      - Mappe L/R → speed_l/speed_r pour cohérence avec le frontend
+    """
+    result = dict(feedback)
+    if "voltage" in result:
+        try:
+            result["battery"] = _compute_battery_pct(float(result["voltage"]))
+        except (TypeError, ValueError):
+            pass
+    if "L" in result and "speed_l" not in result:
+        result["speed_l"] = result["L"]
+    if "R" in result and "speed_r" not in result:
+        result["speed_r"] = result["R"]
+    return result
+
+
 def _obstacle_front() -> bool:
     """
     Obstacle devant pour la sécurité anti-collision (pilotage manuel).
@@ -375,13 +403,14 @@ async def get_status() -> dict:
         return JSONResponse(status_code=503, content={"error": "not ready"})
     loop = asyncio.get_running_loop()
     try:
+        # T=130 (chassis feedback) → tension réelle + vitesses L/R
         feedback = await loop.run_in_executor(
             None,
-            lambda: _link.request_feedback(timeout_s=1.0, command_type=126),  # type: ignore[union-attr]
+            lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
         )
         pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
         light_state = _lights.state if _lights else {"camera_light": False}
-        return {**feedback, "pan": pan, "tilt": tilt, **light_state}
+        return {**_enrich_feedback(feedback), "pan": pan, "tilt": tilt, **light_state}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=503, content={"error": str(exc)})
 
@@ -551,9 +580,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "message": "not ready"})
                     continue
                 try:
+                    # T=130 (chassis feedback) → tension réelle + vitesses L/R
                     feedback = await loop.run_in_executor(
                         None,
-                        lambda: _link.request_feedback(timeout_s=1.0, command_type=126),  # type: ignore[union-attr]
+                        lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
                     )
                     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
                     light_state = _lights.state if _lights else {"camera_light": False}
@@ -567,7 +597,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json(
                         {
                             "type": "status",
-                            **feedback,
+                            **_enrich_feedback(feedback),
                             "pan": pan,
                             "tilt": tilt,
                             **light_state,
