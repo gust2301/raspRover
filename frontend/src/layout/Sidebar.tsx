@@ -5,6 +5,7 @@ import {
   Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
+import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: "Vue d'ensemble", highlight: false },
@@ -27,6 +28,9 @@ export default function Sidebar({
 }) {
   const [emergencyActive, setEmergencyActive] = useState(false)
   const robot = mockRobot
+  const conn = useSharedRobotConnection()
+  const isOnline = conn.status === 'connected'
+  const battery = conn.lastStatus?.battery ?? null
 
   return (
     <>
@@ -92,21 +96,25 @@ export default function Sidebar({
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-slate-400 font-medium">Robot actif</span>
               <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs text-emerald-400">En ligne</span>
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {isOnline ? 'En ligne' : 'Hors ligne'}
+                </span>
               </div>
             </div>
             <div className="text-white text-sm font-semibold mb-1">{robot.name}</div>
             <div className="text-slate-500 text-xs mb-2">ID : {robot.id}</div>
             <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Battery size={13} className="text-emerald-400" />
+              <Battery size={13} className={battery != null && battery < 20 ? 'text-red-400' : battery != null && battery < 40 ? 'text-amber-400' : 'text-emerald-400'} />
               <div className="flex-1 bg-slate-700 rounded-full h-1.5">
                 <div
-                  className="h-1.5 rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${robot.battery}%` }}
+                  className={`h-1.5 rounded-full transition-all ${battery != null && battery < 20 ? 'bg-red-500' : battery != null && battery < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${battery ?? 0}%` }}
                 />
               </div>
-              <span className="text-emerald-400 font-medium">{robot.battery}%</span>
+              <span className={`font-medium ${battery != null && battery < 20 ? 'text-red-400' : battery != null && battery < 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {battery != null ? `${battery}%` : '—'}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-400">
               <Wifi size={12} className="text-blue-400" />
