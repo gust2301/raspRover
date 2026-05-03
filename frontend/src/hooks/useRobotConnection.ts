@@ -123,6 +123,21 @@ export function useRobotConnection(): RobotConnection {
       try {
         const data = JSON.parse(event.data as string) as Record<string, unknown>
         if (data.type === 'status') {
+          // Rétrocompatibilité : si le serveur Pi n'a pas encore _enrich_feedback,
+          // il envoie 'v' (tension brute) mais pas 'battery'. On le calcule ici.
+          if (data.battery == null) {
+            const rawV = data.v ?? data.voltage
+            if (rawV != null) {
+              const v = Number(rawV)
+              if (!isNaN(v) && v > 0) {
+                data.battery = Math.max(0, Math.min(100, Math.round((v - 9.6) / 3.0 * 100)))
+              }
+            }
+          }
+          // Normalise 'v' → 'voltage' si absent (idem rétrocompat)
+          if (data.voltage == null && data.v != null) {
+            data.voltage = Number(data.v)
+          }
           setLastStatus(data as RobotStatus)
           if (pingTsRef.current !== null) {
             setLatencyMs(Date.now() - pingTsRef.current)

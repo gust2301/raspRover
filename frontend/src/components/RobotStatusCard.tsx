@@ -16,10 +16,11 @@ function voltageToPercent(v: number): number {
 // Jauge batterie semi-circulaire
 // ---------------------------------------------------------------------------
 
-function BatteryGauge({ pct, voltage }: { pct: number; voltage: number | undefined }) {
+function BatteryGauge({ pct, voltage }: { pct: number | null; voltage: number | undefined }) {
   const radius = 52
   const circumference = 2 * Math.PI * radius
-  const color = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444'
+  const safePct = pct ?? 0
+  const color = pct == null ? '#475569' : safePct > 50 ? '#10b981' : safePct > 20 ? '#f59e0b' : '#ef4444'
 
   return (
     <div className="relative w-32 h-32 mx-auto">
@@ -28,13 +29,13 @@ function BatteryGauge({ pct, voltage }: { pct: number; voltage: number | undefin
           strokeDasharray={`${circumference * 0.75} ${circumference * 0.25}`}
           strokeLinecap="round" />
         <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="10"
-          strokeDasharray={`${circumference * 0.75 * pct / 100} ${circumference}`}
+          strokeDasharray={`${circumference * 0.75 * safePct / 100} ${circumference}`}
           strokeLinecap="round"
           style={{ transition: 'stroke-dasharray 0.5s ease' }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold text-white">{pct}%</span>
+        <span className="text-3xl font-bold text-white">{pct != null ? `${pct}%` : '—'}</span>
         {voltage !== undefined && (
           <span className="text-xs text-slate-500 font-mono mt-0.5">{voltage.toFixed(1)} V</span>
         )}
@@ -53,8 +54,8 @@ export default function RobotStatusCard() {
   const s    = conn.lastStatus
   const isOnline = conn.status === 'connected'
 
-  // Batterie — battery = % calculé par le serveur, voltage = tension brute
-  const batteryPct = s?.battery ?? (s?.voltage != null ? voltageToPercent(s.voltage as number) : 0)
+  // Batterie — battery = % calculé par le serveur (ou le hook), voltage = tension brute
+  const batteryPct = (s?.battery as number | undefined) ?? (s?.voltage != null ? voltageToPercent(s.voltage as number) : null)
   const batteryV   = s?.voltage as number | undefined
 
   // Patrol
@@ -108,7 +109,7 @@ export default function RobotStatusCard() {
         </div>
       </div>
 
-      <BatteryGauge pct={batteryPct} voltage={batteryV} />
+      <BatteryGauge pct={batteryPct ?? null} voltage={batteryV} />
 
       {!isOnline && (
         <p className="text-center text-xs text-slate-600 mt-2 mb-2">Connectez-vous pour voir les données réelles</p>
