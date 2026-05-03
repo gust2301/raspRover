@@ -91,9 +91,9 @@ class RobotState:
                 "R": round(self.R, 3),
                 "pan": round(self.pan_deg, 1),
                 "tilt": round(self.tilt_deg, 1),
-                # Champ 'v' : fidèle au firmware Waveshare réel
-                # {'T':1001,'L':0,'R':0,'r':0,'p':0,'v':11,'pan':0,'tilt':0}
-                "v": round(self.voltage, 2),
+                # Champ 'v' : centivolts comme le firmware Waveshare réel
+                # Le JS officiel fait data['v']/100 → 1260 = 12.60 V
+                "v": round(self.voltage * 100),
                 "uptime": round(self.uptime_s, 1),
             }
 

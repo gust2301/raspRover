@@ -164,16 +164,21 @@ def _compute_battery_pct(voltage: float) -> int:
 def _enrich_feedback(feedback: dict) -> dict:
     """
     Enrichit le dict brut de l'ESP32 :
-      - Le firmware Waveshare envoie la tension sous 'v' (ex: {'v': 11.4})
-        On la mappe vers 'voltage' (lisible) et on calcule 'battery' (%)
+      - Le firmware Waveshare envoie la tension sous 'v' en centivolts
+        (ex: v=1134 → 11.34 V). Le JS officiel Waveshare fait data['v']/100.
+        On divise par 100 pour obtenir des volts réels.
+      - Mappe vers 'voltage' (lisible) et calcule 'battery' (%)
       - Mappe L/R → speed_l/speed_r pour cohérence avec le frontend
     """
     result = dict(feedback)
-    # Tension : champ 'v' dans le firmware réel, 'voltage' dans le simulateur
-    raw_v = result.get("v") or result.get("voltage")
+    # Tension : champ 'v' en centivolts (firmware Waveshare), ou 'voltage' (simulateur)
+    raw_v = result.get("v") if result.get("v") is not None else result.get("voltage")
     if raw_v is not None:
         try:
-            v = float(raw_v)
+            raw = float(raw_v)
+            # Le firmware envoie en centivolts (ex: 1134 = 11.34 V).
+            # Si la valeur > 30, c'est forcément des centivolts.
+            v = raw / 100.0 if raw > 30 else raw
             result["voltage"] = round(v, 2)
             result["battery"] = _compute_battery_pct(v)
         except (TypeError, ValueError):
