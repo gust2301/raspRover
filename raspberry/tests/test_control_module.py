@@ -50,7 +50,9 @@ class TestESP32Link:
         with ESP32Link(port=emulator["url"]) as link:
             fb = link.request_feedback(timeout_s=2.0)
         assert fb["T"] == 1001
-        assert 9.0 < fb["voltage"] <= 12.6
+        # Le firmware Waveshare réel (et le simulateur) envoie le champ 'v' (tension),
+        # pas 'voltage'. _enrich_feedback() dans server.py ajoute 'voltage' côté serveur.
+        assert 9.0 < fb["v"] <= 12.6
         assert "x" in fb and "y" in fb and "yaw" in fb
 
     def test_feedback_timeout_on_silent_server(self):
