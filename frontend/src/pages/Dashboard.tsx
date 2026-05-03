@@ -1,4 +1,4 @@
-import { Shield, Camera, Route, Bot } from 'lucide-react'
+import { Shield, Camera, Route, BatteryMedium } from 'lucide-react'
 import StatCard from '../components/StatCard'
 import VideoFeedCard from '../components/VideoFeedCard'
 import RobotStatusCard from '../components/RobotStatusCard'
@@ -17,6 +17,9 @@ export default function Dashboard() {
   const patrolState  = s?.patrol_state ?? 'idle'
   const obstacle     = s?.obstacle ?? false
   const frontCm      = s?.front_cm as number | null | undefined
+
+  const batteryPct = s?.battery
+  const batteryLow = batteryPct != null && batteryPct < 20
 
   const kpis = [
     {
@@ -46,12 +49,14 @@ export default function Dashboard() {
       statusDot: (patrolActive ? 'green' : 'red') as 'green' | 'red',
     },
     {
-      icon: <Bot size={20} className={isOnline ? 'text-emerald-400' : 'text-slate-500'} />,
-      iconBg: isOnline ? 'bg-emerald-500/10' : 'bg-slate-500/10',
-      value: isOnline ? '100%' : '0%',
-      label: 'Disponibilité robot',
-      sub: isOnline ? 'En ligne' : 'Hors ligne',
-      statusDot: (isOnline ? 'green' : 'red') as 'green' | 'red',
+      icon: <BatteryMedium size={20} className={!isOnline ? 'text-slate-500' : batteryLow ? 'text-red-400' : 'text-emerald-400'} />,
+      iconBg: !isOnline ? 'bg-slate-500/10' : batteryLow ? 'bg-red-500/10' : 'bg-emerald-500/10',
+      value: batteryPct != null ? `${batteryPct}%` : isOnline ? '—' : '—',
+      label: 'Batterie',
+      sub: s?.voltage != null
+        ? `${(s.voltage as number).toFixed(1)} V`
+        : isOnline ? 'En attente…' : 'Robot hors ligne',
+      statusDot: (!isOnline || batteryPct == null ? 'red' : batteryLow ? 'red' : 'green') as 'red' | 'green',
     },
   ]
 

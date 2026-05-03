@@ -53,9 +53,9 @@ export default function RobotStatusCard() {
   const s    = conn.lastStatus
   const isOnline = conn.status === 'connected'
 
-  // Batterie
-  const batteryV   = s?.battery as number | undefined
-  const batteryPct = batteryV != null ? voltageToPercent(batteryV) : 0
+  // Batterie — battery = % calculé par le serveur, voltage = tension brute
+  const batteryPct = s?.battery ?? (s?.voltage != null ? voltageToPercent(s.voltage as number) : 0)
+  const batteryV   = s?.voltage as number | undefined
 
   // Patrol
   const patrolActive = s?.patrol_active ?? false
