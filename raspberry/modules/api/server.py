@@ -196,7 +196,12 @@ async def lifespan(app: FastAPI):
         on_auto_record=_auto_record_coro,
     )
 
-    _tracker = TrackerController(_pantilt, _human_detector)
+    _tracker = TrackerController(
+        _pantilt,
+        _human_detector,
+        on_incident=log_incident,
+        on_auto_record=_auto_record_coro,
+    )
 
     _motors.stop()
     _pantilt.center()

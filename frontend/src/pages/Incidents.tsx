@@ -31,12 +31,14 @@ const SEVERITY_STYLE: Record<string, { badge: string; icon: React.ReactNode; dot
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  obstacle:     'Obstacle détecté',
-  patrol_start: 'Patrouille démarrée',
-  patrol_stop:  'Patrouille arrêtée',
-  patrol_stuck: 'Robot bloqué',
-  alert:        'Alerte déclenchée',
-  emergency:    'Arrêt urgence',
+  obstacle:        'Obstacle détecté',
+  patrol_start:    'Patrouille démarrée',
+  patrol_stop:     'Patrouille arrêtée',
+  patrol_stuck:    'Robot bloqué',
+  alert:           'Alerte déclenchée',
+  emergency:       'Arrêt urgence',
+  person_detected: 'Personne détectée',
+  person_lost:     'Personne perdue de vue',
 }
 
 function formatTs(ts: string): string {
