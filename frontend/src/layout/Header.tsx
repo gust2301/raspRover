@@ -65,16 +65,16 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
         {/* Robot connection status */}
         {conn.status === 'connected' ? (
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-mono truncate max-w-[160px] text-emerald-400">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+            <span className="hidden sm:block text-xs font-mono truncate max-w-[120px] text-emerald-400">
               {conn.robotIp}
             </span>
             {conn.latencyMs !== null && (
-              <span className="text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
+              <span className="hidden lg:block text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
             )}
             <button
               onClick={conn.disconnect}
@@ -87,7 +87,7 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
         ) : (
           <button
             onClick={() => navigate('/connect')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0
               bg-blue-600/15 text-blue-300 border border-blue-500/30
               hover:bg-blue-600/25 transition-colors"
           >
