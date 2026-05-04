@@ -5,8 +5,6 @@ import {
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
-import { ConnectionBar } from '../components/ConnectionBar'
-import { CaptureBar } from '../components/CaptureBar'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,17 +73,6 @@ export default function Patrols() {
 
   return (
     <div className="-m-3 sm:-m-4 lg:-m-6 flex flex-col min-h-full" style={{ background: '#070d1a' }}>
-
-      {/* ---- Barre de connexion ---- */}
-      <ConnectionBar
-        status={conn.status}
-        robotIp={conn.robotIp}
-        setRobotIp={conn.setRobotIp}
-        connect={conn.connect}
-        disconnect={conn.disconnect}
-        latencyMs={conn.latencyMs}
-        errorMessage={conn.errorMessage}
-      />
 
       {/* ---- Corps : caméra gauche + contrôles droite (identique à Pilotage) ---- */}
       <div className="flex flex-col xl:flex-row flex-1 overflow-hidden">
@@ -263,11 +250,6 @@ export default function Patrols() {
   scan_with_pantilt: false  # sweep caméra L/C/D`}</pre>
                 </div>
               )}
-            </div>
-
-            {/* Capture photo / vidéo */}
-            <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
-              <CaptureBar robotIp={conn.robotIp} connected={isConnected} />
             </div>
 
             {/* Sensors */}

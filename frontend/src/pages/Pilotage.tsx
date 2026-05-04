@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Square, Camera, CameraOff, Activity, Lightbulb, Siren, Radar,
+  Image, Video, VideoOff, Loader2, Circle,
 } from 'lucide-react'
-import { CaptureBar } from '../components/CaptureBar'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
-import { ConnectionBar } from '../components/ConnectionBar'
+import { useMedia } from '../hooks/useMedia'
 
 // ---------------------------------------------------------------------------
 // D-pad
@@ -443,6 +443,9 @@ function DriveJoystick({
 
 export default function Pilotage() {
   const conn = useSharedRobotConnection()
+  const media = useMedia(conn.robotIp)
+  const [photoLoading, setPhotoLoading] = useState(false)
+  const [videoLoading, setVideoLoading] = useState(false)
   const [speed, setSpeed] = useState(0.35)
   const [pan, setPan] = useState(0)
   const [tilt, setTilt] = useState(0)
@@ -539,6 +542,22 @@ export default function Pilotage() {
     conn.sendLight(next)
   }, [cameraLight, conn])
 
+  const handlePhoto = useCallback(async () => {
+    setPhotoLoading(true)
+    await media.takePhoto()
+    setPhotoLoading(false)
+  }, [media])
+
+  const handleVideo = useCallback(async () => {
+    setVideoLoading(true)
+    if (media.isRecording) {
+      await media.stopRecording()
+    } else {
+      await media.startRecording()
+    }
+    setVideoLoading(false)
+  }, [media])
+
   const handlePanTiltNudge = useCallback((dir: Direction) => {
     const nextPan =
       dir === 'left' ? pan - 15 :
@@ -556,19 +575,6 @@ export default function Pilotage() {
 
   return (
     <div className={`flex flex-col min-h-full ${isMobileLandscape ? 'h-[100dvh] m-0' : '-m-3 sm:-m-4 lg:-m-6'}`} style={{ background: '#070d1a' }}>
-      {/* Connection bar */}
-      {!isMobileLandscape && (
-        <ConnectionBar
-          status={conn.status}
-          robotIp={conn.robotIp}
-          setRobotIp={conn.setRobotIp}
-          connect={conn.connect}
-          disconnect={conn.disconnect}
-          latencyMs={conn.latencyMs}
-          errorMessage={conn.errorMessage}
-        />
-      )}
-
       {/* Main layout */}
       <div className="flex flex-col xl:flex-row flex-1 overflow-hidden">
 
@@ -576,12 +582,49 @@ export default function Pilotage() {
         <div className="flex-1 flex flex-col xl:border-r border-slate-800 min-w-0 min-h-[42vh] xl:min-h-0">
           <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-800">
             <span className="text-sm font-medium text-slate-300">Flux caméra</span>
-            {conn.status === 'connected' && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-xs text-red-400">EN DIRECT</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {conn.status === 'connected' && (
+                <>
+                  <button
+                    onClick={handlePhoto}
+                    disabled={photoLoading || media.isRecording}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium
+                      bg-blue-600/15 text-blue-300 border border-blue-500/30
+                      hover:bg-blue-600/25 hover:border-blue-400/50
+                      disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    {photoLoading ? <Loader2 size={11} className="animate-spin" /> : <Image size={11} />}
+                    Photo
+                  </button>
+                  <button
+                    onClick={handleVideo}
+                    disabled={videoLoading}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium
+                      border transition-all disabled:opacity-40 disabled:cursor-not-allowed
+                      ${media.isRecording
+                        ? 'bg-red-600/20 text-red-300 border-red-500/40 hover:bg-red-600/30'
+                        : 'bg-emerald-600/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-600/25'
+                      }`}
+                  >
+                    {videoLoading
+                      ? <Loader2 size={11} className="animate-spin" />
+                      : media.isRecording ? <VideoOff size={11} /> : <Video size={11} />
+                    }
+                    {media.isRecording ? 'Stop' : 'Vidéo'}
+                  </button>
+                  {media.isRecording && (
+                    <div className="flex items-center gap-1">
+                      <Circle size={6} className="text-red-500 fill-red-500 animate-pulse" />
+                      <span className="text-xs text-red-400 font-bold">REC</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-slate-700">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-xs text-red-400">EN DIRECT</span>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
           <div
             className={`flex-1 flex items-center justify-center relative sticky top-0 z-10 xl:static ${isMobileLandscape ? 'min-h-[100dvh]' : 'min-h-[42vh] md:min-h-[50vh] xl:min-h-0'}`}
@@ -808,9 +851,6 @@ export default function Pilotage() {
               </span>
             </button>
           </div>
-
-          {/* Capture photo / vidéo */}
-          <CaptureBar robotIp={conn.robotIp} connected={conn.status === 'connected'} />
 
           {/* Alert button */}
           <div className="px-5 py-4 border-b border-slate-800">

@@ -6,6 +6,7 @@ import importlib
 import io
 import logging
 import pathlib
+import subprocess
 import sys
 import threading
 import time
@@ -24,13 +25,6 @@ except ImportError:  # pragma: no cover - dev hors Raspberry Pi
             Picamera2 = importlib.import_module("picamera2").Picamera2  # type: ignore[attr-defined]
         except ImportError:
             Picamera2 = None  # type: ignore[assignment]
-
-try:
-    from picamera2.encoders import H264Encoder  # type: ignore[import-not-found]
-    from picamera2.outputs import FileOutput  # type: ignore[import-not-found]
-except ImportError:
-    H264Encoder = None  # type: ignore[assignment]
-    FileOutput = None  # type: ignore[assignment]
 
 try:
     from PIL import Image, ImageDraw  # type: ignore[import-not-found]
@@ -289,10 +283,12 @@ def generate_frames() -> Iterator[bytes]:
 # Capture photo / enregistrement vidéo
 # ---------------------------------------------------------------------------
 
-_recording_encoder: object | None = None
 _recording_path: str | None = None
 _is_recording: bool = False
 _recording_started_at: float | None = None
+_ffmpeg_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
+_recording_thread: threading.Thread | None = None
+_recording_stop = threading.Event()
 
 
 def capture_photo() -> bytes:
@@ -307,47 +303,95 @@ def capture_photo() -> bytes:
     return buf.getvalue()
 
 
+def _frame_capture_loop() -> None:
+    """Thread : capture des frames JPEG et les pipe vers ffmpeg."""
+    _, _, framerate = _camera_settings()
+    width, height, _ = _camera_settings()
+    delay = 1.0 / max(1, framerate)
+    with _camera_lock:
+        cam = _get_camera(width, height, framerate)
+    while not _recording_stop.is_set():
+        try:
+            buf = io.BytesIO()
+            cam.capture_file(buf, format="jpeg")  # type: ignore[union-attr]
+            if _ffmpeg_proc and _ffmpeg_proc.stdin and not _ffmpeg_proc.stdin.closed:
+                _ffmpeg_proc.stdin.write(buf.getvalue())
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Frame capture error during recording: %s", exc)
+        time.sleep(delay)
+
+
 def start_video_recording(path: str) -> None:
-    """Démarre un enregistrement H264 vers `path`. Lève RuntimeError si déjà en cours."""
-    global _recording_encoder, _recording_path, _is_recording, _recording_started_at
+    """Démarre l'enregistrement via ffmpeg (pipe JPEG → MP4). Lève RuntimeError si déjà en cours."""
+    global _ffmpeg_proc, _recording_thread, _recording_path, _is_recording, _recording_started_at
 
     if _is_recording:
         raise RuntimeError("Enregistrement déjà en cours")
-    if Picamera2 is None or H264Encoder is None or FileOutput is None:
-        raise RuntimeError("picamera2 / H264Encoder non disponible")
+    if Picamera2 is None:
+        raise RuntimeError("picamera2 non disponible")
 
-    width, height, framerate = _camera_settings()
-    with _camera_lock:
-        cam = _get_camera(width, height, framerate)
+    _, _, framerate = _camera_settings()
+    try:
+        _ffmpeg_proc = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "image2pipe",
+                "-framerate",
+                str(framerate),
+                "-i",
+                "pipe:0",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p",
+                path,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg introuvable — sudo apt install ffmpeg") from exc
 
-    encoder = H264Encoder()
-    cam.start_encoder(encoder, FileOutput(path))  # type: ignore[union-attr]
-
-    _recording_encoder = encoder
     _recording_path = path
     _is_recording = True
     _recording_started_at = time.time()
+    _recording_stop.clear()
+    _recording_thread = threading.Thread(
+        target=_frame_capture_loop, daemon=True, name="video-recorder"
+    )
+    _recording_thread.start()
     log.info("Enregistrement démarré → %s", path)
 
 
 def stop_video_recording() -> str | None:
-    """Arrête l'enregistrement. Retourne le path du fichier .h264, ou None si rien n'était actif."""
-    global _recording_encoder, _recording_path, _is_recording, _recording_started_at
+    """Arrête l'enregistrement. Retourne le path du fichier MP4, ou None si rien n'était actif."""
+    global _ffmpeg_proc, _recording_thread, _recording_path, _is_recording, _recording_started_at
 
-    if not _is_recording or _recording_encoder is None:
+    if not _is_recording:
         return None
 
-    width, height, framerate = _camera_settings()
-    with _camera_lock:
-        cam = _get_camera(width, height, framerate)
-
-    try:
-        cam.stop_encoder()  # type: ignore[union-attr]
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Erreur lors de l'arrêt de l'encodeur : %s", exc)
-
     path = _recording_path
-    _recording_encoder = None
+    _recording_stop.set()
+
+    if _recording_thread:
+        _recording_thread.join(timeout=3.0)
+
+    if _ffmpeg_proc:
+        try:
+            if _ffmpeg_proc.stdin and not _ffmpeg_proc.stdin.closed:
+                _ffmpeg_proc.stdin.close()
+            _ffmpeg_proc.wait(timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ffmpeg finalization error: %s", exc)
+            _ffmpeg_proc.kill()
+
+    _ffmpeg_proc = None
+    _recording_thread = None
     _recording_path = None
     _is_recording = False
     _recording_started_at = None

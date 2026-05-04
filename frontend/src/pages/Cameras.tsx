@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Camera, Trash2, Download, RefreshCw, Loader2, AlertCircle } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
-import { ConnectionBar } from '../components/ConnectionBar'
 import { useMedia, type MediaItem } from '../hooks/useMedia'
 
 function formatBytes(bytes: number): string {
@@ -97,19 +96,8 @@ export default function Cameras() {
   const videos = media.items.filter(i => i.type === 'video')
 
   return (
-    <div className="flex flex-col min-h-screen" style={{ background: '#070d1a' }}>
-      <ConnectionBar
-        status={conn.status}
-        robotIp={conn.robotIp}
-        setRobotIp={conn.setRobotIp}
-        connect={conn.connect}
-        disconnect={conn.disconnect}
-        latencyMs={conn.latencyMs}
-        errorMessage={conn.errorMessage}
-      />
-
-      <div className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full">
-        <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
+    <div className="max-w-7xl mx-auto w-full">
+      <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Camera size={16} className="text-emerald-400" />
@@ -187,7 +175,6 @@ export default function Cameras() {
               </div>
             )}
           </div>
-        </div>
       </div>
     </div>
   )

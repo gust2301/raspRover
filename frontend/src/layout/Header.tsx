@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { ChevronDown, Bell, Shield, Building2, User, Menu } from 'lucide-react'
+import { ChevronDown, Bell, Building2, User, Menu, WifiOff } from 'lucide-react'
 import { mockSites } from '../data/sites'
+import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
 export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const [selectedSite, setSelectedSite] = useState(mockSites[0])
   const [siteMenuOpen, setSiteMenuOpen] = useState(false)
+  const conn = useSharedRobotConnection()
 
   return (
     <header
@@ -62,9 +64,26 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
-        <div className="hidden lg:flex items-center gap-2 text-sm text-emerald-400">
-          <Shield size={14} />
-          <span>Système opérationnel</span>
+        {/* Robot connection status */}
+        <div className="hidden lg:flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${
+            conn.status === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'
+          }`} />
+          <span className={`text-xs font-mono truncate max-w-[160px] ${
+            conn.status === 'connected' ? 'text-emerald-400' : 'text-amber-400'
+          }`}>
+            {conn.robotIp}
+          </span>
+          {conn.latencyMs !== null && (
+            <span className="text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
+          )}
+          <button
+            onClick={conn.disconnect}
+            title="Déconnecter"
+            className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            <WifiOff size={13} />
+          </button>
         </div>
 
         <button className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">

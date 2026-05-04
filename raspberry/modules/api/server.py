@@ -6,7 +6,6 @@ import asyncio
 import datetime
 import logging
 import pathlib
-import subprocess
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -684,11 +683,11 @@ async def video_start() -> dict:
         )
 
     ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
-    h264_path = f"/tmp/video_{ts}.h264"
+    mp4_path = f"/tmp/video_{ts}.mp4"
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, lambda: start_video_recording(h264_path))
+        await loop.run_in_executor(None, lambda: start_video_recording(mp4_path))
     except Exception as exc:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
@@ -697,7 +696,7 @@ async def video_start() -> dict:
 
 @app.post("/api/video/stop")
 async def video_stop() -> dict:
-    """Arrête l'enregistrement, convertit en MP4 via ffmpeg et upload vers R2."""
+    """Arrête l'enregistrement et upload le MP4 vers R2."""
     state = get_recording_state()
     if not state["is_recording"]:
         return JSONResponse(
@@ -707,37 +706,19 @@ async def video_stop() -> dict:
     started_at: float | None = state["started_at"]
     loop = asyncio.get_running_loop()
 
-    h264_path = await loop.run_in_executor(None, stop_video_recording)
-    if not h264_path:
+    mp4_path = await loop.run_in_executor(None, stop_video_recording)
+    if not mp4_path:
         return JSONResponse(status_code=500, content={"ok": False, "error": "Fichier introuvable"})
 
     duration_s = round(time.time() - started_at, 1) if started_at else 0.0
 
-    # Remuxage H264 → MP4 via ffmpeg (sans réencodage, très rapide)
-    mp4_path = h264_path.replace(".h264", ".mp4")
-    try:
-        await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["ffmpeg", "-y", "-framerate", "24", "-i", h264_path, "-c:v", "copy", mp4_path],
-                check=True,
-                capture_output=True,
-                timeout=60,
-            ),
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        log.warning("ffmpeg indisponible ou échec de remuxage, upload du .h264 brut : %s", exc)
-        mp4_path = h264_path
-
-    ts = Path(h264_path).stem.replace("video_", "")
+    ts = Path(mp4_path).stem.replace("video_", "")
     date_str = ts[:10] if len(ts) >= 10 else datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    ext = "mp4" if mp4_path.endswith(".mp4") else "h264"
-    key = f"{_rover_name}/{date_str}/videos/video_{ts}.{ext}"
+    key = f"{_rover_name}/{date_str}/videos/video_{ts}.mp4"
 
     r2 = get_r2_client()
     if r2 is None:
-        for p in {h264_path, mp4_path}:
-            Path(p).unlink(missing_ok=True)
+        Path(mp4_path).unlink(missing_ok=True)
         return JSONResponse(
             status_code=503,
             content={"ok": False, "error": "Stockage R2 non configuré", "duration_s": duration_s},
@@ -751,8 +732,7 @@ async def video_stop() -> dict:
     except Exception as exc:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
     finally:
-        for p in {h264_path, mp4_path}:
-            Path(p).unlink(missing_ok=True)
+        Path(mp4_path).unlink(missing_ok=True)
 
     url = await loop.run_in_executor(None, lambda: r2.presigned_url(key))
     return {"ok": True, "key": key, "url": url, "duration_s": duration_s}
