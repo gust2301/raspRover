@@ -83,3 +83,13 @@ patrol:
   stuck_timeout: 3.5        # Secondes en FORWARD sans obstacle → angle mort détecté
   scan_with_pantilt: false  # true = sweep caméra gauche/centre/droite avant chaque étape
                             # plus précis pour les angles morts, mais plus lent (~1s/scan)
+
+storage:
+  r2:
+    # Laisser endpoint_url vide pour désactiver le stockage R2.
+    # Prérequis sur la Pi : pip install boto3  &&  sudo apt install ffmpeg
+    endpoint_url: ""          # ex: https://<account_id>.r2.cloudflarestorage.com
+    access_key_id: ""
+    secret_access_key: ""
+    bucket_name: "rasprover-media"
+    presigned_url_expiry_s: 3600   # Durée de vie des URLs signées (1h)

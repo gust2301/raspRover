@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import pathlib
+import subprocess
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -22,12 +26,17 @@ from modules.control.patrol import PatrolController
 from modules.sensors import UltrasonicSensor, VisionObstacleDetector
 
 from .camera import (
+    capture_photo,
     generate_frames,
+    get_recording_state,
     register_frame_callback,
     start_standalone_vision_producer,
+    start_video_recording,
     stop_standalone_vision_producer,
+    stop_video_recording,
     unregister_frame_callback,
 )
+from .media import get_r2_client
 
 log = logging.getLogger(__name__)
 
@@ -138,6 +147,8 @@ async def lifespan(app: FastAPI):
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
         await _patrol.stop(loop)
+    if get_recording_state()["is_recording"]:
+        stop_video_recording()
     if _vision:
         stop_standalone_vision_producer()
         unregister_frame_callback(_vision.push_frame)
@@ -626,3 +637,146 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await loop.run_in_executor(None, _motors.stop)
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---------------------------------------------------------------------------
+# REST — Média (photo / vidéo / galerie R2)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/photo")
+async def take_photo() -> dict:
+    """Capture un JPEG et l'upload vers R2. Retourne key, url, size, timestamp."""
+    loop = asyncio.get_running_loop()
+    try:
+        jpeg_bytes = await loop.run_in_executor(None, capture_photo)
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+    r2 = get_r2_client()
+    if r2 is None:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Stockage R2 non configuré"},
+        )
+
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    key = f"photo_{ts}.jpg"
+
+    try:
+        await loop.run_in_executor(None, lambda: r2.upload_bytes(key, jpeg_bytes, "image/jpeg"))
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+    url = await loop.run_in_executor(None, lambda: r2.presigned_url(key))
+    return {"ok": True, "key": key, "url": url, "size": len(jpeg_bytes), "timestamp": ts}
+
+
+@app.post("/api/video/start")
+async def video_start() -> dict:
+    """Démarre l'enregistrement vidéo vers /tmp/."""
+    if get_recording_state()["is_recording"]:
+        return JSONResponse(
+            status_code=409, content={"ok": False, "error": "Déjà en cours d'enregistrement"}
+        )
+
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    h264_path = f"/tmp/video_{ts}.h264"
+
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: start_video_recording(h264_path))
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+    return {"ok": True, "recording": True, "started_at": ts}
+
+
+@app.post("/api/video/stop")
+async def video_stop() -> dict:
+    """Arrête l'enregistrement, convertit en MP4 via ffmpeg et upload vers R2."""
+    state = get_recording_state()
+    if not state["is_recording"]:
+        return JSONResponse(
+            status_code=409, content={"ok": False, "error": "Aucun enregistrement en cours"}
+        )
+
+    started_at: float | None = state["started_at"]
+    loop = asyncio.get_running_loop()
+
+    h264_path = await loop.run_in_executor(None, stop_video_recording)
+    if not h264_path:
+        return JSONResponse(status_code=500, content={"ok": False, "error": "Fichier introuvable"})
+
+    duration_s = round(time.time() - started_at, 1) if started_at else 0.0
+
+    # Remuxage H264 → MP4 via ffmpeg (sans réencodage, très rapide)
+    mp4_path = h264_path.replace(".h264", ".mp4")
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["ffmpeg", "-y", "-framerate", "24", "-i", h264_path, "-c:v", "copy", mp4_path],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            ),
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        log.warning("ffmpeg indisponible ou échec de remuxage, upload du .h264 brut : %s", exc)
+        mp4_path = h264_path
+
+    ts = Path(h264_path).stem.replace("video_", "")
+    key = f"video_{ts}.mp4" if mp4_path.endswith(".mp4") else f"video_{ts}.h264"
+
+    r2 = get_r2_client()
+    if r2 is None:
+        for p in {h264_path, mp4_path}:
+            Path(p).unlink(missing_ok=True)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Stockage R2 non configuré", "duration_s": duration_s},
+        )
+
+    try:
+        with open(mp4_path, "rb") as f:
+            data = f.read()
+        content_type = "video/mp4" if mp4_path.endswith(".mp4") else "video/h264"
+        await loop.run_in_executor(None, lambda: r2.upload_bytes(key, data, content_type))
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+    finally:
+        for p in {h264_path, mp4_path}:
+            Path(p).unlink(missing_ok=True)
+
+    url = await loop.run_in_executor(None, lambda: r2.presigned_url(key))
+    return {"ok": True, "key": key, "url": url, "duration_s": duration_s}
+
+
+@app.get("/api/media")
+async def list_media() -> list | dict:
+    """Liste les médias stockés dans R2 avec leurs presigned URLs."""
+    r2 = get_r2_client()
+    if r2 is None:
+        return JSONResponse(
+            status_code=503, content={"error": "Stockage R2 non configuré"}
+        )
+    loop = asyncio.get_running_loop()
+    items = await loop.run_in_executor(None, r2.list_media)
+    return items
+
+
+@app.delete("/api/media/{key:path}")
+async def delete_media(key: str) -> dict:
+    """Supprime un média de R2."""
+    r2 = get_r2_client()
+    if r2 is None:
+        return JSONResponse(
+            status_code=503, content={"ok": False, "error": "Stockage R2 non configuré"}
+        )
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: r2.delete(key))
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+    return {"ok": True, "key": key}

@@ -26,6 +26,13 @@ except ImportError:  # pragma: no cover - dev hors Raspberry Pi
             Picamera2 = None  # type: ignore[assignment]
 
 try:
+    from picamera2.encoders import H264Encoder  # type: ignore[import-not-found]
+    from picamera2.outputs import FileOutput  # type: ignore[import-not-found]
+except ImportError:
+    H264Encoder = None  # type: ignore[assignment]
+    FileOutput = None  # type: ignore[assignment]
+
+try:
     from PIL import Image, ImageDraw  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - pillow n'est pas requise
     Image = None  # type: ignore[assignment]
@@ -276,3 +283,81 @@ def generate_frames() -> Iterator[bytes]:
     except Exception as exc:  # noqa: BLE001
         log.exception("picamera2 stream failed, falling back to test frames: %s", exc)
         yield from _test_pattern_stream(width, height, framerate)
+
+
+# ---------------------------------------------------------------------------
+# Capture photo / enregistrement vidéo
+# ---------------------------------------------------------------------------
+
+_recording_encoder: object | None = None
+_recording_path: str | None = None
+_is_recording: bool = False
+_recording_started_at: float | None = None
+
+
+def capture_photo() -> bytes:
+    """Capture un frame JPEG. Réutilise le singleton caméra si déjà ouvert."""
+    width, height, framerate = _camera_settings()
+    if Picamera2 is None:
+        return _generate_test_frame(width, height)
+    with _camera_lock:
+        cam = _get_camera(width, height, framerate)
+    buf = io.BytesIO()
+    cam.capture_file(buf, format="jpeg")  # type: ignore[union-attr]
+    return buf.getvalue()
+
+
+def start_video_recording(path: str) -> None:
+    """Démarre un enregistrement H264 vers `path`. Lève RuntimeError si déjà en cours."""
+    global _recording_encoder, _recording_path, _is_recording, _recording_started_at
+
+    if _is_recording:
+        raise RuntimeError("Enregistrement déjà en cours")
+    if Picamera2 is None or H264Encoder is None or FileOutput is None:
+        raise RuntimeError("picamera2 / H264Encoder non disponible")
+
+    width, height, framerate = _camera_settings()
+    with _camera_lock:
+        cam = _get_camera(width, height, framerate)
+
+    encoder = H264Encoder()
+    cam.start_encoder(encoder, FileOutput(path))  # type: ignore[union-attr]
+
+    _recording_encoder = encoder
+    _recording_path = path
+    _is_recording = True
+    _recording_started_at = time.time()
+    log.info("Enregistrement démarré → %s", path)
+
+
+def stop_video_recording() -> str | None:
+    """Arrête l'enregistrement. Retourne le path du fichier .h264, ou None si rien n'était actif."""
+    global _recording_encoder, _recording_path, _is_recording, _recording_started_at
+
+    if not _is_recording or _recording_encoder is None:
+        return None
+
+    width, height, framerate = _camera_settings()
+    with _camera_lock:
+        cam = _get_camera(width, height, framerate)
+
+    try:
+        cam.stop_encoder()  # type: ignore[union-attr]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Erreur lors de l'arrêt de l'encodeur : %s", exc)
+
+    path = _recording_path
+    _recording_encoder = None
+    _recording_path = None
+    _is_recording = False
+    _recording_started_at = None
+    log.info("Enregistrement arrêté → %s", path)
+    return path
+
+
+def get_recording_state() -> dict:
+    return {
+        "is_recording": _is_recording,
+        "started_at": _recording_started_at,
+        "path": _recording_path,
+    }

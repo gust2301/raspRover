@@ -27,6 +27,10 @@ export function getRobotWsUrl(robotIp: string): string {
   return `${parseRobotUrl(robotIp).wsBase}/ws`
 }
 
+export function getRobotApiUrl(robotIp: string): string {
+  return parseRobotUrl(robotIp).httpBase
+}
+
 export function getRobotTransportWarning(robotIp: string = ''): string | null {
   if (window.location.protocol !== 'https:') return null
   if (isFullUrl(robotIp) && robotIp.startsWith('https://')) return null
