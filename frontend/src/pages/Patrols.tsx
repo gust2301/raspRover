@@ -6,6 +6,7 @@ import {
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
 import { ConnectionBar } from '../components/ConnectionBar'
+import { CaptureBar } from '../components/CaptureBar'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,6 +263,11 @@ export default function Patrols() {
   scan_with_pantilt: false  # sweep caméra L/C/D`}</pre>
                 </div>
               )}
+            </div>
+
+            {/* Capture photo / vidéo */}
+            <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
+              <CaptureBar robotIp={conn.robotIp} connected={isConnected} />
             </div>
 
             {/* Sensors */}

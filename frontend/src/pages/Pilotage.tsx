@@ -3,6 +3,7 @@ import {
   Wifi, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Square, Camera, CameraOff, Activity, Lightbulb, Siren, Radar,
 } from 'lucide-react'
+import { CaptureBar } from '../components/CaptureBar'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
 import { ConnectionBar } from '../components/ConnectionBar'
@@ -807,6 +808,9 @@ export default function Pilotage() {
               </span>
             </button>
           </div>
+
+          {/* Capture photo / vidéo */}
+          <CaptureBar robotIp={conn.robotIp} connected={conn.status === 'connected'} />
 
           {/* Alert button */}
           <div className="px-5 py-4 border-b border-slate-800">
