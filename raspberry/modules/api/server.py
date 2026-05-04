@@ -758,9 +758,7 @@ async def list_media() -> list | dict:
     """Liste les médias stockés dans R2 avec leurs presigned URLs."""
     r2 = get_r2_client()
     if r2 is None:
-        return JSONResponse(
-            status_code=503, content={"error": "Stockage R2 non configuré"}
-        )
+        return JSONResponse(status_code=503, content={"error": "Stockage R2 non configuré"})
     loop = asyncio.get_running_loop()
     items = await loop.run_in_executor(None, r2.list_media)
     return items
