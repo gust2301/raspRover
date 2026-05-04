@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Square, Camera, CameraOff, Activity, Lightbulb, Siren, Radar,
-  Image, Video, VideoOff, Loader2, Circle,
+  Image, Video, VideoOff, Loader2, Circle, Crosshair,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
@@ -463,6 +463,8 @@ export default function Pilotage() {
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
 
   const patrolActive = conn.lastStatus?.patrol_active ?? false
+  const trackingActive = conn.trackingActive
+  const personDetected = conn.personDetected
   const connected = conn.status === 'connected' && !emergency && !patrolActive
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
   const canAlert = conn.status === 'connected'
@@ -685,6 +687,20 @@ export default function Pilotage() {
               </div>
             )}
 
+            {/* Tracking active overlay */}
+            {trackingActive && (
+              <div className={`absolute top-4 right-4 z-30 flex items-center gap-2 rounded-xl px-3 py-1.5 backdrop-blur-sm border ${
+                personDetected
+                  ? 'bg-emerald-900/80 border-emerald-500/60 text-emerald-200'
+                  : 'bg-slate-900/80 border-slate-600/60 text-slate-300'
+              }`}>
+                <Crosshair size={13} className={personDetected ? 'text-emerald-400' : 'text-slate-400 animate-pulse'} />
+                <span className="text-xs font-bold">
+                  {personDetected ? 'PERSONNE DÉTECTÉE' : 'RECHERCHE…'}
+                </span>
+              </div>
+            )}
+
             {/* Obstacle warning overlay */}
             {conn.lastStatus?.obstacle && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
@@ -850,6 +866,33 @@ export default function Pilotage() {
                 {cameraLight ? 'Lampe caméra allumée' : 'Allumer la lampe caméra'}
               </span>
             </button>
+          </div>
+
+          {/* Tracking */}
+          <div className="px-5 py-4 border-b border-slate-800">
+            <button
+              onClick={() => trackingActive ? conn.stopTracking() : conn.startTracking()}
+              disabled={conn.status !== 'connected' || patrolActive}
+              className={`w-full py-3 rounded-xl border-2 transition-all duration-150 flex items-center justify-center gap-3 font-bold active:scale-95 ${
+                conn.status !== 'connected' || patrolActive
+                  ? 'bg-slate-800/40 text-slate-700 border-slate-800 cursor-not-allowed'
+                  : trackingActive
+                    ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/60 hover:bg-emerald-600/30'
+                    : 'bg-slate-800/60 text-slate-300 border-slate-600/60 hover:bg-slate-700'
+              }`}
+            >
+              <Crosshair size={18} />
+              <span className="text-sm">{trackingActive ? 'Tracking actif — Arrêter' : 'Mode tracking humain'}</span>
+            </button>
+            {trackingActive && (
+              <p className={`mt-2 text-xs rounded-lg px-3 py-2 border ${
+                personDetected
+                  ? 'text-emerald-400 bg-emerald-900/20 border-emerald-700/40'
+                  : 'text-amber-400 bg-amber-900/20 border-amber-700/40 animate-pulse'
+              }`}>
+                {personDetected ? '✓ Personne détectée — caméra en suivi automatique' : 'Recherche d\'une personne…'}
+              </p>
+            )}
           </div>
 
           {/* Alert button */}

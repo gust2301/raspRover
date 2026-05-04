@@ -20,6 +20,11 @@ export interface RobotStatus {
   obstacle_rear?: boolean
   patrol_active?: boolean
   patrol_state?: 'idle' | 'forward' | 'avoiding' | 'stuck'
+  tracker_active?: boolean
+  tracking_person_detected?: boolean
+  tracking_cx?: number | null
+  tracking_cy?: number | null
+  tracking_confidence?: number
   vision_obstacle?: boolean
   vision_left?: boolean
   vision_center?: boolean
@@ -45,6 +50,10 @@ export interface RobotConnection {
   stopAlert: () => void
   startPatrol: () => void
   stopPatrol: () => void
+  startTracking: () => void
+  stopTracking: () => void
+  trackingActive: boolean
+  personDetected: boolean
   obstacleBlocked: boolean
   lastStatus: RobotStatus | null
   latencyMs: number | null
@@ -64,6 +73,8 @@ export function useRobotConnection(): RobotConnection {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [obstacleBlocked, setObstacleBlocked] = useState(false)
   const obstacleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [trackingActive, setTrackingActive] = useState(false)
+  const [personDetected, setPersonDetected] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const pingTsRef = useRef<number | null>(null)
@@ -122,7 +133,11 @@ export function useRobotConnection(): RobotConnection {
       if (wsRef.current !== ws) return
       try {
         const data = JSON.parse(event.data as string) as Record<string, unknown>
-        if (data.type === 'status') {
+        if (data.type === 'tracker_ack') {
+          setTrackingActive(Boolean(data.tracker_active))
+          setPersonDetected(Boolean(data.tracking_person_detected))
+          setLastStatus(prev => prev ? { ...prev, ...data } : data as RobotStatus)
+        } else if (data.type === 'status') {
           // Rétrocompatibilité : si le serveur Pi n'a pas encore _enrich_feedback,
           // il envoie 'v' brut (centivolts Waveshare, ex: 1134 = 11.34V) sans 'battery'.
           // Le JS officiel Waveshare fait data['v']/100 — on fait pareil ici.
@@ -142,6 +157,8 @@ export function useRobotConnection(): RobotConnection {
             const raw = Number(data.v)
             data.voltage = raw > 30 ? raw / 100 : raw
           }
+          if (data.tracker_active !== undefined) setTrackingActive(Boolean(data.tracker_active))
+          if (data.tracking_person_detected !== undefined) setPersonDetected(Boolean(data.tracking_person_detected))
           setLastStatus(data as RobotStatus)
           if (pingTsRef.current !== null) {
             setLatencyMs(Date.now() - pingTsRef.current)
@@ -250,6 +267,14 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'patrol', action: 'stop' })
   }, [send])
 
+  const startTracking = useCallback(() => {
+    send({ type: 'tracker', action: 'start' })
+  }, [send])
+
+  const stopTracking = useCallback(() => {
+    send({ type: 'tracker', action: 'stop' })
+  }, [send])
+
   // Ping toutes les 3s pour mesurer la latence et récupérer le statut
   useEffect(() => {
     if (status !== 'connected') return
@@ -282,6 +307,10 @@ export function useRobotConnection(): RobotConnection {
     stopAlert,
     startPatrol,
     stopPatrol,
+    startTracking,
+    stopTracking,
+    trackingActive,
+    personDetected,
     obstacleBlocked,
     lastStatus,
     latencyMs,

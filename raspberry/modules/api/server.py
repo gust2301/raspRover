@@ -22,7 +22,9 @@ from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 from modules.control.patrol import PatrolController
+from modules.control.tracker import TrackerController
 from modules.sensors import UltrasonicSensor, VisionObstacleDetector
+from modules.sensors.human_detector import HumanDetector
 
 from .camera import (
     capture_photo,
@@ -51,6 +53,8 @@ _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
+_human_detector: HumanDetector | None = None
+_tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 
 
@@ -97,7 +101,17 @@ async def _auto_record_coro(mp4_path: str, incident_id: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt, _lights, _ultrasonic, _vision, _patrol, _rover_name
+    global \
+        _link, \
+        _motors, \
+        _pantilt, \
+        _lights, \
+        _ultrasonic, \
+        _vision, \
+        _patrol, \
+        _human_detector, \
+        _tracker, \
+        _rover_name
 
     global _mixer
     cfg = _load_config()
@@ -160,6 +174,12 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Détecteur vision désactivé (sensors.vision.enabled: false)")
 
+    # Détecteur humain (HOG+SVM) + contrôleur de tracking
+    _human_detector = HumanDetector()
+    _human_detector.start()
+    register_frame_callback(_human_detector.push_frame)
+    log.info("HumanDetector démarré")
+
     # Contrôleur de patrouille
     patrol_cfg = cfg.get("patrol", {})
     _patrol = PatrolController(
@@ -176,6 +196,8 @@ async def lifespan(app: FastAPI):
         on_auto_record=_auto_record_coro,
     )
 
+    _tracker = TrackerController(_pantilt, _human_detector)
+
     _motors.stop()
     _pantilt.center()
     _lights.set_camera_light(False)
@@ -186,8 +208,13 @@ async def lifespan(app: FastAPI):
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
         await _patrol.stop(loop)
+    if _tracker and _tracker.active:
+        _tracker.stop()
     if get_recording_state()["is_recording"]:
         stop_video_recording()
+    if _human_detector:
+        unregister_frame_callback(_human_detector.push_frame)
+        _human_detector.stop()
     if _vision:
         stop_standalone_vision_producer()
         unregister_frame_callback(_vision.push_frame)
@@ -630,10 +657,27 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
                 action = data.get("action", "start")
                 if action == "start":
+                    if _tracker and _tracker.active:
+                        _tracker.stop()
                     await _patrol.start(loop)
                 else:
                     await _patrol.stop(loop)
                 await ws.send_json({"type": "patrol_ack", **_patrol.to_dict()})
+
+            elif msg_type == "tracker":
+                if _tracker is None or _pantilt is None:
+                    await ws.send_json({"type": "error", "message": "not ready"})
+                    continue
+                action = data.get("action", "start")
+                if action == "start":
+                    if _patrol and _patrol.active:
+                        await _patrol.stop(loop)
+                    _tracker.start(loop)
+                else:
+                    _tracker.stop()
+                tracker_data = _tracker.to_dict()
+                human_data = _human_detector.to_dict() if _human_detector else {}
+                await ws.send_json({"type": "tracker_ack", **tracker_data, **human_data})
 
             elif msg_type == "status":
                 if _link is None:
@@ -654,6 +698,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         if _patrol
                         else {"patrol_active": False, "patrol_state": "idle"}
                     )
+                    tracker_data = _tracker.to_dict() if _tracker else {"tracker_active": False}
+                    human_data = _human_detector.to_dict() if _human_detector else {}
                     await ws.send_json(
                         {
                             "type": "status",
@@ -664,6 +710,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             **distance_data,
                             **vision_data,
                             **patrol_data,
+                            **tracker_data,
+                            **human_data,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
