@@ -35,6 +35,7 @@ from .camera import (
     stop_video_recording,
     unregister_frame_callback,
 )
+from .db import init_db, list_incidents, log_incident, update_media_key
 from .media import get_r2_client
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,40 @@ def _load_config() -> dict:
     return {}
 
 
+async def _auto_record_coro(mp4_path: str, incident_id: int) -> None:
+    """Enregistre _AUTO_RECORD_DURATION secondes de vidéo puis upload vers R2."""
+    from modules.control.patrol import _AUTO_RECORD_DURATION
+
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: start_video_recording(mp4_path))
+        await asyncio.sleep(_AUTO_RECORD_DURATION)
+    finally:
+        mp4_out = await loop.run_in_executor(None, stop_video_recording)
+
+    if not mp4_out:
+        return
+
+    r2 = get_r2_client()
+    if r2 is None:
+        pathlib.Path(mp4_out).unlink(missing_ok=True)
+        return
+
+    try:
+        ts = pathlib.Path(mp4_out).stem.replace("auto_video_", "")
+        date_str = ts[:10] if len(ts) >= 10 else datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        key = f"{_rover_name}/{date_str}/videos/auto_{ts}.mp4"
+        with open(mp4_out, "rb") as f:
+            data = f.read()
+        await loop.run_in_executor(None, lambda: r2.upload_bytes(key, data, "video/mp4"))
+        update_media_key(incident_id, key)
+        log.info("Auto-vidéo uploadée : %s", key)
+    except Exception as exc:
+        log.warning("Auto-vidéo upload échoué : %s", exc)
+    finally:
+        pathlib.Path(mp4_out).unlink(missing_ok=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _link, _motors, _pantilt, _lights, _ultrasonic, _vision, _patrol, _rover_name
@@ -67,6 +102,7 @@ async def lifespan(app: FastAPI):
     global _mixer
     cfg = _load_config()
     _rover_name = cfg.get("rover", {}).get("name", "rasprover")
+    init_db()
     _mixer = DriveMixer(DriveConfig.from_dict(cfg.get("drive", {})))
     ctrl = cfg.get("control", {})
     port = ctrl.get("serial_port", "/dev/ttyAMA0")
@@ -136,6 +172,8 @@ async def lifespan(app: FastAPI):
         step_duration=float(patrol_cfg.get("step_duration", 0.7)),
         scan_with_pantilt=bool(patrol_cfg.get("scan_with_pantilt", False)),
         stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
+        on_incident=log_incident,
+        on_auto_record=_auto_record_coro,
     )
 
     _motors.stop()
@@ -763,3 +801,25 @@ async def delete_media(key: str) -> dict:
     except Exception as exc:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
     return {"ok": True, "key": key}
+
+
+@app.get("/api/incidents")
+async def get_incidents(days: int = 7) -> list:
+    """Retourne les incidents des N derniers jours (défaut 7)."""
+    loop = asyncio.get_running_loop()
+    incidents = await loop.run_in_executor(None, lambda: list_incidents(days))
+    r2 = get_r2_client()
+
+    if r2 is None:
+        return incidents
+
+    # Génère les presigned URLs pour les médias liés
+    def enrich(inc: dict) -> dict:
+        if inc.get("media_key"):
+            try:
+                inc["media_url"] = r2.presigned_url(inc["media_key"])
+            except Exception:
+                inc["media_url"] = None
+        return inc
+
+    return await loop.run_in_executor(None, lambda: [enrich(i) for i in incidents])

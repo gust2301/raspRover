@@ -23,9 +23,11 @@ Détection de blocage :
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import random
 import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
 
 log = logging.getLogger(__name__)
@@ -60,6 +62,10 @@ _VISION_WARMUP = 0.3  # s
 # Détection de blocage → scan pan-tilt
 _MIN_FREE_SECS = 1.5
 _STUCK_SCAN_THRESHOLD = 3
+
+# Auto-enregistrement vidéo sur incident
+_AUTO_RECORD_DURATION = 15.0  # secondes d'enregistrement par incident
+_AUTO_RECORD_COOLDOWN = 30.0  # délai minimum entre deux enregistrements (s)
 _SCAN_ANGLES = (-50, 0, 50)
 _SCAN_SETTLE = 0.6
 _SCAN_READ_SECS = 0.5
@@ -108,6 +114,8 @@ class PatrolController:
         step_duration: float = 0.7,
         scan_with_pantilt: bool = False,
         stuck_timeout: float = 0.0,
+        on_incident: Callable[[str, str, str], int] | None = None,
+        on_auto_record: Callable[[str, int], Awaitable[None]] | None = None,
     ) -> None:
         self._motors = motors
         self._ultrasonic = ultrasonic
@@ -115,12 +123,15 @@ class PatrolController:
         self._pantilt = pantilt
         self.speed = speed
         self.obstacle_cm = obstacle_cm
+        self._on_incident = on_incident
+        self._on_auto_record = on_auto_record
 
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._state: PatrolState = PatrolState.IDLE
         self._avoidance_count: int = 0  # alternance G/D
         self._short_move_count: int = 0  # compteur blocage
         self._last_turn_dir = None  # Direction | None — conservé entre évitements
+        self._last_record_ts: float = 0.0  # timestamp du dernier auto-enregistrement
 
     # ------------------------------------------------------------------
     # Propriétés
@@ -147,7 +158,12 @@ class PatrolController:
         self._avoidance_count = 0
         self._short_move_count = 0
         self._last_turn_dir = None
+        self._last_record_ts = 0.0
         self._task = asyncio.create_task(self._run(loop))
+        if self._on_incident:
+            self._on_incident(
+                "patrol_start", "info", f"speed={self.speed:.2f} obstacle_cm={self.obstacle_cm:.0f}"
+            )
         log.info("Patrouille démarrée (speed=%.2f obstacle_cm=%.0f)", self.speed, self.obstacle_cm)
 
     async def stop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -160,6 +176,8 @@ class PatrolController:
         self._task = None
         self._state = PatrolState.IDLE
         await loop.run_in_executor(None, self._motors.stop)
+        if self._on_incident:
+            self._on_incident("patrol_stop", "info", None)
         log.info("Patrouille arrêtée")
 
     # ------------------------------------------------------------------
@@ -189,6 +207,16 @@ class PatrolController:
                     await loop.run_in_executor(None, self._motors.stop)
                     log.info("Patrol: OBSTACLE — %s (libre=%.1fs)", obstacle, free_secs)
 
+                    # Journal + auto-enregistrement
+                    incident_id = -1
+                    if self._on_incident:
+                        incident_id = self._on_incident(
+                            "obstacle",
+                            "warning",
+                            f"{obstacle} après {free_secs:.1f}s de déplacement libre",
+                        )
+                    self._trigger_auto_record(incident_id)
+
                     if free_secs < _MIN_FREE_SECS:
                         self._short_move_count += 1
                         log.info(
@@ -202,6 +230,10 @@ class PatrolController:
                     if self._short_move_count >= _STUCK_SCAN_THRESHOLD and self._pantilt:
                         log.warning("Patrol: BLOQUÉ → scan pan-tilt")
                         self._state = PatrolState.STUCK
+                        if self._on_incident:
+                            self._on_incident(
+                                "patrol_stuck", "critical", f"count={self._short_move_count}"
+                            )
                         self._short_move_count = 0
                         best_dir = await self._pantilt_scan(loop, Direction)
                         if best_dir is not None:
@@ -214,6 +246,23 @@ class PatrolController:
             await loop.run_in_executor(None, self._motors.stop)
             self._state = PatrolState.IDLE
             raise
+
+    # ------------------------------------------------------------------
+    # Auto-enregistrement
+    # ------------------------------------------------------------------
+
+    def _trigger_auto_record(self, incident_id: int) -> None:
+        """Démarre un enregistrement automatique si le cooldown est passé."""
+        if self._on_auto_record is None:
+            return
+        now = time.monotonic()
+        if now - self._last_record_ts < _AUTO_RECORD_COOLDOWN:
+            return
+        self._last_record_ts = now
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+        path = f"/tmp/auto_video_{ts}.mp4"
+        asyncio.create_task(self._on_auto_record(path, incident_id))
+        log.info("Patrol: auto-enregistrement démarré → %s", path)
 
     # ------------------------------------------------------------------
     # Surveillance pendant l'avance
