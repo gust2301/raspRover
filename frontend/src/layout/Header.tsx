@@ -68,7 +68,7 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Robot connection status */}
         {conn.status === 'connected' ? (
-          <div className="hidden lg:flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-mono truncate max-w-[160px] text-emerald-400">
               {conn.robotIp}
@@ -87,12 +87,12 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
         ) : (
           <button
             onClick={() => navigate('/connect')}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
               bg-blue-600/15 text-blue-300 border border-blue-500/30
               hover:bg-blue-600/25 transition-colors"
           >
             <Wifi size={13} />
-            Connecter le robot
+            <span className="hidden sm:inline">Connecter le robot</span>
           </button>
         )}
 
