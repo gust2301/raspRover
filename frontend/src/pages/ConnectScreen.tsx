@@ -1,5 +1,6 @@
-import { Shield, Wifi, Loader2, AlertCircle, Settings2 } from 'lucide-react'
-import { useState } from 'react'
+import { Shield, Wifi, Loader2, AlertCircle, Settings2, ArrowLeft } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
 const STATUS_MSG: Record<string, { text: string; color: string }> = {
@@ -11,18 +12,25 @@ const STATUS_MSG: Record<string, { text: string; color: string }> = {
 
 export default function ConnectScreen() {
   const conn = useSharedRobotConnection()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(conn.robotIp)
 
+  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard'
+
+  useEffect(() => {
+    if (conn.status === 'connected') navigate(from, { replace: true })
+  }, [conn.status, navigate, from])
+
   const isConnecting = conn.status === 'connecting'
+  const { text: statusText, color: statusColor } = STATUS_MSG[conn.status]
 
   const saveAndConnect = () => {
     if (draft !== conn.robotIp) conn.setRobotIp(draft)
     setEditing(false)
     conn.connect()
   }
-
-  const { text: statusText, color: statusColor } = STATUS_MSG[conn.status]
 
   return (
     <div
@@ -93,7 +101,7 @@ export default function ConnectScreen() {
         </div>
 
         {/* Primary action */}
-        {conn.status === 'connected' ? null : isConnecting ? (
+        {isConnecting ? (
           <button
             onClick={conn.disconnect}
             className="w-full py-3 rounded-xl bg-slate-800 text-slate-400 font-medium text-sm
@@ -124,7 +132,16 @@ export default function ConnectScreen() {
         )}
       </div>
 
-      <p className="mt-8 text-xs text-slate-700">Entrez l'IP locale ou l'URL du tunnel ngrok/Cloudflare</p>
+      {/* Back to app */}
+      <button
+        onClick={() => navigate(-1)}
+        className="mt-6 flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors"
+      >
+        <ArrowLeft size={12} />
+        Continuer sans connexion
+      </button>
+
+      <p className="mt-3 text-xs text-slate-700">Entrez l'IP locale ou l'URL du tunnel ngrok/Cloudflare</p>
     </div>
   )
 }

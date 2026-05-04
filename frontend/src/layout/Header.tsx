@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ChevronDown, Bell, Building2, User, Menu, WifiOff } from 'lucide-react'
+import { ChevronDown, Bell, Building2, User, Menu, WifiOff, Wifi } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { mockSites } from '../data/sites'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
@@ -7,6 +8,7 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
   const [selectedSite, setSelectedSite] = useState(mockSites[0])
   const [siteMenuOpen, setSiteMenuOpen] = useState(false)
   const conn = useSharedRobotConnection()
+  const navigate = useNavigate()
 
   return (
     <header
@@ -65,26 +67,34 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
 
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Robot connection status */}
-        <div className="hidden lg:flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
-            conn.status === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'
-          }`} />
-          <span className={`text-xs font-mono truncate max-w-[160px] ${
-            conn.status === 'connected' ? 'text-emerald-400' : 'text-amber-400'
-          }`}>
-            {conn.robotIp}
-          </span>
-          {conn.latencyMs !== null && (
-            <span className="text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
-          )}
+        {conn.status === 'connected' ? (
+          <div className="hidden lg:flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-mono truncate max-w-[160px] text-emerald-400">
+              {conn.robotIp}
+            </span>
+            {conn.latencyMs !== null && (
+              <span className="text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
+            )}
+            <button
+              onClick={conn.disconnect}
+              title="Déconnecter"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <WifiOff size={13} />
+            </button>
+          </div>
+        ) : (
           <button
-            onClick={conn.disconnect}
-            title="Déconnecter"
-            className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            onClick={() => navigate('/connect')}
+            className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+              bg-blue-600/15 text-blue-300 border border-blue-500/30
+              hover:bg-blue-600/25 transition-colors"
           >
-            <WifiOff size={13} />
+            <Wifi size={13} />
+            Connecter le robot
           </button>
-        </div>
+        )}
 
         <button className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
           <Bell size={18} />
