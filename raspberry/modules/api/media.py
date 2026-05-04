@@ -65,9 +65,12 @@ class R2Client:
         )
         log.info("R2 upload OK : %s (%d bytes)", key, len(data))
 
-    def list_media(self) -> list[dict]:
+    def list_media(self, prefix: str = "") -> list[dict]:
         assert self._client is not None
-        resp = self._client.list_objects_v2(Bucket=self._bucket)
+        kwargs: dict = {"Bucket": self._bucket}
+        if prefix:
+            kwargs["Prefix"] = prefix
+        resp = self._client.list_objects_v2(**kwargs)
         items = []
         for obj in resp.get("Contents", []):
             key: str = obj["Key"]

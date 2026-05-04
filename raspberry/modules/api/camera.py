@@ -188,7 +188,7 @@ def _get_camera(width: int, height: int, framerate: int) -> object:
     assert Picamera2 is not None
     if _camera_instance is None:
         cam = Picamera2()
-        config = cam.create_video_configuration(main={"size": (width, height)})
+        config = cam.create_video_configuration(main={"size": (width, height), "format": "BGR888"})
         cam.configure(config)
         cam.start()
         time.sleep(0.2)

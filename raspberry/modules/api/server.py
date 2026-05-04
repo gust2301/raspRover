@@ -51,6 +51,7 @@ _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
+_rover_name: str = "rasprover"
 
 
 def _load_config() -> dict:
@@ -62,10 +63,11 @@ def _load_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _link, _motors, _pantilt, _lights, _ultrasonic, _vision, _patrol
+    global _link, _motors, _pantilt, _lights, _ultrasonic, _vision, _patrol, _rover_name
 
     global _mixer
     cfg = _load_config()
+    _rover_name = cfg.get("rover", {}).get("name", "rasprover")
     _mixer = DriveMixer(DriveConfig.from_dict(cfg.get("drive", {})))
     ctrl = cfg.get("control", {})
     port = ctrl.get("serial_port", "/dev/ttyAMA0")
@@ -660,8 +662,9 @@ async def take_photo() -> dict:
             content={"ok": False, "error": "Stockage R2 non configuré"},
         )
 
-    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
-    key = f"photo_{ts}.jpg"
+    now = datetime.datetime.utcnow()
+    ts = now.strftime("%Y-%m-%dT%H-%M-%S")
+    key = f"{_rover_name}/{now.strftime('%Y-%m-%d')}/photos/photo_{ts}.jpg"
 
     try:
         await loop.run_in_executor(None, lambda: r2.upload_bytes(key, jpeg_bytes, "image/jpeg"))
@@ -727,7 +730,9 @@ async def video_stop() -> dict:
         mp4_path = h264_path
 
     ts = Path(h264_path).stem.replace("video_", "")
-    key = f"video_{ts}.mp4" if mp4_path.endswith(".mp4") else f"video_{ts}.h264"
+    date_str = ts[:10] if len(ts) >= 10 else datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    ext = "mp4" if mp4_path.endswith(".mp4") else "h264"
+    key = f"{_rover_name}/{date_str}/videos/video_{ts}.{ext}"
 
     r2 = get_r2_client()
     if r2 is None:
@@ -760,7 +765,7 @@ async def list_media() -> list | dict:
     if r2 is None:
         return JSONResponse(status_code=503, content={"error": "Stockage R2 non configuré"})
     loop = asyncio.get_running_loop()
-    items = await loop.run_in_executor(None, r2.list_media)
+    items = await loop.run_in_executor(None, lambda: r2.list_media(prefix=_rover_name))
     return items
 
 

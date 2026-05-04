@@ -1,6 +1,9 @@
 # Configuration du RaspRover
 # Modifier ici sans toucher au code.
 
+rover:
+  name: "rasprover"          # Identifiant unique du rover (utilisé comme préfixe dans R2)
+
 control:
   # Port série UART de la Pi 5 vers l'ESP32 Waveshare.
   # - Matériel réel : /dev/ttyAMA0 (UART Pi 5) ou /dev/ttyUSB0 (ESP32 en USB)
