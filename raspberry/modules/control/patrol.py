@@ -49,7 +49,7 @@ _TURN_LATERAL = 0.75  # s
 _TURN_FRONT_MIN = 0.60  # s (~60°)
 _TURN_FRONT_MAX = 1.60  # s (~160°)
 
-_REVERSE_FRONT = 0.4  # recul avant rotation frontale (s)
+_REVERSE_FRONT = 0.7  # recul avant rotation frontale (s)
 _TURN_PAUSE = 0.15  # pause moteurs entre phases (s)
 
 # Keepalive : MotorController coupe après watchdog_s=1 s sans commande
@@ -68,11 +68,8 @@ _AUTO_RECORD_DURATION = 15.0  # secondes d'enregistrement par incident
 _AUTO_RECORD_COOLDOWN = 30.0  # délai minimum entre deux enregistrements (s)
 
 # Détection humaine pendant la patrouille
-_HUMAN_DETECT_PAUSE = 4.0  # s d'arrêt moteurs pour suivre + capturer
 _HUMAN_CAPTURE_COOLDOWN = 45.0  # délai minimum entre deux captures humaines (s)
-_HUMAN_TRACK_KP_PAN = 40.0  # gain P pan (même valeur que TrackerController)
-_HUMAN_TRACK_KP_TILT = 30.0  # gain P tilt
-_HUMAN_TRACK_DEAD_ZONE = 0.05  # zone morte normalisée
+_HUMAN_POLL = 0.5  # intervalle de vérification de la détection humaine (s)
 
 _SCAN_ANGLES = (-50, 0, 50)
 _SCAN_SETTLE = 0.6
@@ -201,6 +198,7 @@ class PatrolController:
     async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
         from modules.control.motor_controller import Direction
 
+        human_task = asyncio.create_task(self._human_capture_loop())
         try:
             while True:
                 # ── Avance ────────────────────────────────────────────
@@ -257,6 +255,11 @@ class PatrolController:
                         await self._avoid(loop, Direction, obstacle, free_secs)
 
         except asyncio.CancelledError:
+            human_task.cancel()
+            try:
+                await human_task
+            except asyncio.CancelledError:
+                pass
             await loop.run_in_executor(None, self._motors.stop)
             self._state = PatrolState.IDLE
             raise
@@ -282,56 +285,33 @@ class PatrolController:
     # Détection humaine pendant la patrouille
     # ------------------------------------------------------------------
 
-    async def _handle_human_pause(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Arrête le robot, suit la personne avec le pan-tilt, capture une photo, reprend."""
-        log.info("Patrol: humain détecté → pause %.1fs + tracking", _HUMAN_DETECT_PAUSE)
-        self._last_human_capture_ts = time.monotonic()
+    async def _human_capture_loop(self) -> None:
+        """Tâche de fond : surveille la détection humaine tout au long de la patrouille.
 
-        await loop.run_in_executor(None, self._motors.stop)
-
-        incident_id = -1
-        if self._on_incident:
-            incident_id = self._on_incident(
-                "human_detected_patrol",
-                "warning",
-                "Personne détectée pendant la patrouille",
-            )
-        self._trigger_human_capture(incident_id)
-
-        # Suivi pan-tilt pendant la pause
-        t_end = time.monotonic() + _HUMAN_DETECT_PAUSE
-        while time.monotonic() < t_end:
-            if self._pantilt and self._human_detector:
-                target = self._human_detector.best_target
-                if target:
-                    cx, cy, _ = target
-                    pan, tilt = self._pantilt.position
-                    error_x = cx - 0.5
-                    error_y = cy - 0.5
-                    new_pan = (
-                        pan + _HUMAN_TRACK_KP_PAN * error_x
-                        if abs(error_x) > _HUMAN_TRACK_DEAD_ZONE
-                        else pan
+        Tourne en parallèle du patrol loop principal — ne touche pas aux moteurs.
+        Déclenche une capture photo + incident dès qu'une personne est détectée,
+        quelle que soit la phase de patrouille (avance, évitement, scan).
+        """
+        while True:
+            await asyncio.sleep(_HUMAN_POLL)
+            if not self._human_detector or not self._human_detector.person_detected:
+                continue
+            now = time.monotonic()
+            if now - self._last_human_capture_ts < _HUMAN_CAPTURE_COOLDOWN:
+                continue
+            self._last_human_capture_ts = now
+            incident_id = -1
+            if self._on_incident:
+                try:
+                    incident_id = self._on_incident(
+                        "human_detected_patrol",
+                        "warning",
+                        "Personne détectée pendant la patrouille",
                     )
-                    new_tilt = (
-                        tilt - _HUMAN_TRACK_KP_TILT * error_y
-                        if abs(error_y) > _HUMAN_TRACK_DEAD_ZONE
-                        else tilt
-                    )
-                    if new_pan != pan or new_tilt != tilt:
-                        try:
-                            await loop.run_in_executor(
-                                None, lambda p=new_pan, t=new_tilt: self._pantilt.goto(p, t)
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            log.debug("Patrol human track goto error: %s", exc)
-            await asyncio.sleep(_POLL)
-
-        if self._pantilt:
-            try:
-                await loop.run_in_executor(None, self._pantilt.center)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("Patrol human track center error: %s", exc)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Patrol human incident error: %s", exc)
+            self._trigger_human_capture(incident_id)
+            log.info("Patrol: personne détectée → photo déclenchée (incident=%d)", incident_id)
 
     def _trigger_human_capture(self, incident_id: int) -> None:
         """Déclenche une capture photo de la personne détectée."""
@@ -399,18 +379,6 @@ class PatrolController:
                 if right:
                     log.info("Patrol cam: obstacle DROITE après %.1fs", elapsed)
                     return "vision:right"
-
-            # ── Détection humaine (tracking automatique + capture) ────
-            if self._human_detector and self._human_detector.person_detected:
-                now_h = time.monotonic()
-                if now_h - self._last_human_capture_ts >= _HUMAN_CAPTURE_COOLDOWN:
-                    await self._handle_human_pause(loop)
-                    # Reprise immédiate : renvoie la commande moteur
-                    await loop.run_in_executor(
-                        None,
-                        lambda d=fwd_direction, s=fwd_speed: self._motors.from_direction(d, s),
-                    )
-                    t_last_keepalive = time.monotonic()
 
             await asyncio.sleep(_POLL)
 
