@@ -72,6 +72,10 @@ async def _auto_record_coro(mp4_path: str, incident_id: int) -> None:
     loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, lambda: start_video_recording(mp4_path))
+    except RuntimeError as exc:
+        log.warning("Auto-vidéo: impossible de démarrer (%s)", exc)
+        return
+    try:
         await asyncio.sleep(_AUTO_RECORD_DURATION)
     finally:
         mp4_out = await loop.run_in_executor(None, stop_video_recording)
@@ -97,6 +101,31 @@ async def _auto_record_coro(mp4_path: str, incident_id: int) -> None:
         log.warning("Auto-vidéo upload échoué : %s", exc)
     finally:
         pathlib.Path(mp4_out).unlink(missing_ok=True)
+
+
+async def _auto_photo_coro(incident_id: int) -> None:
+    """Capture une photo de la personne détectée et l'upload vers R2."""
+    loop = asyncio.get_running_loop()
+    try:
+        jpeg_bytes = await loop.run_in_executor(None, capture_photo)
+    except Exception as exc:
+        log.warning("Auto-photo: capture échouée : %s", exc)
+        return
+
+    r2 = get_r2_client()
+    if r2 is None:
+        return
+
+    now = datetime.datetime.utcnow()
+    ts = now.strftime("%Y-%m-%dT%H-%M-%S")
+    key = f"{_rover_name}/{now.strftime('%Y-%m-%d')}/photos/human_{ts}.jpg"
+
+    try:
+        await loop.run_in_executor(None, lambda: r2.upload_bytes(key, jpeg_bytes, "image/jpeg"))
+        update_media_key(incident_id, key)
+        log.info("Auto-photo humaine uploadée : %s", key)
+    except Exception as exc:
+        log.warning("Auto-photo: upload échoué : %s", exc)
 
 
 @asynccontextmanager
@@ -187,6 +216,7 @@ async def lifespan(app: FastAPI):
         ultrasonic=_ultrasonic,
         vision=_vision,
         pantilt=_pantilt,
+        human_detector=_human_detector,
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
         step_duration=float(patrol_cfg.get("step_duration", 0.7)),
@@ -194,6 +224,7 @@ async def lifespan(app: FastAPI):
         stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
         on_incident=log_incident,
         on_auto_record=_auto_record_coro,
+        on_capture_photo=_auto_photo_coro,
     )
 
     _tracker = TrackerController(
