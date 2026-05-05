@@ -68,10 +68,10 @@ _AUTO_RECORD_DURATION = 15.0  # secondes d'enregistrement par incident
 _AUTO_RECORD_COOLDOWN = 30.0  # délai minimum entre deux enregistrements (s)
 
 # Détection humaine pendant la patrouille
-_HUMAN_DETECT_PAUSE = 4.0     # s d'arrêt moteurs pour suivre + capturer
+_HUMAN_DETECT_PAUSE = 4.0  # s d'arrêt moteurs pour suivre + capturer
 _HUMAN_CAPTURE_COOLDOWN = 45.0  # délai minimum entre deux captures humaines (s)
-_HUMAN_TRACK_KP_PAN = 40.0    # gain P pan (même valeur que TrackerController)
-_HUMAN_TRACK_KP_TILT = 30.0   # gain P tilt
+_HUMAN_TRACK_KP_PAN = 40.0  # gain P pan (même valeur que TrackerController)
+_HUMAN_TRACK_KP_TILT = 30.0  # gain P tilt
 _HUMAN_TRACK_DEAD_ZONE = 0.05  # zone morte normalisée
 
 _SCAN_ANGLES = (-50, 0, 50)
