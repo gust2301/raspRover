@@ -1,154 +1,222 @@
-# RaspRover Surveillance System
+# SENTRYX RaspRover
 
-Robot mobile de surveillance basé sur **Waveshare RaspRover PT** (ref. 26832) + **Raspberry Pi 5**.
+Robot mobile de surveillance construit autour d'un **Waveshare RaspRover PT 4WD** et d'une **Raspberry Pi 5**. Le projet regroupe une interface web type poste de contrôle, une API embarquée, le pilotage moteur/pan-tilt, le streaming caméra, la détection d'obstacles, les patrouilles autonomes et la journalisation d'incidents.
 
-## Matériel
+> Projet personnel réalisé pour explorer l'intégration robotique complète : contrôle temps réel, backend embarqué, vision, stockage média et interface opérateur.
+
+## Aperçu
+
+SENTRYX permet de piloter un rover de surveillance depuis un navigateur, de consulter son flux caméra, de déclencher des patrouilles et de récupérer les événements détectés pendant l'exécution. Le système peut tourner sur le robot réel ou en mode simulation grâce à un émulateur ESP32 fourni dans le dépôt.
+
+Fonctionnalités principales :
+
+- Pilotage manuel du rover : avance, recul, rotation, arrêt d'urgence.
+- Contrôle de la caméra pan-tilt via servos ST3215.
+- Flux vidéo MJPEG depuis la caméra Raspberry Pi.
+- Détection d'obstacles par capteur ultrasonique et analyse d'image OpenCV.
+- Détection humaine et suivi pan-tilt.
+- Mode patrouille autonome avec évitement simple et création d'incidents.
+- Capture photo, enregistrement vidéo et stockage optionnel Cloudflare R2.
+- Interface web responsive installable comme PWA.
+- API REST et WebSocket pour le contrôle et la télémétrie temps réel.
+- Émulateur ESP32 pour développer sans le matériel.
+
+## Stack technique
+
+| Couche | Technologies |
+|---|---|
+| Frontend | React, TypeScript, Vite, Tailwind CSS, PWA |
+| Backend embarqué | Python 3.11+, FastAPI, Uvicorn, WebSocket |
+| Robotique | Raspberry Pi 5, ESP32 Waveshare, UART JSON line-delimited |
+| Vision / capteurs | PiCamera2, OpenCV, HC-SR04 via Arduino |
+| Stockage média | SQLite local, Cloudflare R2 optionnel |
+| Qualité | Pytest, Ruff, émulateur matériel local |
+
+## Matériel ciblé
 
 | Composant | Détail |
 |---|---|
-| Plateforme | Waveshare RaspRover PT 4WD (châssis alu 2mm) |
-| Calculateur principal | Raspberry Pi 5 (4-8 GB) |
-| Sous-contrôleur | **ESP32** embarqué (firmware Waveshare UGV pré-flashé) |
-| Pan-Tilt | 2× servos bus série **ST3215** (20 kg.cm) |
-| Caméra | 5 MP, FOV 160° |
-| Alimentation | Module UPS 3S + 3× batteries Li-Ion 18650 |
-| Vitesse max | 0,65 m/s — rotation sur place (R=0) |
+| Plateforme | Waveshare RaspRover PT 4WD |
+| Calculateur principal | Raspberry Pi 5 |
+| Sous-contrôleur | ESP32 embarqué avec firmware Waveshare UGV |
+| Caméra | Module caméra Raspberry Pi, flux MJPEG |
+| Pan-tilt | 2 servos bus série ST3215 |
+| Distance | HC-SR04 branché sur Arduino en USB série |
+| Alimentation | Module UPS 3S + batteries Li-Ion 18650 |
 
-> Note : Le document technique d'origine mentionnait SG90/L298N, mais le kit Waveshare embarque en réalité un ESP32 + servos ST3215. Le code de ce projet est adapté à la réalité matérielle.
+## Architecture
 
-## Architecture logicielle
-
+```text
+Navigateur / PWA React
+        |
+        | HTTP REST + WebSocket + MJPEG
+        v
+Raspberry Pi 5
+  - FastAPI
+  - contrôle moteur et pan-tilt
+  - caméra, capture photo, vidéo
+  - détection obstacle / humain
+  - patrouilles et incidents
+        |
+        | UART /dev/ttyAMA0 ou socket://localhost:9999
+        | protocole JSON line-delimited Waveshare
+        v
+ESP32 Waveshare
+  - moteurs 4WD
+  - servos ST3215
+  - feedback batterie / IMU
 ```
-┌────────────────────────────────────────────┐
-│  Navigateur (utilisateur)                  │
-└──────────────┬─────────────────────────────┘
-               │ HTTP/WebSocket (WiFi)
-┌──────────────▼─────────────────────────────┐
-│  Raspberry Pi 5  (Python 3.11+)            │
-│  ├── modules/api         (Flask + WS)      │
-│  ├── modules/video       (PiCamera2/MJPEG) │
-│  ├── modules/surveillance (logique/alerte) │
-│  ├── modules/perception  (OpenCV, HC-SR04) │
-│  ├── modules/storage     (SSD NVMe)        │
-│  └── modules/control     ◄── Développé ici │
-└──────────────┬─────────────────────────────┘
-               │ UART /dev/ttyS0 @ 115200 bauds
-               │ Protocole : JSON line-delimited
-┌──────────────▼─────────────────────────────┐
-│  ESP32 (firmware Waveshare UGV)            │
-│  ├── Pilotage moteurs 4WD (PWM)            │
-│  ├── Contrôle servos ST3215 bus série      │
-│  ├── Lecture IMU / batterie                │
-│  └── Boucle temps-réel < 10 ms             │
-└────────────────────────────────────────────┘
-```
-
-## Phase 1 livrée
-
-- [x] **Module Contrôle** : liaison ESP32 + API haut niveau moteurs + Pan-Tilt
-- [ ] Module Vidéo (à venir)
-- [ ] Module Perception (à venir)
-- [ ] Module Surveillance (à venir)
-- [ ] Module Stockage (à venir)
-- [ ] Module API / Interface Web (à venir)
-
-## Installation
-
-```bash
-# Sur la Raspberry Pi 5, depuis le dossier du projet :
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Activer l'UART matériel sur la Pi 5 :
-#   sudo raspi-config → Interface Options → Serial Port
-#   - Login shell over serial : NO
-#   - Serial hardware enabled : YES
-# Puis redémarrer.
-
-# Donner les droits série à l'utilisateur :
-sudo usermod -aG dialout $USER
-```
-
-## Test rapide du Module Contrôle
-
-```bash
-# Script interactif pour tester moteurs + Pan-Tilt sur vrai matériel :
-python3 -m tests.test_control --port /dev/ttyAMA0
-```
-
-Commandes disponibles : `f` (avance), `b` (recul), `l` (gauche), `r` (droite), `s` (stop), `p <pan> <tilt>` (orienter caméra), `c` (recentre caméra), `fb` / `fb126` / `fb130` (diagnostic feedback), `echo on|off`, `stream on|off`, `raw <json>`, `rx`, `?` (état), `q` (quitter).
-
-Notes protocole Waveshare :
-
-- Vitesse châssis : `{"T":1,"L":0.5,"R":0.5}`
-- Pan-Tilt : `{"T":133,"X":45,"Y":10,"SPD":600,"ACC":50}`
-- Feedback châssis : `{"T":130}`
-- IMU / statut : `{"T":126}`
-
-## Tester SANS le matériel (émulateur)
-
-En attendant le RaspRover physique, un émulateur ESP32 livré avec le projet reproduit le protocole JSON-UART Waveshare UGV sur un socket TCP local. Il maintient un état robot virtuel (position 2D intégrée, angles Pan-Tilt, batterie qui se décharge) et répond aux commandes comme le ferait le firmware réel. Pas besoin de driver virtuel : ça marche sous Windows, macOS et Linux.
-
-Terminal 1 — lancer l'émulateur :
-
-```bash
-python3 -m tools.fake_esp32                # par défaut localhost:9999
-python3 -m tools.fake_esp32 --viz          # avec mini ASCII map temps-réel
-python3 -m tools.fake_esp32 --port 9999
-```
-
-Terminal 2 — pointer le code sur l'émulateur (URL `socket://` au lieu d'un port série) :
-
-```bash
-# REPL interactif :
-python3 -m tests.test_control --port socket://localhost:9999
-
-# Ou édition de config.yaml :
-#   serial_port: socket://localhost:9999
-# puis : python3 main.py
-
-# Ou directement en Python :
-from modules.control import ESP32Link, MotorController, PanTiltController
-link = ESP32Link(port="socket://localhost:9999")
-link.open()
-motors = MotorController(link)
-motors.forward(0.4)
-```
-
-Pour basculer vers le vrai matériel, remplacer `socket://localhost:9999` par `/dev/ttyAMA0` (UART hardware Pi 5) ou `/dev/ttyUSB0` (ESP32 en USB) — le reste du code ne change pas.
-
-### Limites de l'émulateur et alternatives plus poussées
-
-L'émulateur livré simule : le protocole JSON, la physique 2D différentielle, la batterie, et le feedback (T=126). Il ne simule pas la vidéo, le capteur ultrasonique, ni les collisions.
-
-Pour aller plus loin quand vous aurez besoin de tester la détection visuelle et la navigation :
-
-- **Webots** (gratuit, officiellement recommandé pour robots Waveshare) — simulation 3D complète avec caméras, capteurs ultrasoniques, physique réaliste
-- **Gazebo + ROS 2 Humble** (le kit supporte ROS 2) — écosystème standard en robotique, nodes caméra et lidar disponibles
-- **Photos/vidéos en playback** : pour la Phase 4 (détection IA), on peut rejouer un fichier MP4 au lieu de la caméra réelle via OpenCV — pas besoin de matériel du tout
 
 ## Structure du dépôt
 
-```
+```text
 raspRover/
-├── README.md
-├── requirements.txt
-├── config.yaml                     # Ports série, vitesses max, limites angulaires
-├── main.py                         # Point d'entrée (stub)
-├── modules/
-│   ├── __init__.py
-│   └── control/
-│       ├── __init__.py
-│       ├── esp32_link.py           # Couche basse : JSON-UART vers ESP32
-│       ├── motor_controller.py     # API haut niveau : move / stop / rotate
-│       ├── pantilt_controller.py   # API Pan-Tilt ST3215
-│       └── exceptions.py
-└── tests/
-    ├── __init__.py
-    └── test_control.py             # REPL interactif pour essais réels
+├── frontend/                 # Interface opérateur React/Vite
+│   ├── src/pages/            # Dashboard, pilotage, caméras, patrouilles, incidents
+│   ├── src/components/       # Cartes et contrôles UI
+│   └── public/               # PWA, manifest, icônes
+├── raspberry/                # Backend embarqué Python
+│   ├── modules/api/          # API FastAPI, caméra, médias, SQLite
+│   ├── modules/control/      # ESP32Link, moteurs, pan-tilt, lumières, patrouille
+│   ├── modules/sensors/      # Ultrason, vision, détection humaine
+│   ├── modules/audio/        # Alertes audio
+│   ├── tools/fake_esp32.py   # Émulateur du firmware Waveshare
+│   └── tests/                # Tests unitaires et tests de contrôle
+└── arduino/                  # Sketch HC-SR04 pour Arduino
 ```
 
----
+## Démarrage rapide en simulation
 
-© 2026 Augustin Jr Varore — All rights reserved.
+La simulation permet de tester le contrôle du rover sans Raspberry Pi ni ESP32 réel.
+
+### Backend
+
+```bash
+cd raspberry
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp config.yaml.example config.yaml
+```
+
+Dans `config.yaml`, garder le port de simulation :
+
+```yaml
+control:
+  serial_port: socket://localhost:9999
+```
+
+Terminal 1, lancer l'émulateur ESP32 :
+
+```bash
+python3 -m tools.fake_esp32 --viz
+```
+
+Terminal 2, lancer l'API :
+
+```bash
+python3 run_api_server.py --disable-https
+```
+
+L'API est disponible sur :
+
+- `http://localhost:8080/health`
+- `http://localhost:8080/stream`
+- `ws://localhost:8080/ws`
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Ouvrir l'URL Vite affichée dans le terminal, puis entrer `localhost` ou `http://localhost:8080` sur l'écran de connexion.
+
+## Déploiement sur le RaspRover
+
+Sur la Raspberry Pi :
+
+```bash
+cd raspberry
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp config.yaml.example config.yaml
+```
+
+Configurer ensuite le port série réel dans `raspberry/config.yaml` :
+
+```yaml
+control:
+  serial_port: /dev/ttyAMA0
+  baudrate: 115200
+```
+
+Activer l'UART matériel avec `raspi-config`, puis ajouter l'utilisateur au groupe série :
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+Un service systemd est fourni pour le démarrage automatique :
+
+```bash
+cd raspberry
+sudo bash install_systemd_service.sh
+sudo systemctl status rasprover-control
+```
+
+Voir aussi [raspberry/OPERATIONS.md](raspberry/OPERATIONS.md) pour les commandes d'exploitation sur le robot.
+
+## API principale
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/health` | Vérifier que le backend répond |
+| `GET` | `/stream` | Flux caméra MJPEG |
+| `GET` | `/api/status` | Télémétrie robot |
+| `POST` | `/api/motors/move` | Commander les moteurs |
+| `POST` | `/api/motors/stop` | Arrêter le rover |
+| `POST` | `/api/pantilt` | Orienter la caméra |
+| `POST` | `/api/patrol/start` | Démarrer une patrouille |
+| `POST` | `/api/patrol/stop` | Arrêter une patrouille |
+| `GET` | `/api/incidents` | Lister les incidents |
+| `WS` | `/ws` | Télémétrie et commandes temps réel |
+
+## Tests
+
+Backend :
+
+```bash
+cd raspberry
+source .venv/bin/activate
+pytest
+ruff check .
+```
+
+Frontend :
+
+```bash
+cd frontend
+npm run build
+```
+
+Test interactif du module de contrôle :
+
+```bash
+cd raspberry
+python3 -m tests.test_control --port socket://localhost:9999
+```
+
+Remplacer `socket://localhost:9999` par `/dev/ttyAMA0` pour tester sur le robot réel.
+
+## État du projet
+
+Ce dépôt contient un prototype fonctionnel avec interface web, API embarquée, contrôle robot, vidéo, capteurs, patrouille et simulation locale. Les prochaines améliorations naturelles seraient la navigation cartographiée, une détection IA plus robuste, une gestion multi-robots complète et un tableau de bord d'observabilité plus détaillé.
+
+## Auteur
+
+Augustin Jr Varore  
+Projet personnel, 2026.
