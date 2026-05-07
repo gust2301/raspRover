@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import {
   Camera, Trash2, Download, RefreshCw, Loader2,
-  AlertCircle, Video, Image, Calendar, X,
+  AlertCircle, Video, Image, X,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { useMedia, type MediaItem } from '../hooks/useMedia'
@@ -25,11 +25,6 @@ function formatTimestamp(key: string): string {
   const name = key.replace(/^.*\//, '')
   const ts   = name.replace(/^(photo|video|auto|human)_/, '').replace(/\.(jpg|mp4|h264)$/, '')
   return ts.replace('T', ' ').replace(/-(\d{2})-(\d{2})$/, ':$1:$2')
-}
-
-function formatDateFR(dateStr: string): string {
-  if (!dateStr) return ''
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 }
 
 function todayStr(): string {
@@ -122,26 +117,22 @@ export default function Cameras() {
   const connected = conn.status === 'connected'
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
-  const [dateFilter, setDateFilter] = useState<string>('')
+  const [dateFrom, setDateFrom]     = useState<string>('')
+  const [dateTo, setDateTo]         = useState<string>('')
 
   useEffect(() => {
     if (connected) media.fetchMedia()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, conn.robotIp])
 
-  // ── Dates disponibles (extraites des clés R2) ──────────────────────────────
-  const availableDates = useMemo(() => {
-    const dates = new Set(media.items.map(i => extractDate(i.key)).filter(Boolean))
-    return [...dates].sort().reverse()   // du plus récent au plus ancien
-  }, [media.items])
-
   // ── Items filtrés ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let result = media.items
     if (typeFilter !== 'all') result = result.filter(i => i.type === typeFilter)
-    if (dateFilter)           result = result.filter(i => extractDate(i.key) === dateFilter)
+    if (dateFrom) result = result.filter(i => extractDate(i.key) >= dateFrom)
+    if (dateTo)   result = result.filter(i => extractDate(i.key) <= dateTo)
     return result
-  }, [media.items, typeFilter, dateFilter])
+  }, [media.items, typeFilter, dateFrom, dateTo])
 
   const photos = filtered.filter(i => i.type === 'photo')
   const videos = filtered.filter(i => i.type === 'video')
@@ -149,9 +140,7 @@ export default function Cameras() {
   const totalPhotos = media.items.filter(i => i.type === 'photo').length
   const totalVideos = media.items.filter(i => i.type === 'video').length
 
-  // Chips de date : 5 dates max, le reste accessible via le date picker
-  const dateChips     = availableDates.slice(0, 5)
-  const hasMoreDates  = availableDates.length > 5
+  const hasDateFilter = dateFrom !== '' || dateTo !== ''
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -209,72 +198,46 @@ export default function Cameras() {
               </div>
             </div>
 
-            {/* Date */}
+            {/* Date range */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-slate-500 w-14 flex-shrink-0">Date</span>
-
-              {/* Bouton "Toutes" */}
-              <button
-                onClick={() => setDateFilter('')}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  !dateFilter
-                    ? 'bg-slate-600 text-white'
-                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                }`}
-              >
-                Toutes
-              </button>
-
-              {/* Chips des dates disponibles */}
-              {dateChips.map(d => (
-                <button
-                  key={d}
-                  onClick={() => setDateFilter(d)}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                    dateFilter === d
-                      ? 'bg-slate-600 text-white'
-                      : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                  }`}
-                >
-                  {formatDateFR(d)}
-                </button>
-              ))}
-
-              {/* Date picker pour les dates plus anciennes */}
-              {(hasMoreDates || dateFilter) && (
-                <div className="flex items-center gap-1.5">
-                  {hasMoreDates && <span className="text-slate-700 text-xs">···</span>}
-                  <Calendar size={13} className="text-slate-500 flex-shrink-0" />
-                  <input
-                    type="date"
-                    value={dateFilter}
-                    max={todayStr()}
-                    onChange={e => setDateFilter(e.target.value)}
-                    className={`bg-slate-800 border text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors ${
-                      dateFilter && !dateChips.includes(dateFilter)
-                        ? 'border-slate-500 text-slate-200'
-                        : 'border-slate-700 text-slate-400'
-                    }`}
-                    style={{ colorScheme: 'dark' }}
-                  />
-                  {dateFilter && (
-                    <button
-                      onClick={() => setDateFilter('')}
-                      className="text-slate-500 hover:text-slate-300 transition-colors"
-                      title="Toutes les dates"
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || todayStr()}
+                  onChange={e => setDateFrom(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
+                  style={{ colorScheme: 'dark' }}
+                  placeholder="Du"
+                />
+                <span className="text-slate-600 text-xs">→</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  max={todayStr()}
+                  onChange={e => setDateTo(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
+                  style={{ colorScheme: 'dark' }}
+                  placeholder="Au"
+                />
+                {hasDateFilter && (
+                  <button
+                    onClick={() => { setDateFrom(''); setDateTo('') }}
+                    className="text-slate-500 hover:text-slate-300 transition-colors"
+                    title="Effacer les dates"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Résumé de la sélection active */}
-            {(dateFilter || typeFilter !== 'all') && (
+            {(hasDateFilter || typeFilter !== 'all') && (
               <p className="text-xs text-slate-500">
                 {filtered.length} résultat{filtered.length !== 1 ? 's' : ''}
-                {dateFilter && <> · <span className="text-slate-300">{formatDateFR(dateFilter)}</span></>}
                 {typeFilter !== 'all' && <> · <span className="text-slate-300">{typeFilter === 'photo' ? 'photos' : 'vidéos'}</span></>}
               </p>
             )}
@@ -312,11 +275,9 @@ export default function Cameras() {
           {connected && media.items.length > 0 && filtered.length === 0 && (
             <div className="text-center py-12 space-y-2">
               <Camera size={32} className="mx-auto text-slate-700" />
-              <p className="text-slate-600 text-sm">
-                Aucun média pour {dateFilter ? `le ${formatDateFR(dateFilter)}` : 'cette sélection'}.
-              </p>
+              <p className="text-slate-600 text-sm">Aucun média pour cette sélection.</p>
               <button
-                onClick={() => { setTypeFilter('all'); setDateFilter('') }}
+                onClick={() => { setTypeFilter('all'); setDateFrom(''); setDateTo('') }}
                 className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
               >
                 Réinitialiser les filtres
