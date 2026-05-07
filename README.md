@@ -148,3 +148,7 @@ raspRover/
     ├── __init__.py
     └── test_control.py             # REPL interactif pour essais réels
 ```
+
+---
+
+© 2026 Augustin Jr Varore — All rights reserved.
