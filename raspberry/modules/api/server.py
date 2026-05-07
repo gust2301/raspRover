@@ -37,7 +37,7 @@ from .camera import (
     stop_video_recording,
     unregister_frame_callback,
 )
-from .db import init_db, list_incidents, log_incident, update_media_key
+from .db import init_db, list_incidents, list_incidents_by_date, log_incident, update_media_key
 from .media import get_r2_client
 
 log = logging.getLogger(__name__)
@@ -888,10 +888,13 @@ async def delete_media(key: str) -> dict:
 
 
 @app.get("/api/incidents")
-async def get_incidents(days: int = 7) -> list:
-    """Retourne les incidents des N derniers jours (défaut 7)."""
+async def get_incidents(days: int = 7, date: str | None = None) -> list:
+    """Retourne les incidents des N derniers jours ou d'une date précise (YYYY-MM-DD)."""
     loop = asyncio.get_running_loop()
-    incidents = await loop.run_in_executor(None, lambda: list_incidents(days))
+    if date:
+        incidents = await loop.run_in_executor(None, lambda: list_incidents_by_date(date))
+    else:
+        incidents = await loop.run_in_executor(None, lambda: list_incidents(days))
     r2 = get_r2_client()
 
     if r2 is None:

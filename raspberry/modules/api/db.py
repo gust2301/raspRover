@@ -77,6 +77,20 @@ def list_incidents(days: int = 7) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def list_incidents_by_date(date_str: str) -> list[dict]:
+    """Retourne les incidents d'une date précise (YYYY-MM-DD), du plus récent au plus ancien."""
+    if _conn is None:
+        return []
+    date_from = f"{date_str}T00:00:00"
+    date_to = f"{date_str}T23:59:59"
+    with _lock:
+        rows = _conn.execute(
+            "SELECT * FROM incidents WHERE ts >= ? AND ts <= ? ORDER BY ts DESC",
+            (date_from, date_to),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def cleanup_old(days: int = 7) -> int:
     """Supprime les incidents plus vieux que N jours. Retourne le nb de lignes supprimées."""
     if _conn is None:
