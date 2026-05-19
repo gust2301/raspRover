@@ -28,6 +28,7 @@ _CMD_STOP = 0x25
 _CMD_SCAN = 0x20
 _CMD_RESET = 0x40
 _DESCRIPTOR_LEN = 7
+_DESCRIPTOR_TIMEOUT_S = 2.0
 _MAX_POINTS = 1440
 
 
@@ -213,13 +214,37 @@ class RPLidarA1:
 
     def _start_scan(self) -> None:
         assert self._serial is not None
-        self._send_command(_CMD_RESET)
-        time.sleep(0.15)
-        self._serial.reset_input_buffer()  # type: ignore[union-attr]
+        self._send_command(_CMD_STOP)
+        time.sleep(0.05)
+        try:
+            self._serial.reset_input_buffer()  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
         self._send_command(_CMD_SCAN)
-        descriptor = self._serial.read(_DESCRIPTOR_LEN)  # type: ignore[union-attr]
-        if len(descriptor) != _DESCRIPTOR_LEN or descriptor[:2] != b"\xa5\x5a":
-            raise RuntimeError("descripteur scan RPLIDAR invalide")
+        descriptor = self._read_scan_descriptor()
+        log.debug("RPLIDAR scan descriptor: %s", descriptor.hex(" "))
+
+    def _read_scan_descriptor(self) -> bytes:
+        assert self._serial is not None
+        deadline = time.monotonic() + _DESCRIPTOR_TIMEOUT_S
+        window = bytearray()
+
+        while time.monotonic() < deadline and not self._stop_event.is_set():
+            chunk = self._serial.read(1)  # type: ignore[union-attr]
+            if not chunk:
+                continue
+            window.extend(chunk)
+            if len(window) > _DESCRIPTOR_LEN:
+                del window[:-_DESCRIPTOR_LEN]
+            if len(window) >= 2 and window[-2:] == b"\xa5\x5a":
+                rest = self._serial.read(_DESCRIPTOR_LEN - 2)  # type: ignore[union-attr]
+                descriptor = bytes(window[-2:] + rest)
+                if len(descriptor) == _DESCRIPTOR_LEN:
+                    return descriptor
+                break
+
+        tail = bytes(window).hex(" ") or "vide"
+        raise RuntimeError(f"descripteur scan RPLIDAR invalide (tail={tail})")
 
     def _stop_scan(self) -> None:
         try:
