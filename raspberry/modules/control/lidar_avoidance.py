@@ -79,10 +79,16 @@ class LidarAvoidancePlanner:
             side_label = "gauche" if preferred_sign < 0 else "droite"
 
             if front <= self.danger_cm:
-                action = AvoidanceAction.TURN_LEFT if preferred_sign < 0 else AvoidanceAction.TURN_RIGHT
-                reason = f"obstacle frontal reel {front:.0f}cm, rotation vers zone libre {side_label}"
+                action = (
+                    AvoidanceAction.TURN_LEFT if preferred_sign < 0 else AvoidanceAction.TURN_RIGHT
+                )
+                reason = (
+                    f"obstacle frontal reel {front:.0f}cm, rotation vers zone libre {side_label}"
+                )
             else:
-                action = AvoidanceAction.ARC_LEFT if preferred_sign < 0 else AvoidanceAction.ARC_RIGHT
+                action = (
+                    AvoidanceAction.ARC_LEFT if preferred_sign < 0 else AvoidanceAction.ARC_RIGHT
+                )
                 reason = f"obstacle leger {front:.0f}cm, correction vers {side_label}"
 
             decision = AvoidanceDecision(
@@ -126,4 +132,3 @@ class LidarAvoidancePlanner:
         distances.sort()
         sample = distances[: max(1, len(distances) // 4)]
         return sum(sample) / len(sample)
-
