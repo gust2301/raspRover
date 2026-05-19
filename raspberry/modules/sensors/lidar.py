@@ -218,7 +218,7 @@ class RPLidarA1:
         self._serial.reset_input_buffer()  # type: ignore[union-attr]
         self._send_command(_CMD_SCAN)
         descriptor = self._serial.read(_DESCRIPTOR_LEN)  # type: ignore[union-attr]
-        if len(descriptor) != _DESCRIPTOR_LEN or descriptor[:2] != b"\xA5\x5A":
+        if len(descriptor) != _DESCRIPTOR_LEN or descriptor[:2] != b"\xa5\x5a":
             raise RuntimeError("descripteur scan RPLIDAR invalide")
 
     def _stop_scan(self) -> None:
