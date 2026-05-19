@@ -80,6 +80,7 @@ sensors:
     max_distance_mm: 6000
     motor_dtr: false          # RPLIDAR A1 USB courant : false demarre le moteur
     motor_start_delay_s: 0.8  # Laisse le temps au moteur de prendre sa vitesse
+    angle_offset_deg: 180     # 180 si le zero du LIDAR pointe vers l'arriere du rover
 
   vision:
     enabled: true             # Détection d'obstacles par caméra (OpenCV dual-méthode)

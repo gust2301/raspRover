@@ -211,6 +211,7 @@ async def lifespan(app: FastAPI):
             max_distance_mm=float(lidar_cfg.get("max_distance_mm", 6000.0)),
             motor_dtr=bool(lidar_cfg.get("motor_dtr", False)),
             motor_start_delay_s=float(lidar_cfg.get("motor_start_delay_s", 0.8)),
+            angle_offset_deg=float(lidar_cfg.get("angle_offset_deg", 0.0)),
         )
         _lidar.start()
         log.info("RPLIDAR A1 demarre (USB, port=%s)", lidar_cfg.get("port") or "auto")
