@@ -78,6 +78,8 @@ sensors:
     front_fov_deg: 55         # Cone avant analyse par le planner
     min_quality: 5
     max_distance_mm: 6000
+    motor_dtr: false          # RPLIDAR A1 USB courant : false demarre le moteur
+    motor_start_delay_s: 0.8  # Laisse le temps au moteur de prendre sa vitesse
 
   vision:
     enabled: true             # Détection d'obstacles par caméra (OpenCV dual-méthode)
