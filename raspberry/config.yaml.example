@@ -11,6 +11,7 @@ control:
   serial_port: socket://localhost:9999
   baudrate: 115200
   timeout_s: 1.0
+  esp32_required: false       # false = l'API demarre meme si l'ESP32 est absent
 
   # Limites de sécurité
   motor_max_speed: 0.5        # Vitesse maximale normalisée (0.0 à 1.0)
@@ -64,10 +65,19 @@ audio:
 
 sensors:
   ultrasonic:
-    enabled: true             # Mettre false pour désactiver le capteur
+    enabled: false            # HC-SR04 retire : garder false pour LIDAR_ONLY
     # port: "/dev/ttyACM0"   # Laisser vide = auto-détection du port Arduino
     baudrate: 9600            # Doit correspondre au sketch Arduino
     obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
+
+  lidar:
+    enabled: true             # RPLIDAR A1 branche en USB sur la Raspberry Pi
+    # port: "/dev/ttyUSB0"    # Laisser vide = auto-detection
+    baudrate: 115200
+    obstacle_threshold_cm: 70 # Seuil frontal utilise pour la securite manuelle
+    front_fov_deg: 55         # Cone avant analyse par le planner
+    min_quality: 5
+    max_distance_mm: 6000
 
   vision:
     enabled: true             # Détection d'obstacles par caméra (OpenCV dual-méthode)
@@ -80,8 +90,9 @@ sensors:
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
 
 patrol:
+  navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY
   speed: 0.3                # Vitesse d'avance (0-1)
-  obstacle_cm: 40           # Seuil ultrason (cm) déclenchant l'évitement
+  obstacle_cm: 70           # Seuil obstacle (cm) pour l'évitement LIDAR
   step_duration: 0.7        # Durée d'une étape d'avance (s) — scan entre chaque étape
   stuck_timeout: 3.5        # Secondes en FORWARD sans obstacle → angle mort détecté
   scan_with_pantilt: false  # true = sweep caméra gauche/centre/droite avant chaque étape

@@ -23,7 +23,7 @@ from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
-from modules.sensors import UltrasonicSensor, VisionObstacleDetector
+from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
 
 from .camera import (
@@ -51,6 +51,7 @@ _lights: LightController | None = None
 _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
+_lidar: RPLidarA1 | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
 _human_detector: HumanDetector | None = None
@@ -136,6 +137,7 @@ async def lifespan(app: FastAPI):
         _pantilt, \
         _lights, \
         _ultrasonic, \
+        _lidar, \
         _vision, \
         _patrol, \
         _human_detector, \
@@ -148,28 +150,38 @@ async def lifespan(app: FastAPI):
     init_db()
     _mixer = DriveMixer(DriveConfig.from_dict(cfg.get("drive", {})))
     ctrl = cfg.get("control", {})
+    esp32_required = bool(ctrl.get("esp32_required", False))
     port = ctrl.get("serial_port", "/dev/ttyAMA0")
     baudrate = ctrl.get("baudrate", 115200)
     timeout_s = ctrl.get("timeout_s", 1.0)
     pt_cfg = ctrl.get("pantilt", {})
 
     _link = ESP32Link(port=port, baudrate=baudrate, timeout_s=timeout_s)
-    _link.open()
-
-    _motors = MotorController(
-        _link,
-        max_speed=ctrl.get("motor_max_speed", 0.5),
-        default_speed=ctrl.get("motor_default_speed", 0.35),
-    )
-    _pantilt = PanTiltController(
-        _link,
-        pan_range=(pt_cfg.get("pan_min_deg", -90), pt_cfg.get("pan_max_deg", 90)),
-        tilt_range=(pt_cfg.get("tilt_min_deg", -45), pt_cfg.get("tilt_max_deg", 60)),
-        speed=pt_cfg.get("servo_speed", 600),
-        accel=pt_cfg.get("servo_accel", 50),
-    )
-
-    _lights = LightController(_link)
+    try:
+        _link.open()
+        _motors = MotorController(
+            _link,
+            max_speed=ctrl.get("motor_max_speed", 0.5),
+            default_speed=ctrl.get("motor_default_speed", 0.35),
+        )
+        _pantilt = PanTiltController(
+            _link,
+            pan_range=(pt_cfg.get("pan_min_deg", -90), pt_cfg.get("pan_max_deg", 90)),
+            tilt_range=(pt_cfg.get("tilt_min_deg", -45), pt_cfg.get("tilt_max_deg", 60)),
+            speed=pt_cfg.get("servo_speed", 600),
+            accel=pt_cfg.get("servo_accel", 50),
+        )
+        _lights = LightController(_link)
+        log.info("ESP32 connecte - port=%s", port)
+    except Exception as exc:  # noqa: BLE001
+        _motors = None
+        _pantilt = None
+        _lights = None
+        msg = f"ESP32 indisponible sur {port}: {exc}"
+        if esp32_required:
+            log.error("%s (control.esp32_required=true)", msg)
+            raise
+        log.warning("%s - demarrage continue en mode degrade", msg)
 
     audio_cfg = cfg.get("audio", {})
     _alert.device = audio_cfg.get("device") or None
@@ -187,6 +199,21 @@ async def lifespan(app: FastAPI):
         log.info("HC-SR04 (Arduino) démarré")
     else:
         log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
+
+    lidar_cfg = cfg.get("sensors", {}).get("lidar", {})
+    if lidar_cfg.get("enabled", True):
+        _lidar = RPLidarA1(
+            port=lidar_cfg.get("port") or None,
+            baudrate=int(lidar_cfg.get("baudrate", 115200)),
+            obstacle_threshold_cm=float(lidar_cfg.get("obstacle_threshold_cm", 70.0)),
+            front_fov_deg=float(lidar_cfg.get("front_fov_deg", 55.0)),
+            min_quality=int(lidar_cfg.get("min_quality", 5)),
+            max_distance_mm=float(lidar_cfg.get("max_distance_mm", 6000.0)),
+        )
+        _lidar.start()
+        log.info("RPLIDAR A1 demarre (USB, port=%s)", lidar_cfg.get("port") or "auto")
+    else:
+        log.info("RPLIDAR desactive (sensors.lidar.enabled: false)")
 
     # Détecteur vision (OpenCV) — complément au HC-SR04
     vision_cfg = cfg.get("sensors", {}).get("vision", {})
@@ -214,9 +241,11 @@ async def lifespan(app: FastAPI):
     _patrol = PatrolController(
         motors=_motors,
         ultrasonic=_ultrasonic,
+        lidar=_lidar,
         vision=_vision,
         pantilt=_pantilt,
         human_detector=_human_detector,
+        navigation_mode=str(patrol_cfg.get("navigation_mode", "LIDAR_ONLY")),
         speed=float(patrol_cfg.get("speed", 0.3)),
         obstacle_cm=float(patrol_cfg.get("obstacle_cm", 40.0)),
         step_duration=float(patrol_cfg.get("step_duration", 0.7)),
@@ -227,17 +256,24 @@ async def lifespan(app: FastAPI):
         on_capture_photo=_auto_photo_coro,
     )
 
-    _tracker = TrackerController(
-        _pantilt,
-        _human_detector,
-        on_incident=log_incident,
-        on_auto_record=_auto_record_coro,
+    _tracker = (
+        TrackerController(
+            _pantilt,
+            _human_detector,
+            on_incident=log_incident,
+            on_auto_record=_auto_record_coro,
+        )
+        if _pantilt
+        else None
     )
 
-    _motors.stop()
-    _pantilt.center()
-    _lights.set_camera_light(False)
-    log.info("RaspRover API démarrée — port=%s", port)
+    if _motors:
+        _motors.stop()
+    if _pantilt:
+        _pantilt.center()
+    if _lights:
+        _lights.set_camera_light(False)
+    log.info("RaspRover API demarree - esp32=%s lidar=%s", bool(_motors), bool(_lidar))
 
     yield
 
@@ -257,6 +293,8 @@ async def lifespan(app: FastAPI):
         _vision.stop()
     if _ultrasonic:
         _ultrasonic.stop()
+    if _lidar:
+        _lidar.stop()
     if _motors:
         _motors.shutdown()
     if _link:
@@ -307,11 +345,39 @@ def _obstacle_front() -> bool:
     """
     Obstacle devant pour la sécurité anti-collision (pilotage manuel).
 
-    On se base uniquement sur l'ultrason : fiable, seuil calibré (obstacle_threshold_cm).
-    La vision n'est PAS utilisée ici — trop de faux positifs (sol, reflets, zones G/D)
-    qui bloqueraient l'avance à tort. La vision est gérée dans la logique de patrouille.
+    Le LIDAR est prioritaire. L'ultrason reste en fallback si le capteur est
+    explicitement active. La vision n'est pas utilisée ici pour éviter les faux
+    positifs sur le sol, les reflets ou les zones latérales.
     """
+    if _lidar:
+        snap = _lidar.snapshot
+        if snap.connected and snap.obstacle_front:
+            return True
     return _ultrasonic.reading.front.obstacle if _ultrasonic else False
+
+
+def _system_status() -> dict:
+    pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
+    light_state = _lights.state if _lights else {"camera_light": False}
+    patrol_data = _patrol.to_dict() if _patrol else {"patrol_active": False, "patrol_state": "idle"}
+    tracker_data = _tracker.to_dict() if _tracker else {"tracker_active": False}
+    human_data = _human_detector.to_dict() if _human_detector else {}
+    distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
+    vision_data = _vision.to_dict() if _vision else {}
+    lidar_data = _lidar.to_dict() if _lidar else {"lidar_connected": False}
+    return {
+        "esp32_connected": bool(_link and _link.is_open),
+        "control_available": _motors is not None,
+        "pan": pan,
+        "tilt": tilt,
+        **light_state,
+        **distance_data,
+        **vision_data,
+        **lidar_data,
+        **patrol_data,
+        **tracker_data,
+        **human_data,
+    }
 
 
 app = FastAPI(title="RaspRover Control API", version="1.0.0", lifespan=lifespan)
@@ -452,6 +518,17 @@ async def get_vision() -> dict:
     return _vision.to_dict()
 
 
+@app.get("/api/lidar")
+async def get_lidar() -> dict:
+    """Etat du RPLIDAR A1 et points du scan avant."""
+    if _lidar is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "RPLIDAR non active (sensors.lidar.enabled: false)"},
+        )
+    return _lidar.to_dict()
+
+
 # ---------------------------------------------------------------------------
 # REST — Patrouille
 # ---------------------------------------------------------------------------
@@ -522,20 +599,22 @@ async def audio_test() -> dict:
 
 @app.get("/api/status")
 async def get_status() -> dict:
-    if _link is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
     loop = asyncio.get_running_loop()
+    base_status = _system_status()
+    if _link is None or not _link.is_open:
+        return {
+            **base_status,
+            "status_warning": "ESP32 indisponible - controle moteur/pantilt desactive",
+        }
     try:
         # T=130 (chassis feedback) → tension réelle + vitesses L/R
         feedback = await loop.run_in_executor(
             None,
             lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
         )
-        pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
-        light_state = _lights.state if _lights else {"camera_light": False}
-        return {**_enrich_feedback(feedback), "pan": pan, "tilt": tilt, **light_state}
+        return {**base_status, **_enrich_feedback(feedback)}
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse(status_code=503, content={"error": str(exc)})
+        return {**base_status, "esp32_connected": False, "status_warning": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -716,8 +795,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await ws.send_json({"type": "tracker_ack", **tracker_data, **human_data})
 
             elif msg_type == "status":
-                if _link is None:
-                    await ws.send_json({"type": "error", "message": "not ready"})
+                base_status = _system_status()
+                if _link is None or not _link.is_open:
+                    await ws.send_json(
+                        {
+                            "type": "status",
+                            **base_status,
+                            "status_warning": "ESP32 indisponible - controle moteur/pantilt desactive",
+                        }
+                    )
                     continue
                 try:
                     # T=130 (chassis feedback) → tension réelle + vitesses L/R
@@ -725,33 +811,22 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         None,
                         lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
                     )
-                    pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
-                    light_state = _lights.state if _lights else {"camera_light": False}
-                    distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
-                    vision_data = _vision.to_dict() if _vision else {}
-                    patrol_data = (
-                        _patrol.to_dict()
-                        if _patrol
-                        else {"patrol_active": False, "patrol_state": "idle"}
-                    )
-                    tracker_data = _tracker.to_dict() if _tracker else {"tracker_active": False}
-                    human_data = _human_detector.to_dict() if _human_detector else {}
                     await ws.send_json(
                         {
                             "type": "status",
+                            **base_status,
                             **_enrich_feedback(feedback),
-                            "pan": pan,
-                            "tilt": tilt,
-                            **light_state,
-                            **distance_data,
-                            **vision_data,
-                            **patrol_data,
-                            **tracker_data,
-                            **human_data,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
-                    await ws.send_json({"type": "error", "message": str(exc)})
+                    await ws.send_json(
+                        {
+                            "type": "status",
+                            **base_status,
+                            "esp32_connected": False,
+                            "status_warning": str(exc),
+                        }
+                    )
 
     except WebSocketDisconnect:
         _manager.disconnect(ws)
