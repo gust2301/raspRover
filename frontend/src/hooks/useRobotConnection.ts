@@ -20,6 +20,19 @@ export interface RobotStatus {
   obstacle_rear?: boolean
   patrol_active?: boolean
   patrol_state?: 'idle' | 'forward' | 'avoiding' | 'stuck'
+  navigation_mode?: 'LIDAR_ONLY' | 'HYBRID' | 'LEGACY'
+  esp32_connected?: boolean
+  control_available?: boolean
+  status_warning?: string
+  lidar_connected?: boolean
+  lidar_port?: string | null
+  lidar_error?: string | null
+  lidar_points?: Array<{ angle: number; distance_cm: number }>
+  lidar_front_cm?: number | null
+  lidar_left_cm?: number | null
+  lidar_right_cm?: number | null
+  lidar_obstacle_front?: boolean
+  lidar_updated_at?: number
   tracker_active?: boolean
   tracking_person_detected?: boolean
   tracking_cx?: number | null

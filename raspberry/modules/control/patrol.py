@@ -30,6 +30,8 @@ import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
 
+from modules.control.lidar_avoidance import AvoidanceAction, LidarAvoidancePlanner
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -88,6 +90,12 @@ class PatrolState(str, Enum):
     STUCK = "stuck"
 
 
+class NavigationMode(str, Enum):
+    LEGACY = "LEGACY"
+    LIDAR_ONLY = "LIDAR_ONLY"
+    HYBRID = "HYBRID"
+
+
 # ---------------------------------------------------------------------------
 # Contrôleur
 # ---------------------------------------------------------------------------
@@ -112,9 +120,11 @@ class PatrolController:
         self,
         motors,
         ultrasonic=None,
+        lidar=None,
         vision=None,
         pantilt=None,
         human_detector=None,
+        navigation_mode: str = NavigationMode.HYBRID.value,
         speed: float = _SPEED,
         obstacle_cm: float = _OBSTACLE_CM,
         step_duration: float = 0.7,
@@ -126,11 +136,21 @@ class PatrolController:
     ) -> None:
         self._motors = motors
         self._ultrasonic = ultrasonic
+        self._lidar = lidar
         self._vision = vision
         self._pantilt = pantilt
         self._human_detector = human_detector
+        try:
+            self.navigation_mode = NavigationMode(navigation_mode.upper())
+        except ValueError:
+            self.navigation_mode = NavigationMode.HYBRID
         self.speed = speed
         self.obstacle_cm = obstacle_cm
+        self._lidar_planner = LidarAvoidancePlanner(
+            caution_cm=max(obstacle_cm * 1.7, 70.0),
+            danger_cm=max(obstacle_cm * 0.9, 35.0),
+            clear_cm=max(obstacle_cm * 2.1, 90.0),
+        )
         self._on_incident = on_incident
         self._on_auto_record = on_auto_record
         self._on_capture_photo = on_capture_photo
@@ -156,7 +176,11 @@ class PatrolController:
         return self._state
 
     def to_dict(self) -> dict:
-        return {"patrol_active": self.active, "patrol_state": self._state.value}
+        return {
+            "patrol_active": self.active,
+            "patrol_state": self._state.value,
+            "navigation_mode": self.navigation_mode.value,
+        }
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -173,9 +197,19 @@ class PatrolController:
         self._task = asyncio.create_task(self._run(loop))
         if self._on_incident:
             self._on_incident(
-                "patrol_start", "info", f"speed={self.speed:.2f} obstacle_cm={self.obstacle_cm:.0f}"
+                "patrol_start",
+                "info",
+                (
+                    f"mode={self.navigation_mode.value} speed={self.speed:.2f} "
+                    f"obstacle_cm={self.obstacle_cm:.0f}"
+                ),
             )
-        log.info("Patrouille démarrée (speed=%.2f obstacle_cm=%.0f)", self.speed, self.obstacle_cm)
+        log.info(
+            "Patrouille demarree (mode=%s speed=%.2f obstacle_cm=%.0f)",
+            self.navigation_mode.value,
+            self.speed,
+            self.obstacle_cm,
+        )
 
     async def stop(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._task and not self._task.done():
@@ -353,7 +387,29 @@ class PatrolController:
                 t_last_keepalive = now
 
             # ── Ultrason (frontal) ────────────────────────────────────
-            if self._ultrasonic:
+            if self._uses_lidar():
+                decision = self._lidar_planner.decide(self._lidar.snapshot)
+                if decision.action == AvoidanceAction.STOP:
+                    log.warning("Patrol LIDAR: stop securite - %s", decision.reason)
+                    return f"lidar:stop:{decision.reason}"
+                if decision.action == AvoidanceAction.CLEAR:
+                    pass
+                elif decision.action in (AvoidanceAction.ARC_LEFT, AvoidanceAction.ARC_RIGHT):
+                    steering = -0.32 if decision.action == AvoidanceAction.ARC_LEFT else 0.32
+                    await loop.run_in_executor(
+                        None,
+                        lambda s=fwd_speed, st=steering: self._motors.arc(s, st),
+                    )
+                    t_last_keepalive = now
+                elif decision.action == AvoidanceAction.TURN_LEFT:
+                    log.info("Patrol LIDAR: obstacle - %s", decision.reason)
+                    return f"lidar:left:{decision.reason}"
+                elif decision.action == AvoidanceAction.TURN_RIGHT:
+                    log.info("Patrol LIDAR: obstacle - %s", decision.reason)
+                    return f"lidar:right:{decision.reason}"
+
+            # ── Ultrason (frontal) ────────────────────────────────────
+            if self._ultrasonic and self.navigation_mode is not NavigationMode.LIDAR_ONLY:
                 r = self._ultrasonic.reading
                 cm = r.front.distance_cm
                 if (cm is not None and cm < self.obstacle_cm) or (cm is None and r.front.obstacle):
@@ -365,7 +421,11 @@ class PatrolController:
             # Centre volontairement ignoré : l'ultrason le couvre.
             # Warmup court (0.3 s) pour laisser le vote se stabiliser
             # sans risquer de percuter un obstacle non vu pendant trop longtemps.
-            if self._vision and elapsed >= _VISION_WARMUP:
+            if (
+                self._vision
+                and elapsed >= _VISION_WARMUP
+                and self.navigation_mode is not NavigationMode.LIDAR_ONLY
+            ):
                 zones = self._vision.zones
                 left = zones.get("left", False)
                 right = zones.get("right", False)
@@ -381,6 +441,12 @@ class PatrolController:
                     return "vision:right"
 
             await asyncio.sleep(_POLL)
+
+    def _uses_lidar(self) -> bool:
+        return self._lidar is not None and self.navigation_mode in (
+            NavigationMode.LIDAR_ONLY,
+            NavigationMode.HYBRID,
+        )
 
     # ------------------------------------------------------------------
     # Évitement directionnel
@@ -412,7 +478,24 @@ class PatrolController:
     ) -> None:
         consecutive = free_secs < _MIN_FREE_SECS
 
-        if obstacle.startswith("vision:left"):
+        if obstacle.startswith("lidar:stop"):
+            log.warning("Patrol avoid: LIDAR indisponible, arret de securite")
+            await loop.run_in_executor(None, self._motors.stop)
+            await asyncio.sleep(0.5)
+
+        elif obstacle.startswith("lidar:left"):
+            self._last_turn_dir = Direction.LEFT
+            front_cm = self._lidar.snapshot.front_distance_cm if self._lidar else None
+            duration = 0.85 if front_cm is not None and front_cm < self.obstacle_cm else 0.55
+            await self._turn(loop, Direction.LEFT, duration, obstacle)
+
+        elif obstacle.startswith("lidar:right"):
+            self._last_turn_dir = Direction.RIGHT
+            front_cm = self._lidar.snapshot.front_distance_cm if self._lidar else None
+            duration = 0.85 if front_cm is not None and front_cm < self.obstacle_cm else 0.55
+            await self._turn(loop, Direction.RIGHT, duration, obstacle)
+
+        elif obstacle.startswith("vision:left"):
             self._last_turn_dir = Direction.RIGHT
             await self._turn(loop, Direction.RIGHT, _TURN_LATERAL, "obstacle gauche → droite")
 

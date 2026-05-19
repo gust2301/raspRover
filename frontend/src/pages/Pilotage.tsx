@@ -323,6 +323,92 @@ function PanTiltControl({
 type DriveMode = 'driver' | 'mirror'
 const DRIVE_MODE_KEY = 'sentryx_drive_mode'
 
+function LidarScanPanel({
+  connected,
+  points = [],
+  frontCm,
+  leftCm,
+  rightCm,
+  obstacle,
+  port,
+  error,
+  autoActive,
+  mode,
+}: {
+  connected?: boolean
+  points?: Array<{ angle: number; distance_cm: number }>
+  frontCm?: number | null
+  leftCm?: number | null
+  rightCm?: number | null
+  obstacle?: boolean
+  port?: string | null
+  error?: string | null
+  autoActive?: boolean
+  mode?: string
+}) {
+  const maxCm = 250
+  const plot = points
+    .filter(p => Math.abs(p.angle) <= 90 || p.angle >= 270)
+    .slice(0, 140)
+    .map((p, i) => {
+      const angle = p.angle > 180 ? p.angle - 360 : p.angle
+      const distanceRatio = Math.min(p.distance_cm, maxCm) / maxCm
+      const x = 50 + Math.sin((angle * Math.PI) / 180) * distanceRatio * 44
+      const y = 92 - Math.cos((angle * Math.PI) / 180) * distanceRatio * 82
+      return <circle key={`${p.angle}-${i}`} cx={x} cy={y} r="0.9" className={obstacle ? 'fill-red-300' : 'fill-cyan-300'} />
+    })
+
+  return (
+    <div className={`mx-5 mb-4 rounded-xl border px-4 py-3 ${
+      connected
+        ? obstacle ? 'border-red-500/60 bg-red-950/30' : 'border-cyan-500/30 bg-slate-800/40'
+        : 'border-slate-700 bg-slate-800/30'
+    }`}>
+      <div className="flex items-center gap-2 mb-3">
+        <Radar size={14} className={connected ? (obstacle ? 'text-red-400' : 'text-cyan-300') : 'text-slate-500'} />
+        <span className="text-sm font-medium text-slate-300">LIDAR</span>
+        <span className={`ml-auto text-[11px] font-mono ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+          {connected ? (port ?? 'USB') : 'OFFLINE'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+        <svg viewBox="0 0 100 100" className="w-[120px] h-[120px] rounded-lg bg-slate-950 border border-slate-800">
+          <path d="M 6 92 A 44 82 0 0 1 94 92" fill="none" className="stroke-slate-800" strokeWidth="1" />
+          <path d="M 22 92 A 28 52 0 0 1 78 92" fill="none" className="stroke-slate-800" strokeWidth="1" />
+          <line x1="50" y1="92" x2="50" y2="8" className="stroke-slate-700" strokeWidth="0.8" />
+          <line x1="50" y1="92" x2="12" y2="26" className="stroke-slate-800" strokeWidth="0.8" />
+          <line x1="50" y1="92" x2="88" y2="26" className="stroke-slate-800" strokeWidth="0.8" />
+          {plot}
+          <circle cx="50" cy="92" r="3" className="fill-blue-500" />
+        </svg>
+
+        <div className="space-y-2 min-w-0">
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Avant</span>
+            <span className={`font-mono font-medium ${obstacle ? 'text-red-400' : 'text-emerald-400'}`}>
+              {frontCm != null ? `${frontCm.toFixed(0)} cm` : '--'}
+            </span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Gauche / droite</span>
+            <span className="text-cyan-300 font-mono">
+              {leftCm != null ? leftCm.toFixed(0) : '--'} / {rightCm != null ? rightCm.toFixed(0) : '--'} cm
+            </span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">AUTO</span>
+            <span className={autoActive ? 'text-blue-300 font-medium' : 'text-slate-500'}>
+              {autoActive ? 'actif' : 'inactif'}{mode ? ` · ${mode}` : ''}
+            </span>
+          </div>
+          {!connected && <p className="text-xs text-amber-400">{error ?? 'LIDAR non connecté'}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DriveJoystick({
   onMoveXY, onStop, connected, mode, onModeChange, size = 160,
 }: {
@@ -465,9 +551,10 @@ export default function Pilotage() {
   const patrolActive = conn.lastStatus?.patrol_active ?? false
   const trackingActive = conn.trackingActive
   const personDetected = conn.personDetected
-  const connected = conn.status === 'connected' && !emergency && !patrolActive
+  const robotConnected = conn.status === 'connected'
+  const connected = robotConnected && !emergency && !patrolActive && (conn.lastStatus?.control_available ?? true)
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
-  const canAlert = conn.status === 'connected'
+  const canAlert = robotConnected
   const streamUrl = getRobotStreamUrl(conn.robotIp)
 
   useEffect(() => {
@@ -651,7 +738,7 @@ export default function Pilotage() {
               <div key={i} className={`absolute w-8 h-8 border-blue-500/40 ${cls}`} />
             ))}
 
-            {connected && (
+            {robotConnected && (
               <img
                 key={`${streamUrl}-${streamKey}`}
                 src={streamUrl}
@@ -680,7 +767,7 @@ export default function Pilotage() {
                   <Camera size={48} className="mx-auto mb-3 text-slate-700" />
                 )}
                 <p className="text-slate-600 text-sm">
-                  {!connected
+                  {!robotConnected
                     ? 'Connecte-toi au robot pour voir le flux'
                     : 'Flux caméra indisponible'}
                 </p>
@@ -702,10 +789,12 @@ export default function Pilotage() {
             )}
 
             {/* Obstacle warning overlay */}
-            {conn.lastStatus?.obstacle && (
+            {(conn.lastStatus?.obstacle || conn.lastStatus?.lidar_obstacle_front) && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-900/90 border border-red-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
                 <Radar size={16} className="text-red-400" />
-                <span className="text-red-200 text-sm font-bold">OBSTACLE — {conn.lastStatus.distance_cm?.toFixed(0)} cm</span>
+                <span className="text-red-200 text-sm font-bold">
+                  OBSTACLE — {(conn.lastStatus.lidar_front_cm ?? conn.lastStatus.distance_cm)?.toFixed(0)} cm
+                </span>
               </div>
             )}
 
@@ -936,6 +1025,21 @@ export default function Pilotage() {
             </div>
           )}
 
+          {conn.lastStatus && (
+            <LidarScanPanel
+              connected={Boolean(conn.lastStatus.lidar_connected)}
+              points={conn.lastStatus.lidar_points}
+              frontCm={conn.lastStatus.lidar_front_cm}
+              leftCm={conn.lastStatus.lidar_left_cm}
+              rightCm={conn.lastStatus.lidar_right_cm}
+              obstacle={Boolean(conn.lastStatus.lidar_obstacle_front)}
+              port={conn.lastStatus.lidar_port}
+              error={conn.lastStatus.lidar_error}
+              autoActive={patrolActive}
+              mode={conn.lastStatus.navigation_mode}
+            />
+          )}
+
           {/* Distance sensor */}
           {conn.lastStatus?.distance_cm !== undefined && (
             <div className={`mx-5 mb-4 rounded-xl border px-4 py-3 transition-colors ${
@@ -1053,8 +1157,6 @@ export default function Pilotage() {
     </div>
   )
 }
-
-
 
 
 
