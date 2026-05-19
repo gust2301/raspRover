@@ -29,6 +29,7 @@ _CMD_SCAN = 0x20
 _CMD_RESET = 0x40
 _DESCRIPTOR_LEN = 7
 _DESCRIPTOR_TIMEOUT_S = 2.0
+_FIRST_MEASUREMENT_TIMEOUT_S = 2.0
 _MAX_POINTS = 1440
 
 
@@ -104,6 +105,8 @@ class RPLidarA1:
         front_fov_deg: float = 50.0,
         min_quality: int = 5,
         max_distance_mm: float = 6000.0,
+        motor_dtr: bool = False,
+        motor_start_delay_s: float = 0.8,
     ) -> None:
         self.port = port
         self.baudrate = int(baudrate)
@@ -111,6 +114,8 @@ class RPLidarA1:
         self.front_fov_deg = float(front_fov_deg)
         self.min_quality = int(min_quality)
         self.max_distance_mm = float(max_distance_mm)
+        self.motor_dtr = bool(motor_dtr)
+        self.motor_start_delay_s = float(motor_start_delay_s)
 
         self._lock = threading.Lock()
         self._latest = LidarSnapshot(error="non demarre")
@@ -118,6 +123,7 @@ class RPLidarA1:
         self._stop_event = threading.Event()
         self._serial: object | None = None
         self._resolved_port: str | None = None
+        self._active_motor_dtr = self.motor_dtr
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -166,8 +172,24 @@ class RPLidarA1:
         while not self._stop_event.is_set():
             try:
                 self._open_serial()
-                self._start_scan()
-                self._read_scan_loop()
+                scan_started = False
+                for motor_dtr in self._motor_dtr_attempts():
+                    self._active_motor_dtr = motor_dtr
+                    self._set_motor_dtr(motor_dtr)
+                    self._start_scan()
+                    try:
+                        self._read_scan_loop()
+                    except TimeoutError:
+                        self._stop_scan()
+                        log.warning(
+                            "RPLIDAR: aucune mesure avec DTR=%s, essai suivant",
+                            motor_dtr,
+                        )
+                        continue
+                    scan_started = True
+                    break
+                if not scan_started:
+                    raise TimeoutError("timeout lecture scan apres essais DTR")
             except Exception as exc:  # noqa: BLE001
                 log.warning("RPLIDAR deconnecte ou indisponible : %s", exc)
                 self._set_snapshot(
@@ -189,13 +211,23 @@ class RPLidarA1:
             raise RuntimeError("aucun port RPLIDAR detecte")
         self._resolved_port = port
         self._serial = serial.Serial(port, self.baudrate, timeout=1.0)
-        try:
-            self._serial.setDTR(False)  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
-            pass
+        self._set_motor_dtr(self.motor_dtr)
         self._serial.reset_input_buffer()  # type: ignore[union-attr]
         self._serial.reset_output_buffer()  # type: ignore[union-attr]
         log.info("RPLIDAR connecte sur %s (%d baud)", port, self.baudrate)
+
+    def _motor_dtr_attempts(self) -> tuple[bool, ...]:
+        return (self.motor_dtr, not self.motor_dtr)
+
+    def _set_motor_dtr(self, value: bool) -> None:
+        if self._serial is None:
+            return
+        try:
+            self._serial.setDTR(value)  # type: ignore[union-attr]
+            log.info("RPLIDAR moteur: DTR=%s", value)
+            time.sleep(self.motor_start_delay_s)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("RPLIDAR: setDTR(%s) ignore (%s)", value, exc)
 
     def _close_serial(self) -> None:
         if self._serial is None:
@@ -256,11 +288,16 @@ class RPLidarA1:
         assert self._serial is not None
         current: list[LidarPoint] = []
         last_publish = 0.0
+        first_measurement_deadline = time.monotonic() + _FIRST_MEASUREMENT_TIMEOUT_S
 
         while not self._stop_event.is_set():
             raw = self._serial.read(5)  # type: ignore[union-attr]
             if len(raw) != 5:
-                raise RuntimeError("timeout lecture scan")
+                if not current and time.monotonic() >= first_measurement_deadline:
+                    raise TimeoutError(
+                        f"timeout lecture scan (aucune mesure, DTR={self._active_motor_dtr})"
+                    )
+                continue
             point, new_scan = self._parse_measurement(raw)
             if point is None:
                 continue
