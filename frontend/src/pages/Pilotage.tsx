@@ -330,7 +330,6 @@ function LidarScanPanel({
   leftCm,
   rightCm,
   obstacle,
-  port,
   error,
   autoActive,
   mode,
@@ -341,7 +340,6 @@ function LidarScanPanel({
   leftCm?: number | null
   rightCm?: number | null
   obstacle?: boolean
-  port?: string | null
   error?: string | null
   autoActive?: boolean
   mode?: string
@@ -368,7 +366,7 @@ function LidarScanPanel({
         <Radar size={14} className={connected ? (obstacle ? 'text-red-400' : 'text-cyan-300') : 'text-slate-500'} />
         <span className="text-sm font-medium text-slate-300">LIDAR</span>
         <span className={`ml-auto text-[11px] font-mono ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
-          {connected ? (port ?? 'USB') : 'OFFLINE'}
+          {connected ? 'ONLINE' : 'OFFLINE'}
         </span>
       </div>
 
@@ -1033,7 +1031,6 @@ export default function Pilotage() {
               leftCm={conn.lastStatus.lidar_left_cm}
               rightCm={conn.lastStatus.lidar_right_cm}
               obstacle={Boolean(conn.lastStatus.lidar_obstacle_front)}
-              port={conn.lastStatus.lidar_port}
               error={conn.lastStatus.lidar_error}
               autoActive={patrolActive}
               mode={conn.lastStatus.navigation_mode}
@@ -1157,7 +1154,6 @@ export default function Pilotage() {
     </div>
   )
 }
-
 
 
 

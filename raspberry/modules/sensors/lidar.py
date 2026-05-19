@@ -107,6 +107,7 @@ class RPLidarA1:
         max_distance_mm: float = 6000.0,
         motor_dtr: bool = False,
         motor_start_delay_s: float = 0.8,
+        angle_offset_deg: float = 0.0,
     ) -> None:
         self.port = port
         self.baudrate = int(baudrate)
@@ -116,6 +117,7 @@ class RPLidarA1:
         self.max_distance_mm = float(max_distance_mm)
         self.motor_dtr = bool(motor_dtr)
         self.motor_start_delay_s = float(motor_start_delay_s)
+        self.angle_offset_deg = float(angle_offset_deg)
 
         self._lock = threading.Lock()
         self._latest = LidarSnapshot(error="non demarre")
@@ -301,6 +303,7 @@ class RPLidarA1:
             point, new_scan = self._parse_measurement(raw)
             if point is None:
                 continue
+            point = self._to_robot_frame(point)
 
             if new_scan and len(current) >= 20:
                 self._publish(current)
@@ -325,6 +328,15 @@ class RPLidarA1:
         if quality < self.min_quality or distance_mm <= 0 or distance_mm > self.max_distance_mm:
             return None, start
         return LidarPoint(angle_deg=angle_deg, distance_mm=distance_mm, quality=quality), start
+
+    def _to_robot_frame(self, point: LidarPoint) -> LidarPoint:
+        if self.angle_offset_deg == 0.0:
+            return point
+        return LidarPoint(
+            angle_deg=(point.angle_deg + self.angle_offset_deg) % 360.0,
+            distance_mm=point.distance_mm,
+            quality=point.quality,
+        )
 
     def _publish(self, points: list[LidarPoint]) -> None:
         if not points:
