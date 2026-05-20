@@ -160,7 +160,9 @@ class RPLidarA1:
         points = [
             {
                 "angle": round(p.angle_deg, 1),
-                "raw_angle": round(p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1),
+                "raw_angle": round(
+                    p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1
+                ),
                 "corrected_angle": round(p.angle_deg, 1),
                 "zone": _robot_zone(p.angle_deg),
                 "distance_cm": round(p.distance_mm / 10.0, 1),
@@ -402,18 +404,16 @@ class RPLidarA1:
         return min(distances) if distances else None
 
     def _zone_min(self, points: list[LidarPoint], zone: str) -> float | None:
-        distances = [
-            p.distance_mm / 10.0
-            for p in points
-            if _robot_zone(p.angle_deg) == zone
-        ]
+        distances = [p.distance_mm / 10.0 for p in points if _robot_zone(p.angle_deg) == zone]
         return min(distances) if distances else None
 
     def _debug_points(self, points: tuple[LidarPoint, ...]) -> list[dict]:
         close_points = sorted(points, key=lambda p: p.distance_mm)[:24]
         return [
             {
-                "raw_angle": round(p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1),
+                "raw_angle": round(
+                    p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1
+                ),
                 "corrected_angle": round(p.angle_deg, 1),
                 "zone": _robot_zone(p.angle_deg),
                 "distance_cm": round(p.distance_mm / 10.0, 1),

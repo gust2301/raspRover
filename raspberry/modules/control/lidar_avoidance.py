@@ -115,9 +115,7 @@ class LidarAvoidancePlanner:
 
     def _zone_min(self, snapshot: LidarSnapshot, zone: str) -> float | None:
         distances = [
-            p.distance_mm / 10.0
-            for p in snapshot.points
-            if _robot_zone(p.angle_deg) == zone
+            p.distance_mm / 10.0 for p in snapshot.points if _robot_zone(p.angle_deg) == zone
         ]
         return min(distances) if distances else None
 
