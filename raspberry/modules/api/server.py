@@ -57,6 +57,7 @@ _patrol: PatrolController | None = None
 _human_detector: HumanDetector | None = None
 _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
+_manual_obstacle_override_until: float = 0.0
 
 
 def _load_config() -> dict:
@@ -205,7 +206,7 @@ async def lifespan(app: FastAPI):
         _lidar = RPLidarA1(
             port=lidar_cfg.get("port") or None,
             baudrate=int(lidar_cfg.get("baudrate", 115200)),
-            obstacle_threshold_cm=float(lidar_cfg.get("obstacle_threshold_cm", 70.0)),
+            obstacle_threshold_cm=float(lidar_cfg.get("obstacle_threshold_cm", 45.0)),
             front_fov_deg=float(lidar_cfg.get("front_fov_deg", 55.0)),
             min_quality=int(lidar_cfg.get("min_quality", 5)),
             max_distance_mm=float(lidar_cfg.get("max_distance_mm", 6000.0)),
@@ -358,6 +359,8 @@ def _obstacle_front() -> bool:
     explicitement active. La vision n'est pas utilisée ici pour éviter les faux
     positifs sur le sol, les reflets ou les zones latérales.
     """
+    if time.monotonic() < _manual_obstacle_override_until:
+        return False
     if _lidar:
         snap = _lidar.snapshot
         if snap.connected and snap.obstacle_front:
@@ -755,6 +758,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             elif msg_type == "stop":
                 if _motors:
                     await loop.run_in_executor(None, _motors.stop)
+
+            elif msg_type == "obstacle_override":
+                global _manual_obstacle_override_until
+                seconds = max(1.0, min(10.0, float(data.get("seconds", 5.0))))
+                _manual_obstacle_override_until = time.monotonic() + seconds
+                log.warning("Obstacle manuel ignore pendant %.1fs", seconds)
+                await ws.send_json(
+                    {
+                        "type": "obstacle_override_ack",
+                        "seconds": seconds,
+                    }
+                )
 
             elif msg_type == "pantilt":
                 if _pantilt is None:

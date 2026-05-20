@@ -798,9 +798,15 @@ export default function Pilotage() {
 
             {/* Obstacle blocked flash */}
             {conn.obstacleBlocked && (
-              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-900/90 border border-amber-500 rounded-xl px-4 py-2 animate-pulse backdrop-blur-sm">
-                <Radar size={14} className="text-amber-300" />
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-900/90 border border-amber-500 rounded-xl px-4 py-2 backdrop-blur-sm">
+                <Radar size={14} className="text-amber-300 animate-pulse" />
                 <span className="text-amber-200 text-xs font-bold">AVANCE BLOQUÉE</span>
+                <button
+                  onClick={conn.clearObstacleBlock}
+                  className="ml-1 rounded-lg border border-amber-400/50 bg-amber-500/20 px-2 py-1 text-[11px] font-bold text-amber-100 hover:bg-amber-500/30"
+                >
+                  Débloquer 5s
+                </button>
               </div>
             )}
 
@@ -1008,9 +1014,17 @@ export default function Pilotage() {
           {/* Obstacle blocked warning */}
           {conn.obstacleBlocked && (
             <div className="px-5 pt-4">
-              <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 animate-pulse">
-                ⚠ Obstacle détecté — avance bloquée
-              </p>
+              <div className="rounded-lg border border-amber-700/40 bg-amber-900/20 px-3 py-2">
+                <p className="text-xs text-amber-400 animate-pulse">
+                  ⚠ Obstacle détecté — avance bloquée
+                </p>
+                <button
+                  onClick={conn.clearObstacleBlock}
+                  className="mt-2 w-full rounded-lg border border-amber-500/40 bg-amber-500/15 py-2 text-xs font-bold text-amber-200 hover:bg-amber-500/25"
+                >
+                  Débloquer le pilotage pendant 5s
+                </button>
+              </div>
             </div>
           )}
 
@@ -1154,7 +1168,6 @@ export default function Pilotage() {
     </div>
   )
 }
-
 
 
 

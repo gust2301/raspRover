@@ -109,6 +109,7 @@ export interface RobotConnection {
   refreshLidarCalibration: () => Promise<LidarCalibration | null>
   startTracking: () => void
   stopTracking: () => void
+  clearObstacleBlock: () => void
   trackingActive: boolean
   personDetected: boolean
   obstacleBlocked: boolean
@@ -226,7 +227,13 @@ export function useRobotConnection(): RobotConnection {
         } else if (data.type === 'obstacle_blocked') {
           setObstacleBlocked(true)
           if (obstacleTimerRef.current) clearTimeout(obstacleTimerRef.current)
-          obstacleTimerRef.current = setTimeout(() => setObstacleBlocked(false), 2000)
+          obstacleTimerRef.current = setTimeout(() => setObstacleBlocked(false), 5000)
+        } else if (data.type === 'obstacle_override_ack') {
+          setObstacleBlocked(false)
+          if (obstacleTimerRef.current) {
+            clearTimeout(obstacleTimerRef.current)
+            obstacleTimerRef.current = null
+          }
         } else if (data.type === 'alert_ack') {
           if (!data.ok && data.error) {
             console.warn('[SENTRYX] Audio error:', data.error)
@@ -397,6 +404,15 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'tracker', action: 'stop' })
   }, [send])
 
+  const clearObstacleBlock = useCallback(() => {
+    setObstacleBlocked(false)
+    if (obstacleTimerRef.current) {
+      clearTimeout(obstacleTimerRef.current)
+      obstacleTimerRef.current = null
+    }
+    send({ type: 'obstacle_override', seconds: 5 })
+  }, [send])
+
   // Ping toutes les 3s pour mesurer la latence et récupérer le statut
   useEffect(() => {
     if (status !== 'connected') return
@@ -435,6 +451,7 @@ export function useRobotConnection(): RobotConnection {
     refreshLidarCalibration,
     startTracking,
     stopTracking,
+    clearObstacleBlock,
     trackingActive,
     personDetected,
     obstacleBlocked,
