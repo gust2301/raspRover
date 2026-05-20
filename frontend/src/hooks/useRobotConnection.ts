@@ -27,12 +27,27 @@ export interface RobotStatus {
   lidar_connected?: boolean
   lidar_port?: string | null
   lidar_error?: string | null
-  lidar_points?: Array<{ angle: number; distance_cm: number }>
+  lidar_points?: Array<{
+    angle: number
+    raw_angle?: number
+    corrected_angle?: number
+    zone?: 'front' | 'right' | 'rear' | 'left'
+    distance_cm: number
+  }>
   lidar_front_cm?: number | null
   lidar_left_cm?: number | null
   lidar_right_cm?: number | null
+  lidar_rear_cm?: number | null
   lidar_obstacle_front?: boolean
   lidar_updated_at?: number
+  lidar_angle_offset_deg?: number
+  lidar_invert_angles?: boolean
+  lidar_debug_points?: Array<{
+    raw_angle: number
+    corrected_angle: number
+    zone: 'front' | 'right' | 'rear' | 'left'
+    distance_cm: number
+  }>
   tracker_active?: boolean
   tracking_person_detected?: boolean
   tracking_cx?: number | null
@@ -63,6 +78,8 @@ export interface RobotConnection {
   stopAlert: () => void
   startPatrol: () => void
   stopPatrol: () => void
+  adjustLidarOffset: (deltaDeg: number) => void
+  toggleLidarInversion: () => void
   startTracking: () => void
   stopTracking: () => void
   trackingActive: boolean
@@ -280,6 +297,14 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'patrol', action: 'stop' })
   }, [send])
 
+  const adjustLidarOffset = useCallback((deltaDeg: number) => {
+    send({ type: 'lidar_calibration', action: 'offset', delta_deg: deltaDeg })
+  }, [send])
+
+  const toggleLidarInversion = useCallback(() => {
+    send({ type: 'lidar_calibration', action: 'invert' })
+  }, [send])
+
   const startTracking = useCallback(() => {
     send({ type: 'tracker', action: 'start' })
   }, [send])
@@ -320,6 +345,8 @@ export function useRobotConnection(): RobotConnection {
     stopAlert,
     startPatrol,
     stopPatrol,
+    adjustLidarOffset,
+    toggleLidarInversion,
     startTracking,
     stopTracking,
     trackingActive,

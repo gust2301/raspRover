@@ -211,7 +211,13 @@ async def lifespan(app: FastAPI):
             max_distance_mm=float(lidar_cfg.get("max_distance_mm", 6000.0)),
             motor_dtr=bool(lidar_cfg.get("motor_dtr", False)),
             motor_start_delay_s=float(lidar_cfg.get("motor_start_delay_s", 0.8)),
-            angle_offset_deg=float(lidar_cfg.get("angle_offset_deg", 0.0)),
+            lidar_angle_offset_deg=float(
+                lidar_cfg.get(
+                    "lidar_angle_offset_deg",
+                    lidar_cfg.get("angle_offset_deg", 0.0),
+                )
+            ),
+            invert_angles=bool(lidar_cfg.get("lidar_invert_angles", False)),
         )
         _lidar.start()
         log.info("RPLIDAR A1 demarre (USB, port=%s)", lidar_cfg.get("port") or "auto")
@@ -796,6 +802,22 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 tracker_data = _tracker.to_dict()
                 human_data = _human_detector.to_dict() if _human_detector else {}
                 await ws.send_json({"type": "tracker_ack", **tracker_data, **human_data})
+
+            elif msg_type == "lidar_calibration":
+                if _lidar is None:
+                    await ws.send_json({"type": "error", "message": "lidar not ready"})
+                    continue
+                action = data.get("action")
+                if action == "offset":
+                    _lidar.adjust_angle_offset(float(data.get("delta_deg", 0.0)))
+                elif action == "invert":
+                    _lidar.toggle_angle_inversion()
+                else:
+                    await ws.send_json(
+                        {"type": "error", "message": f"action calibration inconnue: {action}"}
+                    )
+                    continue
+                await ws.send_json({"type": "status", **_system_status()})
 
             elif msg_type == "status":
                 base_status = _system_status()
