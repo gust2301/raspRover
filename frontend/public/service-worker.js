@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sentryx-v2'
+const CACHE_NAME = 'sentryx-v3'
 const PRECACHE_URLS = [
   '/',
   '/manifest.webmanifest',
@@ -16,7 +16,7 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)))
-  // Do NOT call skipWaiting here — wait for user confirmation via message
+  self.skipWaiting()
 })
 
 self.addEventListener('message', (event) => {
@@ -50,10 +50,14 @@ async function networkFirst(request) {
     }
 
     if (request.mode === 'navigate') {
-      return cache.match('/')
+      const fallback = await cache.match('/')
+      if (fallback) return fallback
     }
 
-    throw new Error('Network unavailable')
+    return new Response('', {
+      status: 503,
+      statusText: 'Network unavailable',
+    })
   }
 }
 

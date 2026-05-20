@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getRobotTransportWarning, getRobotWsUrl } from '../lib/robotTransport'
+import { getRobotApiUrl, getRobotTransportWarning, getRobotWsUrl } from '../lib/robotTransport'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -27,12 +27,28 @@ export interface RobotStatus {
   lidar_connected?: boolean
   lidar_port?: string | null
   lidar_error?: string | null
-  lidar_points?: Array<{ angle: number; distance_cm: number }>
+  lidar_points?: Array<{
+    angle: number
+    raw_angle?: number
+    corrected_angle?: number
+    zone?: 'front' | 'right' | 'rear' | 'left'
+    distance_cm: number
+  }>
   lidar_front_cm?: number | null
   lidar_left_cm?: number | null
   lidar_right_cm?: number | null
+  lidar_rear_cm?: number | null
   lidar_obstacle_front?: boolean
   lidar_updated_at?: number
+  lidar_angle_offset_deg?: number
+  lidar_calibration?: LidarCalibration
+  lidar_invert_angles?: boolean
+  lidar_debug_points?: Array<{
+    raw_angle: number
+    corrected_angle: number
+    zone: 'front' | 'right' | 'rear' | 'left'
+    distance_cm: number
+  }>
   tracker_active?: boolean
   tracking_person_detected?: boolean
   tracking_cx?: number | null
@@ -46,6 +62,26 @@ export interface RobotStatus {
   vision_available?: boolean
   vision_method?: 'canny' | 'uniform' | 'none'
   [key: string]: unknown
+}
+
+export interface LidarCalibration {
+  angle_offset_deg: number
+  invert_angles: boolean
+  connected?: boolean
+  port?: string | null
+  error?: string | null
+  zones?: {
+    front?: number | null
+    right?: number | null
+    rear?: number | null
+    left?: number | null
+  }
+  debug_points?: Array<{
+    raw_angle: number
+    corrected_angle: number
+    zone: 'front' | 'right' | 'rear' | 'left'
+    distance_cm: number
+  }>
 }
 
 export interface RobotConnection {
@@ -63,6 +99,14 @@ export interface RobotConnection {
   stopAlert: () => void
   startPatrol: () => void
   stopPatrol: () => void
+  adjustLidarOffset: (deltaDeg: number) => void
+  toggleLidarInversion: () => void
+  setLidarCalibration: (calibration: {
+    angle_offset_deg?: number
+    invert_angles?: boolean
+    save?: boolean
+  }) => Promise<LidarCalibration | null>
+  refreshLidarCalibration: () => Promise<LidarCalibration | null>
   startTracking: () => void
   stopTracking: () => void
   trackingActive: boolean
@@ -280,6 +324,71 @@ export function useRobotConnection(): RobotConnection {
     send({ type: 'patrol', action: 'stop' })
   }, [send])
 
+  const applyLidarCalibrationState = useCallback((calibration: LidarCalibration) => {
+    setLastStatus(prev => {
+      const next = {
+        ...(prev ?? {}),
+        lidar_angle_offset_deg: calibration.angle_offset_deg,
+        lidar_invert_angles: calibration.invert_angles,
+        lidar_calibration: calibration,
+      } as RobotStatus
+      if (calibration.zones) {
+        next.lidar_front_cm = calibration.zones.front
+        next.lidar_right_cm = calibration.zones.right
+        next.lidar_rear_cm = calibration.zones.rear
+        next.lidar_left_cm = calibration.zones.left
+      }
+      if (calibration.debug_points) {
+        next.lidar_debug_points = calibration.debug_points
+      }
+      return next
+    })
+  }, [])
+
+  const setLidarCalibration = useCallback(async (calibration: {
+    angle_offset_deg?: number
+    invert_angles?: boolean
+    save?: boolean
+  }) => {
+    try {
+      const response = await fetch(`${getRobotApiUrl(robotIp)}/api/lidar/calibration`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(calibration),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json() as LidarCalibration & { ok?: boolean }
+      applyLidarCalibrationState(data)
+      send({ type: 'status' })
+      return data
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Calibration LIDAR impossible')
+      return null
+    }
+  }, [applyLidarCalibrationState, robotIp, send])
+
+  const refreshLidarCalibration = useCallback(async () => {
+    try {
+      const response = await fetch(`${getRobotApiUrl(robotIp)}/api/lidar/calibration`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json() as LidarCalibration
+      applyLidarCalibrationState(data)
+      return data
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Lecture calibration LIDAR impossible')
+      return null
+    }
+  }, [applyLidarCalibrationState, robotIp])
+
+  const adjustLidarOffset = useCallback((deltaDeg: number) => {
+    const current = Number(lastStatus?.lidar_angle_offset_deg ?? 0)
+    void setLidarCalibration({ angle_offset_deg: (current + deltaDeg + 360) % 360 })
+  }, [lastStatus?.lidar_angle_offset_deg, setLidarCalibration])
+
+  const toggleLidarInversion = useCallback(() => {
+    void setLidarCalibration({ invert_angles: !(lastStatus?.lidar_invert_angles ?? false) })
+  }, [lastStatus?.lidar_invert_angles, setLidarCalibration])
+
   const startTracking = useCallback(() => {
     send({ type: 'tracker', action: 'start' })
   }, [send])
@@ -320,6 +429,10 @@ export function useRobotConnection(): RobotConnection {
     stopAlert,
     startPatrol,
     stopPatrol,
+    adjustLidarOffset,
+    toggleLidarInversion,
+    setLidarCalibration,
+    refreshLidarCalibration,
     startTracking,
     stopTracking,
     trackingActive,
