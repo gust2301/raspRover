@@ -13,8 +13,13 @@ import { getRobotStreamUrl } from '../lib/robotTransport'
 
 const STATE_LABEL: Record<string, { text: string; color: string; pulse: boolean }> = {
   idle:     { text: 'En attente',         color: 'text-slate-400',   pulse: false },
+  scanning: { text: 'Scan LIDAR',         color: 'text-cyan-400',    pulse: true  },
   forward:  { text: 'En déplacement',     color: 'text-emerald-400', pulse: true  },
   avoiding: { text: 'Évitement…',         color: 'text-amber-400',   pulse: true  },
+  turning_left:  { text: 'Rotation gauche', color: 'text-amber-400', pulse: true  },
+  turning_right: { text: 'Rotation droite', color: 'text-amber-400', pulse: true  },
+  backing_up: { text: 'Recul sécurisé',   color: 'text-orange-400',  pulse: true  },
+  stopped:  { text: 'Stop sécurité',      color: 'text-red-400',     pulse: true  },
   stuck:    { text: 'Coincé — recul…',    color: 'text-orange-400',  pulse: true  },
 }
 
@@ -63,6 +68,8 @@ export default function Patrols() {
 
   const patrolActive      = conn.lastStatus?.patrol_active ?? false
   const patrolState       = conn.lastStatus?.patrol_state ?? 'idle'
+  const patrolDecision    = conn.lastStatus?.patrol_decision
+  const patrolReason      = conn.lastStatus?.patrol_decision_reason
   const frontCm           = conn.lastStatus?.lidar_front_cm ?? conn.lastStatus?.front_cm
   const obstacle          = conn.lastStatus?.lidar_obstacle_front ?? conn.lastStatus?.obstacle_front ?? false
   const visionObstacle    = conn.lastStatus?.vision_obstacle ?? false
@@ -241,6 +248,17 @@ export default function Patrols() {
                   <span className={`text-sm font-bold ${stateInfo.color}`}>{stateInfo.text}</span>
                 </div>
               </div>
+              {(patrolDecision || patrolReason) && (
+                <div className="mb-5 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                  <div className="flex justify-between gap-3 text-xs">
+                    <span className="text-slate-500">Décision</span>
+                    <span className="font-mono text-cyan-300">{patrolDecision ?? '--'}</span>
+                  </div>
+                  {patrolReason && (
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{patrolReason}</p>
+                  )}
+                </div>
+              )}
 
               {/* Start / Stop button */}
               <button

@@ -261,6 +261,17 @@ async def lifespan(app: FastAPI):
         step_duration=float(patrol_cfg.get("step_duration", 0.7)),
         scan_with_pantilt=bool(patrol_cfg.get("scan_with_pantilt", False)),
         stuck_timeout=float(patrol_cfg.get("stuck_timeout", 3.5)),
+        lidar_stop_cm=float(patrol_cfg.get("lidar_stop_cm", 32.0)),
+        lidar_warning_cm=float(patrol_cfg.get("lidar_warning_cm", 65.0)),
+        lidar_safe_cm=float(patrol_cfg.get("lidar_safe_cm", 110.0)),
+        turn_clearance_cm=float(patrol_cfg.get("turn_clearance_cm", 55.0)),
+        rear_clearance_cm=float(patrol_cfg.get("rear_clearance_cm", 50.0)),
+        min_decision_duration_ms=int(patrol_cfg.get("min_decision_duration_ms", 1200)),
+        patrol_forward_speed=float(
+            patrol_cfg.get("patrol_forward_speed", patrol_cfg.get("speed", 0.3))
+        ),
+        patrol_turn_speed=float(patrol_cfg.get("patrol_turn_speed", 0.42)),
+        scan_zone_min_points=int(patrol_cfg.get("scan_zone_min_points", 2)),
         on_incident=log_incident,
         on_auto_record=_auto_record_coro,
         on_capture_photo=_auto_photo_coro,

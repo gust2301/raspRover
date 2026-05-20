@@ -97,6 +97,15 @@ patrol:
   navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY
   speed: 0.3                # Vitesse d'avance (0-1)
   obstacle_cm: 70           # Seuil obstacle (cm) pour l'évitement LIDAR
+  lidar_stop_cm: 32         # Stop immediat si obstacle frontal/lateral tres proche
+  lidar_warning_cm: 65      # Zone prudente: ralentir ou corriger la trajectoire
+  lidar_safe_cm: 110        # Distance consideree libre pour avancer
+  turn_clearance_cm: 55     # Distance minimale gauche/droite pour tourner
+  rear_clearance_cm: 50     # Distance minimale arriere pour reculer
+  min_decision_duration_ms: 1200 # Anti-oscillation entre deux decisions
+  patrol_forward_speed: 0.3 # Vitesse d'avance en LIDAR_ONLY
+  patrol_turn_speed: 0.42   # Vitesse de rotation en LIDAR_ONLY
+  scan_zone_min_points: 2   # Points minimum par zone pour valider la mesure
   step_duration: 0.7        # Durée d'une étape d'avance (s) — scan entre chaque étape
   stuck_timeout: 3.5        # Secondes en FORWARD sans obstacle → angle mort détecté
   scan_with_pantilt: false  # true = sweep caméra gauche/centre/droite avant chaque étape
