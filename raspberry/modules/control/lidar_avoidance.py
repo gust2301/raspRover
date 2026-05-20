@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from modules.sensors.lidar import LidarSnapshot, _angle_delta
+from modules.sensors.lidar import LidarSnapshot, _robot_zone
 
 log = logging.getLogger(__name__)
 
@@ -58,9 +58,9 @@ class LidarAvoidancePlanner:
         if not snapshot.points:
             return AvoidanceDecision(AvoidanceAction.STOP, "scan lidar vide")
 
-        front = self._sector_min(snapshot, 0.0, self.front_fov_deg)
-        left = self._sector_score(snapshot, -70.0, 80.0)
-        right = self._sector_score(snapshot, 70.0, 80.0)
+        front = self._zone_min(snapshot, "front")
+        left = self._zone_score(snapshot, "left")
+        right = self._zone_score(snapshot, "right")
         now = time.monotonic()
 
         if front is None or front >= self.clear_cm:
@@ -113,19 +113,19 @@ class LidarAvoidancePlanner:
             self._last_turn_sign = 1
         log.info("LIDAR avoidance: %s - %s", decision.action.value, decision.reason)
 
-    def _sector_min(self, snapshot: LidarSnapshot, center: float, width: float) -> float | None:
+    def _zone_min(self, snapshot: LidarSnapshot, zone: str) -> float | None:
         distances = [
             p.distance_mm / 10.0
             for p in snapshot.points
-            if abs(_angle_delta(p.angle_deg, center)) <= width / 2.0
+            if _robot_zone(p.angle_deg) == zone
         ]
         return min(distances) if distances else None
 
-    def _sector_score(self, snapshot: LidarSnapshot, center: float, width: float) -> float:
+    def _zone_score(self, snapshot: LidarSnapshot, zone: str) -> float:
         distances = [
             min(p.distance_mm / 10.0, self.clear_cm * 2.0)
             for p in snapshot.points
-            if abs(_angle_delta(p.angle_deg, center)) <= width / 2.0
+            if _robot_zone(p.angle_deg) == zone
         ]
         if not distances:
             return 0.0

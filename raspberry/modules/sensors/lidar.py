@@ -38,6 +38,7 @@ class LidarPoint:
     angle_deg: float
     distance_mm: float
     quality: int
+    raw_angle_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class LidarSnapshot:
     front_distance_cm: float | None = None
     left_distance_cm: float | None = None
     right_distance_cm: float | None = None
+    rear_distance_cm: float | None = None
     obstacle_front: bool = False
     updated_at: float | None = None
     error: str | None = "non demarre"
@@ -107,7 +109,9 @@ class RPLidarA1:
         max_distance_mm: float = 6000.0,
         motor_dtr: bool = False,
         motor_start_delay_s: float = 0.8,
-        angle_offset_deg: float = 0.0,
+        lidar_angle_offset_deg: float = 0.0,
+        invert_angles: bool = False,
+        angle_offset_deg: float | None = None,
     ) -> None:
         self.port = port
         self.baudrate = int(baudrate)
@@ -117,7 +121,10 @@ class RPLidarA1:
         self.max_distance_mm = float(max_distance_mm)
         self.motor_dtr = bool(motor_dtr)
         self.motor_start_delay_s = float(motor_start_delay_s)
-        self.angle_offset_deg = float(angle_offset_deg)
+        if angle_offset_deg is not None:
+            lidar_angle_offset_deg = angle_offset_deg
+        self.lidar_angle_offset_deg = float(lidar_angle_offset_deg) % 360.0
+        self.invert_angles = bool(invert_angles)
 
         self._lock = threading.Lock()
         self._latest = LidarSnapshot(error="non demarre")
@@ -151,7 +158,13 @@ class RPLidarA1:
     def to_dict(self) -> dict:
         snap = self.snapshot
         points = [
-            {"angle": round(p.angle_deg, 1), "distance_cm": round(p.distance_mm / 10.0, 1)}
+            {
+                "angle": round(p.angle_deg, 1),
+                "raw_angle": round(p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1),
+                "corrected_angle": round(p.angle_deg, 1),
+                "zone": _robot_zone(p.angle_deg),
+                "distance_cm": round(p.distance_mm / 10.0, 1),
+            }
             for p in snap.points
             if abs(_angle_delta(p.angle_deg, 0.0)) <= 90.0
         ]
@@ -166,9 +179,23 @@ class RPLidarA1:
             "lidar_front_cm": snap.front_distance_cm,
             "lidar_left_cm": snap.left_distance_cm,
             "lidar_right_cm": snap.right_distance_cm,
+            "lidar_rear_cm": snap.rear_distance_cm,
             "lidar_obstacle_front": snap.obstacle_front,
             "lidar_updated_at": snap.updated_at,
+            "lidar_angle_offset_deg": self.lidar_angle_offset_deg,
+            "lidar_invert_angles": self.invert_angles,
+            "lidar_debug_points": self._debug_points(snap.points),
         }
+
+    def adjust_angle_offset(self, delta_deg: float) -> float:
+        self.lidar_angle_offset_deg = (self.lidar_angle_offset_deg + float(delta_deg)) % 360.0
+        log.info("RPLIDAR calibration: offset=%.1f deg", self.lidar_angle_offset_deg)
+        return self.lidar_angle_offset_deg
+
+    def toggle_angle_inversion(self) -> bool:
+        self.invert_angles = not self.invert_angles
+        log.info("RPLIDAR calibration: invert_angles=%s", self.invert_angles)
+        return self.invert_angles
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -330,20 +357,22 @@ class RPLidarA1:
         return LidarPoint(angle_deg=angle_deg, distance_mm=distance_mm, quality=quality), start
 
     def _to_robot_frame(self, point: LidarPoint) -> LidarPoint:
-        if self.angle_offset_deg == 0.0:
-            return point
+        raw_angle = point.angle_deg
+        base_angle = -raw_angle if self.invert_angles else raw_angle
         return LidarPoint(
-            angle_deg=(point.angle_deg + self.angle_offset_deg) % 360.0,
+            angle_deg=(base_angle + self.lidar_angle_offset_deg) % 360.0,
             distance_mm=point.distance_mm,
             quality=point.quality,
+            raw_angle_deg=raw_angle,
         )
 
     def _publish(self, points: list[LidarPoint]) -> None:
         if not points:
             return
-        front = self._sector_min(points, 0.0, self.front_fov_deg)
-        left = self._sector_min(points, 315.0, 60.0)
-        right = self._sector_min(points, 45.0, 60.0)
+        front = self._zone_min(points, "front")
+        right = self._zone_min(points, "right")
+        rear = self._zone_min(points, "rear")
+        left = self._zone_min(points, "left")
         snap = LidarSnapshot(
             connected=True,
             port=self._resolved_port,
@@ -351,6 +380,7 @@ class RPLidarA1:
             front_distance_cm=front,
             left_distance_cm=left,
             right_distance_cm=right,
+            rear_distance_cm=rear,
             obstacle_front=front is not None and front < self.obstacle_threshold_cm,
             updated_at=time.time(),
             error=None,
@@ -371,6 +401,37 @@ class RPLidarA1:
         ]
         return min(distances) if distances else None
 
+    def _zone_min(self, points: list[LidarPoint], zone: str) -> float | None:
+        distances = [
+            p.distance_mm / 10.0
+            for p in points
+            if _robot_zone(p.angle_deg) == zone
+        ]
+        return min(distances) if distances else None
+
+    def _debug_points(self, points: tuple[LidarPoint, ...]) -> list[dict]:
+        close_points = sorted(points, key=lambda p: p.distance_mm)[:24]
+        return [
+            {
+                "raw_angle": round(p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1),
+                "corrected_angle": round(p.angle_deg, 1),
+                "zone": _robot_zone(p.angle_deg),
+                "distance_cm": round(p.distance_mm / 10.0, 1),
+            }
+            for p in close_points
+        ]
+
     def _set_snapshot(self, snapshot: LidarSnapshot) -> None:
         with self._lock:
             self._latest = snapshot
+
+
+def _robot_zone(angle_deg: float) -> str:
+    angle = angle_deg % 360.0
+    if angle >= 330.0 or angle < 30.0:
+        return "front"
+    if angle < 120.0:
+        return "right"
+    if angle < 240.0:
+        return "rear"
+    return "left"
