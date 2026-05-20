@@ -71,6 +71,7 @@ export default function Patrols() {
   const visionAvailable   = conn.lastStatus?.vision_available ?? false
   const visionMethod      = conn.lastStatus?.vision_method ?? 'none'
   const lidarOffset       = conn.lastStatus?.lidar_angle_offset_deg
+  const lidarRightOffset  = conn.lastStatus?.lidar_offset_right_cm
   const lidarInverted     = conn.lastStatus?.lidar_invert_angles ?? false
   const lidarDebugPoints  = conn.lastStatus?.lidar_debug_points ?? []
   const stateInfo         = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
@@ -301,6 +302,10 @@ export default function Patrols() {
                       <span>Sens</span>
                       <span>{lidarInverted ? 'inversé' : 'normal'}</span>
                     </div>
+                    <div className="mt-1 flex justify-between text-[11px] text-slate-500">
+                      <span>Décalage droite</span>
+                      <span>{lidarRightOffset != null ? `${lidarRightOffset.toFixed(0)} cm` : '--'}</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -345,17 +350,19 @@ export default function Patrols() {
               </div>
               {showSettings && lidarDebugPoints.length > 0 && (
                 <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-                  <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
+                  <div className="grid grid-cols-5 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
                     <span>Brut</span>
                     <span>Corr.</span>
+                    <span>Robot</span>
                     <span>Zone</span>
                     <span className="text-right">cm</span>
                   </div>
                   <div className="max-h-36 overflow-y-auto">
                     {lidarDebugPoints.slice(0, 12).map((p, idx) => (
-                      <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
+                      <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-5 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
                         <span>{p.raw_angle.toFixed(0)}°</span>
                         <span>{p.corrected_angle.toFixed(0)}°</span>
+                        <span>{(p.robot_angle ?? p.corrected_angle).toFixed(0)}°</span>
                         <span className={p.zone === 'front' ? 'text-red-300' : p.zone === 'right' ? 'text-cyan-300' : p.zone === 'left' ? 'text-blue-300' : 'text-slate-500'}>
                           {LIDAR_ZONE_LABEL[p.zone] ?? p.zone}
                         </span>

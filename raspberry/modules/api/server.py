@@ -214,9 +214,11 @@ async def lifespan(app: FastAPI):
             lidar_angle_offset_deg=float(
                 lidar_cfg.get(
                     "lidar_angle_offset_deg",
-                    lidar_cfg.get("angle_offset_deg", 0.0),
+                    lidar_cfg.get("angle_offset_deg", 90.0),
                 )
             ),
+            lidar_offset_right_cm=float(lidar_cfg.get("lidar_offset_right_cm", 12.0)),
+            lidar_offset_forward_cm=float(lidar_cfg.get("lidar_offset_forward_cm", 0.0)),
             invert_angles=bool(lidar_cfg.get("lidar_invert_angles", False)),
         )
         _lidar.start()
