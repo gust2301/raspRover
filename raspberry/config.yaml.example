@@ -74,7 +74,7 @@ sensors:
     enabled: true             # RPLIDAR A1 branche en USB sur la Raspberry Pi
     # port: "/dev/ttyUSB0"    # Laisser vide = auto-detection
     baudrate: 115200
-    obstacle_threshold_cm: 70 # Seuil frontal utilise pour la securite manuelle
+    obstacle_threshold_cm: 45 # Seuil frontal utilise pour la securite manuelle
     front_fov_deg: 55         # Cone avant analyse par le planner
     min_quality: 5
     max_distance_mm: 6000
