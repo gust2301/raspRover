@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   Bot, Radar, Play, Square,
   ChevronDown, ChevronUp, AlertTriangle, Eye, Camera, CameraOff,
-  Plus, Minus, RotateCcw,
+  RotateCcw, Save,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
@@ -24,6 +24,8 @@ const LIDAR_ZONE_LABEL: Record<string, string> = {
   rear: 'Arrière',
   left: 'Gauche',
 }
+
+const LIDAR_ZONE_ORDER = ['front', 'right', 'rear', 'left'] as const
 
 function DistanceBar({ cm, label }: { cm: number | null | undefined; label: string }) {
   const pct = cm != null ? Math.max(0, Math.min(100, (cm / 300) * 100)) : 0
@@ -71,9 +73,18 @@ export default function Patrols() {
   const visionAvailable   = conn.lastStatus?.vision_available ?? false
   const visionMethod      = conn.lastStatus?.vision_method ?? 'none'
   const lidarOffset       = conn.lastStatus?.lidar_angle_offset_deg
-  const lidarRightOffset  = conn.lastStatus?.lidar_offset_right_cm
   const lidarInverted     = conn.lastStatus?.lidar_invert_angles ?? false
   const lidarDebugPoints  = conn.lastStatus?.lidar_debug_points ?? []
+  const lidarZones        = conn.lastStatus?.lidar_calibration?.zones ?? {
+    front: conn.lastStatus?.lidar_front_cm,
+    right: conn.lastStatus?.lidar_right_cm,
+    rear: conn.lastStatus?.lidar_rear_cm,
+    left: conn.lastStatus?.lidar_left_cm,
+  }
+  const nearestLidarZone  = LIDAR_ZONE_ORDER
+    .map(zone => ({ zone, cm: lidarZones?.[zone] }))
+    .filter((entry): entry is { zone: typeof LIDAR_ZONE_ORDER[number]; cm: number } => typeof entry.cm === 'number')
+    .sort((a, b) => a.cm - b.cm)[0]
   const stateInfo         = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
   const isConnected       = conn.status === 'connected'
 
@@ -82,6 +93,15 @@ export default function Patrols() {
     setStreamKey(k => k + 1)
     if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
   }, [conn.robotIp, conn.status])
+
+  useEffect(() => {
+    if (!showSettings || !isConnected) return
+    void conn.refreshLidarCalibration()
+    const id = setInterval(() => {
+      void conn.refreshLidarCalibration()
+    }, 1000)
+    return () => clearInterval(id)
+  }, [conn.refreshLidarCalibration, isConnected, showSettings])
 
   return (
     <div className="-m-3 sm:-m-4 lg:-m-6 flex flex-col min-h-full" style={{ background: '#070d1a' }}>
@@ -268,34 +288,70 @@ export default function Patrols() {
                         {lidarOffset != null ? `${lidarOffset.toFixed(0)}°` : '--'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       <button
-                        onClick={() => conn.adjustLidarOffset(-10)}
+                        onClick={() => conn.adjustLidarOffset(-15)}
                         disabled={!isConnected}
-                        title="-10°"
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center hover:bg-slate-700 disabled:opacity-40"
+                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
                       >
-                        <Minus size={14} />
+                        -15°
                       </button>
+                      <button
+                        onClick={() => conn.adjustLidarOffset(-5)}
+                        disabled={!isConnected}
+                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
+                      >
+                        -5°
+                      </button>
+                      <button
+                        onClick={() => conn.adjustLidarOffset(5)}
+                        disabled={!isConnected}
+                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
+                      >
+                        +5°
+                      </button>
+                      <button
+                        onClick={() => conn.adjustLidarOffset(15)}
+                        disabled={!isConnected}
+                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
+                      >
+                        +15°
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-2">
                       <button
                         onClick={() => conn.toggleLidarInversion()}
                         disabled={!isConnected}
-                        title="Inverser le sens angulaire"
-                        className={`h-9 rounded-lg border flex items-center justify-center disabled:opacity-40 ${
+                        className={`h-9 rounded-lg border flex items-center justify-center gap-1.5 text-xs disabled:opacity-40 ${
                           lidarInverted
                             ? 'bg-amber-600/20 border-amber-500/50 text-amber-300'
                             : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
                         }`}
                       >
-                        <RotateCcw size={14} />
+                        <RotateCcw size={13} />
+                        Sens
                       </button>
                       <button
-                        onClick={() => conn.adjustLidarOffset(10)}
+                        onClick={() => conn.setLidarCalibration({
+                          angle_offset_deg: lidarOffset ?? 0,
+                          invert_angles: lidarInverted,
+                          save: true,
+                        })}
                         disabled={!isConnected}
-                        title="+10°"
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center hover:bg-slate-700 disabled:opacity-40"
+                        className="h-9 rounded-lg bg-emerald-600/15 border border-emerald-500/40 text-emerald-300 flex items-center justify-center gap-1.5 text-xs hover:bg-emerald-600/25 disabled:opacity-40"
                       >
-                        <Plus size={14} />
+                        <Save size={13} />
+                        Sauver
+                      </button>
+                      <button
+                        onClick={() => conn.setLidarCalibration({
+                          angle_offset_deg: 0,
+                          invert_angles: false,
+                        })}
+                        disabled={!isConnected}
+                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs hover:bg-slate-700 disabled:opacity-40"
+                      >
+                        Reset
                       </button>
                     </div>
                     <div className="mt-2 flex justify-between text-[11px] text-slate-500">
@@ -303,8 +359,12 @@ export default function Patrols() {
                       <span>{lidarInverted ? 'inversé' : 'normal'}</span>
                     </div>
                     <div className="mt-1 flex justify-between text-[11px] text-slate-500">
-                      <span>Décalage droite</span>
-                      <span>{lidarRightOffset != null ? `${lidarRightOffset.toFixed(0)} cm` : '--'}</span>
+                      <span>Obstacle le plus proche</span>
+                      <span>
+                        {nearestLidarZone
+                          ? `${LIDAR_ZONE_LABEL[nearestLidarZone.zone]} ${nearestLidarZone.cm.toFixed(0)} cm`
+                          : '--'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -350,19 +410,17 @@ export default function Patrols() {
               </div>
               {showSettings && lidarDebugPoints.length > 0 && (
                 <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-                  <div className="grid grid-cols-5 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
+                  <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
                     <span>Brut</span>
                     <span>Corr.</span>
-                    <span>Robot</span>
                     <span>Zone</span>
                     <span className="text-right">cm</span>
                   </div>
                   <div className="max-h-36 overflow-y-auto">
                     {lidarDebugPoints.slice(0, 12).map((p, idx) => (
-                      <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-5 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
+                      <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
                         <span>{p.raw_angle.toFixed(0)}°</span>
                         <span>{p.corrected_angle.toFixed(0)}°</span>
-                        <span>{(p.robot_angle ?? p.corrected_angle).toFixed(0)}°</span>
                         <span className={p.zone === 'front' ? 'text-red-300' : p.zone === 'right' ? 'text-cyan-300' : p.zone === 'left' ? 'text-blue-300' : 'text-slate-500'}>
                           {LIDAR_ZONE_LABEL[p.zone] ?? p.zone}
                         </span>
