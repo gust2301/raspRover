@@ -214,11 +214,9 @@ async def lifespan(app: FastAPI):
             lidar_angle_offset_deg=float(
                 lidar_cfg.get(
                     "lidar_angle_offset_deg",
-                    lidar_cfg.get("angle_offset_deg", 90.0),
+                    lidar_cfg.get("angle_offset_deg", 0.0),
                 )
             ),
-            lidar_offset_right_cm=float(lidar_cfg.get("lidar_offset_right_cm", 12.0)),
-            lidar_offset_forward_cm=float(lidar_cfg.get("lidar_offset_forward_cm", 0.0)),
             invert_angles=bool(lidar_cfg.get("lidar_invert_angles", False)),
         )
         _lidar.start()
@@ -540,6 +538,46 @@ async def get_lidar() -> dict:
     return _lidar.to_dict()
 
 
+def _persist_lidar_calibration(angle_offset_deg: float, invert_angles: bool) -> None:
+    cfg = _load_config()
+    sensors = cfg.setdefault("sensors", {})
+    lidar_cfg = sensors.setdefault("lidar", {})
+    lidar_cfg["lidar_angle_offset_deg"] = float(angle_offset_deg) % 360.0
+    lidar_cfg["lidar_invert_angles"] = bool(invert_angles)
+    with CONFIG_PATH.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+
+
+@app.get("/api/lidar/calibration")
+async def get_lidar_calibration() -> dict:
+    if _lidar is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "RPLIDAR non active (sensors.lidar.enabled: false)"},
+        )
+    return _lidar.calibration_to_dict()
+
+
+@app.post("/api/lidar/calibration")
+async def set_lidar_calibration(body: dict[str, Any]) -> dict:
+    if _lidar is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "RPLIDAR non active (sensors.lidar.enabled: false)"},
+        )
+
+    calibration = _lidar.set_calibration(
+        angle_offset_deg=body.get("angle_offset_deg"),
+        invert_angles=body.get("invert_angles"),
+    )
+    if bool(body.get("save", False)):
+        _persist_lidar_calibration(
+            calibration["angle_offset_deg"],
+            calibration["invert_angles"],
+        )
+    return {"ok": True, **calibration}
+
+
 # ---------------------------------------------------------------------------
 # REST — Patrouille
 # ---------------------------------------------------------------------------
@@ -814,6 +852,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     _lidar.adjust_angle_offset(float(data.get("delta_deg", 0.0)))
                 elif action == "invert":
                     _lidar.toggle_angle_inversion()
+                elif action == "set":
+                    _lidar.set_calibration(
+                        angle_offset_deg=data.get("angle_offset_deg"),
+                        invert_angles=data.get("invert_angles"),
+                    )
                 else:
                     await ws.send_json(
                         {"type": "error", "message": f"action calibration inconnue: {action}"}

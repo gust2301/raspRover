@@ -7,7 +7,6 @@ snapshot suitable for obstacle avoidance and the web UI.
 from __future__ import annotations
 
 import logging
-import math
 import threading
 import time
 from dataclasses import dataclass
@@ -40,7 +39,6 @@ class LidarPoint:
     distance_mm: float
     quality: int
     raw_angle_deg: float | None = None
-    corrected_angle_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -111,9 +109,7 @@ class RPLidarA1:
         max_distance_mm: float = 6000.0,
         motor_dtr: bool = False,
         motor_start_delay_s: float = 0.8,
-        lidar_angle_offset_deg: float = 90.0,
-        lidar_offset_right_cm: float = 12.0,
-        lidar_offset_forward_cm: float = 0.0,
+        lidar_angle_offset_deg: float = 0.0,
         invert_angles: bool = False,
         angle_offset_deg: float | None = None,
     ) -> None:
@@ -128,8 +124,6 @@ class RPLidarA1:
         if angle_offset_deg is not None:
             lidar_angle_offset_deg = angle_offset_deg
         self.lidar_angle_offset_deg = float(lidar_angle_offset_deg) % 360.0
-        self.lidar_offset_right_cm = float(lidar_offset_right_cm)
-        self.lidar_offset_forward_cm = float(lidar_offset_forward_cm)
         self.invert_angles = bool(invert_angles)
 
         self._lock = threading.Lock()
@@ -169,11 +163,7 @@ class RPLidarA1:
                 "raw_angle": round(
                     p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1
                 ),
-                "corrected_angle": round(
-                    p.corrected_angle_deg if p.corrected_angle_deg is not None else p.angle_deg,
-                    1,
-                ),
-                "robot_angle": round(p.angle_deg, 1),
+                "corrected_angle": round(p.angle_deg, 1),
                 "zone": _robot_zone(p.angle_deg),
                 "distance_cm": round(p.distance_mm / 10.0, 1),
             }
@@ -195,20 +185,50 @@ class RPLidarA1:
             "lidar_obstacle_front": snap.obstacle_front,
             "lidar_updated_at": snap.updated_at,
             "lidar_angle_offset_deg": self.lidar_angle_offset_deg,
-            "lidar_offset_right_cm": self.lidar_offset_right_cm,
-            "lidar_offset_forward_cm": self.lidar_offset_forward_cm,
+            "lidar_calibration": self.calibration_to_dict(),
             "lidar_invert_angles": self.invert_angles,
             "lidar_debug_points": self._debug_points(snap.points),
         }
 
+    def calibration_to_dict(self) -> dict:
+        return {
+            "angle_offset_deg": self.lidar_angle_offset_deg,
+            "invert_angles": self.invert_angles,
+            "connected": self.snapshot.connected,
+            "port": self.snapshot.port,
+            "error": self.snapshot.error,
+            "zones": {
+                "front": self.snapshot.front_distance_cm,
+                "right": self.snapshot.right_distance_cm,
+                "rear": self.snapshot.rear_distance_cm,
+                "left": self.snapshot.left_distance_cm,
+            },
+            "debug_points": self._debug_points(self.snapshot.points),
+        }
+
+    def set_calibration(
+        self,
+        *,
+        angle_offset_deg: float | None = None,
+        invert_angles: bool | None = None,
+    ) -> dict:
+        if angle_offset_deg is not None:
+            self.lidar_angle_offset_deg = float(angle_offset_deg) % 360.0
+        if invert_angles is not None:
+            self.invert_angles = bool(invert_angles)
+        log.info(
+            "RPLIDAR calibration: angle_offset_deg=%.1f invert_angles=%s",
+            self.lidar_angle_offset_deg,
+            self.invert_angles,
+        )
+        return self.calibration_to_dict()
+
     def adjust_angle_offset(self, delta_deg: float) -> float:
-        self.lidar_angle_offset_deg = (self.lidar_angle_offset_deg + float(delta_deg)) % 360.0
-        log.info("RPLIDAR calibration: offset=%.1f deg", self.lidar_angle_offset_deg)
+        self.set_calibration(angle_offset_deg=self.lidar_angle_offset_deg + float(delta_deg))
         return self.lidar_angle_offset_deg
 
     def toggle_angle_inversion(self) -> bool:
-        self.invert_angles = not self.invert_angles
-        log.info("RPLIDAR calibration: invert_angles=%s", self.invert_angles)
+        self.set_calibration(invert_angles=not self.invert_angles)
         return self.invert_angles
 
     def _run(self) -> None:
@@ -372,20 +392,24 @@ class RPLidarA1:
 
     def _to_robot_frame(self, point: LidarPoint) -> LidarPoint:
         raw_angle = point.angle_deg
-        base_angle = -raw_angle if self.invert_angles else raw_angle
-        corrected_angle = (base_angle + self.lidar_angle_offset_deg) % 360.0
-        robot_angle = _translate_lidar_angle(
+        corrected_angle = _correct_lidar_angle(
+            raw_angle,
+            angle_offset_deg=self.lidar_angle_offset_deg,
+            invert_angles=self.invert_angles,
+        )
+        zone = _robot_zone(corrected_angle)
+        log.debug(
+            "RPLIDAR point raw_angle=%.1f corrected_angle=%.1f distance_mm=%.0f zone=%s",
+            raw_angle,
             corrected_angle,
-            point.distance_mm / 10.0,
-            offset_right_cm=self.lidar_offset_right_cm,
-            offset_forward_cm=self.lidar_offset_forward_cm,
+            point.distance_mm,
+            zone,
         )
         return LidarPoint(
-            angle_deg=robot_angle,
+            angle_deg=corrected_angle,
             distance_mm=point.distance_mm,
             quality=point.quality,
             raw_angle_deg=raw_angle,
-            corrected_angle_deg=corrected_angle,
         )
 
     def _publish(self, points: list[LidarPoint]) -> None:
@@ -434,11 +458,7 @@ class RPLidarA1:
                 "raw_angle": round(
                     p.raw_angle_deg if p.raw_angle_deg is not None else p.angle_deg, 1
                 ),
-                "corrected_angle": round(
-                    p.corrected_angle_deg if p.corrected_angle_deg is not None else p.angle_deg,
-                    1,
-                ),
-                "robot_angle": round(p.angle_deg, 1),
+                "corrected_angle": round(p.angle_deg, 1),
                 "zone": _robot_zone(p.angle_deg),
                 "distance_cm": round(p.distance_mm / 10.0, 1),
             }
@@ -461,18 +481,12 @@ def _robot_zone(angle_deg: float) -> str:
     return "left"
 
 
-def _translate_lidar_angle(
-    lidar_angle_deg: float,
-    distance_cm: float,
+def _correct_lidar_angle(
+    raw_angle_deg: float,
     *,
-    offset_right_cm: float,
-    offset_forward_cm: float,
+    angle_offset_deg: float,
+    invert_angles: bool,
 ) -> float:
-    """Convert a point from the LIDAR origin to the robot-center frame.
-
-    Angles use the robot convention: 0 deg is camera/front, 90 deg is right.
-    """
-    angle_rad = math.radians(lidar_angle_deg)
-    x_right_cm = math.sin(angle_rad) * distance_cm + offset_right_cm
-    y_front_cm = math.cos(angle_rad) * distance_cm + offset_forward_cm
-    return math.degrees(math.atan2(x_right_cm, y_front_cm)) % 360.0
+    if invert_angles:
+        return ((360.0 - raw_angle_deg) + angle_offset_deg) % 360.0
+    return (raw_angle_deg + angle_offset_deg) % 360.0
