@@ -31,6 +31,7 @@ export interface RobotStatus {
     angle: number
     raw_angle?: number
     corrected_angle?: number
+    robot_angle?: number
     zone?: 'front' | 'right' | 'rear' | 'left'
     distance_cm: number
   }>
@@ -41,10 +42,13 @@ export interface RobotStatus {
   lidar_obstacle_front?: boolean
   lidar_updated_at?: number
   lidar_angle_offset_deg?: number
+  lidar_offset_right_cm?: number
+  lidar_offset_forward_cm?: number
   lidar_invert_angles?: boolean
   lidar_debug_points?: Array<{
     raw_angle: number
     corrected_angle: number
+    robot_angle?: number
     zone: 'front' | 'right' | 'rear' | 'left'
     distance_cm: number
   }>
