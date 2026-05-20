@@ -19,7 +19,18 @@ export interface RobotStatus {
   obstacle_front?: boolean
   obstacle_rear?: boolean
   patrol_active?: boolean
-  patrol_state?: 'idle' | 'forward' | 'avoiding' | 'stuck'
+  patrol_state?:
+    | 'idle'
+    | 'scanning'
+    | 'forward'
+    | 'avoiding'
+    | 'turning_left'
+    | 'turning_right'
+    | 'backing_up'
+    | 'stopped'
+    | 'stuck'
+  patrol_decision?: string
+  patrol_decision_reason?: string
   navigation_mode?: 'LIDAR_ONLY' | 'HYBRID' | 'LEGACY'
   esp32_connected?: boolean
   control_available?: boolean

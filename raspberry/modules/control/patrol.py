@@ -85,8 +85,13 @@ _SCAN_READ_SECS = 0.5
 
 class PatrolState(str, Enum):
     IDLE = "idle"
+    SCANNING = "scanning"
     FORWARD = "forward"
     AVOIDING = "avoiding"
+    TURNING_LEFT = "turning_left"
+    TURNING_RIGHT = "turning_right"
+    BACKING_UP = "backing_up"
+    STOPPED = "stopped"
     STUCK = "stuck"
 
 
@@ -130,6 +135,15 @@ class PatrolController:
         step_duration: float = 0.7,
         scan_with_pantilt: bool = False,
         stuck_timeout: float = 0.0,
+        lidar_stop_cm: float = 32.0,
+        lidar_warning_cm: float = 65.0,
+        lidar_safe_cm: float = 110.0,
+        turn_clearance_cm: float = 55.0,
+        rear_clearance_cm: float = 50.0,
+        min_decision_duration_ms: int = 1200,
+        patrol_forward_speed: float | None = None,
+        patrol_turn_speed: float = _TURN_SPEED,
+        scan_zone_min_points: int = 2,
         on_incident: Callable[[str, str, str], int] | None = None,
         on_auto_record: Callable[[str, int], Awaitable[None]] | None = None,
         on_capture_photo: Callable[[int], Awaitable[None]] | None = None,
@@ -144,12 +158,17 @@ class PatrolController:
             self.navigation_mode = NavigationMode(navigation_mode.upper())
         except ValueError:
             self.navigation_mode = NavigationMode.HYBRID
-        self.speed = speed
+        self.speed = patrol_forward_speed if patrol_forward_speed is not None else speed
         self.obstacle_cm = obstacle_cm
+        self.patrol_turn_speed = patrol_turn_speed
         self._lidar_planner = LidarAvoidancePlanner(
-            caution_cm=max(obstacle_cm * 1.7, 70.0),
-            danger_cm=max(obstacle_cm * 0.9, 35.0),
-            clear_cm=max(obstacle_cm * 2.1, 90.0),
+            stop_cm=lidar_stop_cm,
+            warning_cm=lidar_warning_cm,
+            safe_cm=lidar_safe_cm,
+            turn_clearance_cm=turn_clearance_cm,
+            rear_clearance_cm=rear_clearance_cm,
+            min_decision_duration_ms=min_decision_duration_ms,
+            scan_zone_min_points=scan_zone_min_points,
         )
         self._on_incident = on_incident
         self._on_auto_record = on_auto_record
@@ -162,6 +181,8 @@ class PatrolController:
         self._last_turn_dir = None  # Direction | None — conservé entre évitements
         self._last_record_ts: float = 0.0  # timestamp du dernier auto-enregistrement
         self._last_human_capture_ts: float = 0.0  # timestamp de la dernière capture humaine
+        self._last_decision: str = "idle"
+        self._last_decision_reason: str = ""
 
     # ------------------------------------------------------------------
     # Propriétés
@@ -180,6 +201,8 @@ class PatrolController:
             "patrol_active": self.active,
             "patrol_state": self._state.value,
             "navigation_mode": self.navigation_mode.value,
+            "patrol_decision": self._last_decision,
+            "patrol_decision_reason": self._last_decision_reason,
         }
 
     # ------------------------------------------------------------------
@@ -234,6 +257,10 @@ class PatrolController:
 
         human_task = asyncio.create_task(self._human_capture_loop())
         try:
+            if self.navigation_mode is NavigationMode.LIDAR_ONLY and self._lidar is not None:
+                await self._run_lidar_only(loop, Direction)
+                return
+
             while True:
                 # ── Avance ────────────────────────────────────────────
                 self._state = PatrolState.FORWARD
@@ -297,6 +324,96 @@ class PatrolController:
             await loop.run_in_executor(None, self._motors.stop)
             self._state = PatrolState.IDLE
             raise
+
+    async def _run_lidar_only(self, loop: asyncio.AbstractEventLoop, Direction) -> None:
+        log.info("Patrol LIDAR_ONLY: boucle intelligente 360 demarree")
+        keepalive_ts = 0.0
+        while True:
+            decision = self._lidar_planner.decide(self._lidar.snapshot)
+            self._last_decision = decision.action.value
+            self._last_decision_reason = decision.reason
+            now = time.monotonic()
+
+            if decision.action == AvoidanceAction.STOP:
+                self._state = PatrolState.STOPPED
+                await loop.run_in_executor(None, self._motors.stop)
+                log.warning("Patrol LIDAR_ONLY: STOP - %s", decision.reason)
+                await asyncio.sleep(0.25)
+                continue
+
+            if decision.action == AvoidanceAction.SCAN_ROTATE:
+                self._state = PatrolState.SCANNING
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.from_direction(
+                        Direction.RIGHT, self.patrol_turn_speed * 0.45
+                    ),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(0.25)
+                continue
+
+            if decision.action == AvoidanceAction.BACK_UP:
+                self._state = PatrolState.BACKING_UP
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.from_direction(Direction.BACKWARD, self.speed * 0.65),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(_POLL)
+                continue
+
+            if decision.action == AvoidanceAction.TURN_LEFT:
+                self._state = PatrolState.TURNING_LEFT
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.from_direction(Direction.LEFT, self.patrol_turn_speed),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(_POLL)
+                continue
+
+            if decision.action == AvoidanceAction.TURN_RIGHT:
+                self._state = PatrolState.TURNING_RIGHT
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.from_direction(Direction.RIGHT, self.patrol_turn_speed),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(_POLL)
+                continue
+
+            if decision.action == AvoidanceAction.ARC_LEFT:
+                self._state = PatrolState.AVOIDING
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.arc(self.speed * 0.65, -0.28),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(_POLL)
+                continue
+
+            if decision.action == AvoidanceAction.ARC_RIGHT:
+                self._state = PatrolState.AVOIDING
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._motors.arc(self.speed * 0.65, 0.28),
+                )
+                keepalive_ts = now
+                await asyncio.sleep(_POLL)
+                continue
+
+            self._state = PatrolState.FORWARD
+            speed = (
+                self.speed * 0.7 if decision.action == AvoidanceAction.SLOW_FORWARD else self.speed
+            )
+            if now - keepalive_ts >= _MOTOR_KEEPALIVE:
+                await loop.run_in_executor(
+                    None,
+                    lambda s=speed: self._motors.from_direction(Direction.FORWARD, s),
+                )
+                keepalive_ts = now
+            await asyncio.sleep(_POLL)
 
     # ------------------------------------------------------------------
     # Auto-enregistrement
