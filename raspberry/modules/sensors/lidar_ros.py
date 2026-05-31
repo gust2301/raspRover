@@ -62,9 +62,7 @@ class ROS2LidarBridge:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="ros2-lidar-bridge"
-        )
+        self._thread = threading.Thread(target=self._run, daemon=True, name="ros2-lidar-bridge")
         self._thread.start()
         log.info("ROS2LidarBridge démarré (container=%s)", self._container)
 

@@ -309,7 +309,12 @@ async def lifespan(app: FastAPI):
         _pantilt.center()
     if _lights:
         _lights.set_camera_light(False)
-    log.info("RaspRover API demarree - esp32=%s lidar=%s ros2=%s", bool(_motors), bool(_lidar), bool(_lidar_ros))
+    log.info(
+        "RaspRover API demarree - esp32=%s lidar=%s ros2=%s",
+        bool(_motors),
+        bool(_lidar),
+        bool(_lidar_ros),
+    )
 
     broadcast_task = asyncio.create_task(_lidar_scan_broadcast())
 
@@ -660,7 +665,10 @@ async def slam_start() -> dict:
     if not slam_image:
         return JSONResponse(
             status_code=503,
-            content={"ok": False, "error": "image ros2-lidar introuvable — lance d'abord install_all.sh"},
+            content={
+                "ok": False,
+                "error": "image ros2-lidar introuvable — lance d'abord install_all.sh",
+            },
         )
 
     try:
@@ -668,10 +676,17 @@ async def slam_start() -> dict:
             None,
             lambda: subprocess.Popen(
                 [
-                    "docker", "run", "--rm", "--name", _slam_container,
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--name",
+                    _slam_container,
                     "--network=host",
                     "ros2-lidar",
-                    "ros2", "launch", "slam_toolbox", "online_async_launch.py",
+                    "ros2",
+                    "launch",
+                    "slam_toolbox",
+                    "online_async_launch.py",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -690,7 +705,9 @@ async def slam_stop() -> dict:
             None,
             lambda: subprocess.run(
                 ["docker", "stop", _slam_container],
-                capture_output=True, text=True, timeout=10.0,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
             ),
         )
         ok = result.returncode == 0
@@ -743,13 +760,19 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
             None,
             lambda: subprocess.run(
                 [
-                    "docker", "exec", _slam_container,
-                    "ros2", "service", "call",
+                    "docker",
+                    "exec",
+                    _slam_container,
+                    "ros2",
+                    "service",
+                    "call",
                     "/slam_toolbox/save_map",
                     "slam_toolbox/srv/SaveMap",
                     f'{{name: {{data: "{map_name}"}}}}',
                 ],
-                capture_output=True, text=True, timeout=15.0,
+                capture_output=True,
+                text=True,
+                timeout=15.0,
             ),
         )
         ok = result.returncode == 0
@@ -920,7 +943,9 @@ def _docker_running(name: str) -> bool:
     try:
         out = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", name],
-            capture_output=True, text=True, timeout=3.0,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
         ).stdout.strip()
         return out == "true"
     except Exception:  # noqa: BLE001
@@ -932,7 +957,9 @@ def _read_ros2_map_once(container: str = "ros2-slam") -> dict | None:
     try:
         result = subprocess.run(
             ["docker", "exec", container, "ros2", "topic", "echo", "/map", "--once"],
-            capture_output=True, text=True, timeout=15.0,
+            capture_output=True,
+            text=True,
+            timeout=15.0,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
@@ -960,16 +987,18 @@ def _occupancy_grid_to_png_b64(msg: dict) -> str:
     pixels = bytearray(width * height)
     for i, v in enumerate(raw):
         if v == -1:
-            pixels[i] = 128   # unknown → grey
+            pixels[i] = 128  # unknown → grey
         elif v == 0:
-            pixels[i] = 255   # free → white
+            pixels[i] = 255  # free → white
         else:
             pixels[i] = max(0, 255 - v * 2)  # occupied (100) → black
 
     # Minimal grayscale PNG encoder (stdlib only)
     def chunk(tag: bytes, data: bytes) -> bytes:
         body = tag + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
 
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
@@ -977,7 +1006,7 @@ def _occupancy_grid_to_png_b64(msg: dict) -> str:
     raw_rows = bytearray()
     for y in range(height):
         raw_rows.append(0)  # filter=None
-        raw_rows.extend(pixels[y * width:(y + 1) * width])
+        raw_rows.extend(pixels[y * width : (y + 1) * width])
     idat = chunk(b"IDAT", zlib.compress(bytes(raw_rows), 9))
     iend = chunk(b"IEND", b"")
 
