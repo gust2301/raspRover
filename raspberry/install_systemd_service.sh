@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME="rasprover-control.service"
-CURRENT_USER="$(whoami)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CURRENT_USER="$(logname)"
 PROJECT_DIR="${PROJECT_DIR:-/home/${CURRENT_USER}/raspRover/raspberry}"
-SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 RUN_USER="${RUN_USER:-${CURRENT_USER}}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 PORT="${PORT:-8080}"
+
+# ── rasprover-control ────────────────────────────────────────────────────────
 
 if [[ ! -d "${PROJECT_DIR}" ]]; then
   echo "Dossier projet introuvable : ${PROJECT_DIR}" >&2
@@ -15,10 +16,10 @@ if [[ ! -d "${PROJECT_DIR}" ]]; then
 fi
 
 if [[ -z "${PYTHON_BIN}" ]]; then
-  if [[ -x "${PROJECT_DIR}/../.venv/bin/python" ]]; then
-    PYTHON_BIN="${PROJECT_DIR}/../.venv/bin/python"
-  elif [[ -x "${PROJECT_DIR}/.venv/bin/python" ]]; then
+  if [[ -x "${PROJECT_DIR}/.venv/bin/python" ]]; then
     PYTHON_BIN="${PROJECT_DIR}/.venv/bin/python"
+  elif [[ -x "${PROJECT_DIR}/../.venv/bin/python" ]]; then
+    PYTHON_BIN="${PROJECT_DIR}/../.venv/bin/python"
   else
     PYTHON_BIN="$(command -v python3)"
   fi
@@ -29,7 +30,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   exit 1
 fi
 
-cat <<EOF | sudo tee "${SERVICE_PATH}" > /dev/null
+cat <<EOF | sudo tee /etc/systemd/system/rasprover-control.service > /dev/null
 [Unit]
 Description=RaspRover API server (FastAPI + WebSocket)
 After=network-online.target
@@ -48,13 +49,22 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 EOF
 
+# ── ros2-lidar ───────────────────────────────────────────────────────────────
+
+sudo cp "${SCRIPT_DIR}/ros2-lidar.service" /etc/systemd/system/ros2-lidar.service
+
+# ── enable & start both ──────────────────────────────────────────────────────
+
 sudo systemctl daemon-reload
-sudo systemctl enable "${SERVICE_NAME}"
-sudo systemctl restart "${SERVICE_NAME}"
+
+for SVC in rasprover-control ros2-lidar; do
+  sudo systemctl enable "${SVC}.service"
+  sudo systemctl restart "${SVC}.service"
+  echo "Service installe : ${SVC}.service"
+  echo "  Statut : sudo systemctl status ${SVC}"
+  echo "  Logs   : journalctl -u ${SVC} -f"
+done
 
 echo ""
-echo "Service installe : ${SERVICE_NAME}"
-echo "  Statut : sudo systemctl status ${SERVICE_NAME}"
-echo "  Logs   : journalctl -u ${SERVICE_NAME} -f"
 echo "  API    : http://$(hostname -I | awk '{print $1}'):${PORT}/health"
 echo "  HTTPS  : https://$(hostname -I | awk '{print $1}'):8443/health"

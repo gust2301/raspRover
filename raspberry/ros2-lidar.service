@@ -1,0 +1,19 @@
+[Unit]
+Description=ROS2 Jazzy RPLIDAR
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=gust
+ExecStartPre=-/usr/bin/docker rm -f ros2-lidar
+ExecStart=/usr/bin/docker run --rm --name ros2-lidar \
+  --device=/dev/rplidar \
+  --network=host \
+  ros:jazzy-ros-base \
+  ros2 launch rplidar_ros rplidar_a1_launch.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
