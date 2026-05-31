@@ -75,6 +75,15 @@ export interface RobotStatus {
   [key: string]: unknown
 }
 
+export interface LidarScanData {
+  connected: boolean
+  points: Array<{ angle_deg: number; distance_m: number; distance_cm: number }>
+  range_min_m: number
+  range_max_m: number
+  updated_at: number | null
+  error?: string | null
+}
+
 export interface LidarCalibration {
   angle_offset_deg: number
   invert_angles: boolean
@@ -125,6 +134,7 @@ export interface RobotConnection {
   personDetected: boolean
   obstacleBlocked: boolean
   lastStatus: RobotStatus | null
+  lastScan: LidarScanData | null
   latencyMs: number | null
   errorMessage: string | null
 }
@@ -144,6 +154,7 @@ export function useRobotConnection(): RobotConnection {
   const obstacleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [trackingActive, setTrackingActive] = useState(false)
   const [personDetected, setPersonDetected] = useState(false)
+  const [lastScan, setLastScan] = useState<LidarScanData | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const pingTsRef = useRef<number | null>(null)
@@ -245,6 +256,8 @@ export function useRobotConnection(): RobotConnection {
             clearTimeout(obstacleTimerRef.current)
             obstacleTimerRef.current = null
           }
+        } else if (data.type === 'lidar_scan') {
+          setLastScan(data as unknown as LidarScanData)
         } else if (data.type === 'alert_ack') {
           if (!data.ok && data.error) {
             console.warn('[SENTRYX] Audio error:', data.error)
@@ -467,6 +480,7 @@ export function useRobotConnection(): RobotConnection {
     personDetected,
     obstacleBlocked,
     lastStatus,
+    lastScan,
     latencyMs,
     errorMessage,
   }

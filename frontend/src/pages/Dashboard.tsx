@@ -1,4 +1,4 @@
-import { Shield, Camera, Route, BatteryMedium } from 'lucide-react'
+import { Shield, Camera, Route, BatteryMedium, Radar } from 'lucide-react'
 import StatCard from '../components/StatCard'
 import VideoFeedCard from '../components/VideoFeedCard'
 import RobotStatusCard from '../components/RobotStatusCard'
@@ -7,11 +7,13 @@ import ManualControlCard from '../components/ManualControlCard'
 import IncidentList from '../components/IncidentList'
 import QuickActions from '../components/QuickActions'
 import SystemLogs from '../components/SystemLogs'
+import LidarRadar360 from '../components/LidarRadar360'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 
 export default function Dashboard() {
   const conn = useSharedRobotConnection()
   const s    = conn.lastStatus
+  const scan = conn.lastScan
   const isOnline     = conn.status === 'connected'
   const patrolActive = s?.patrol_active ?? false
   const patrolState  = s?.patrol_state ?? 'idle'
@@ -78,9 +80,58 @@ export default function Dashboard() {
       {/* Map */}
       <MapCard />
 
-      {/* Control + Incidents + Actions */}
+      {/* LiDAR 360° + Control */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ManualControlCard />
+        {/* LiDAR radar card */}
+        <div
+          className="rounded-xl p-4 space-y-3"
+          style={{ background: '#0f1629', border: '1px solid #1e293b' }}
+        >
+          <div className="flex items-center gap-2">
+            <Radar size={16} className={scan?.connected ? 'text-cyan-400' : 'text-slate-500'} />
+            <span className="text-sm font-medium text-slate-300">Radar LIDAR 360°</span>
+            <span
+              className={`ml-auto text-xs px-1.5 py-0.5 rounded ${
+                scan?.connected
+                  ? 'bg-cyan-500/10 text-cyan-400'
+                  : 'bg-slate-700 text-slate-500'
+              }`}
+            >
+              {scan?.connected ? `${scan.points.length} pts` : 'ROS2 hors ligne'}
+            </span>
+          </div>
+          <div className="flex justify-center">
+            <LidarRadar360
+              points={scan?.points}
+              rangeMaxM={scan?.range_max_m ?? 6}
+              connected={scan?.connected ?? false}
+              error={scan?.error}
+              size={240}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs text-center">
+            {(['front', 'left', 'right'] as const).map((zone) => {
+              const label = zone === 'front' ? 'Avant' : zone === 'left' ? 'Gauche' : 'Droite'
+              return (
+                <div key={zone} className="rounded-lg bg-slate-800/50 px-2 py-1.5">
+                  <div className="text-slate-500 mb-0.5">{label}</div>
+                  <div className="text-white font-mono font-medium">
+                    {s?.[`lidar_${zone}_cm` as keyof typeof s] != null
+                      ? `${Math.round(s[`lidar_${zone}_cm` as keyof typeof s] as number)} cm`
+                      : '—'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div className="lg:col-span-2">
+          <ManualControlCard />
+        </div>
+      </div>
+
+      {/* Incidents + Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <IncidentList />
         <QuickActions />
       </div>

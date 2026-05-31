@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
+import json
 import logging
 import pathlib
+import struct
+import subprocess
 import time
+import zlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -25,6 +30,7 @@ from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
+from modules.sensors.lidar_ros import ROS2LidarBridge
 
 from .camera import (
     capture_photo,
@@ -52,12 +58,15 @@ _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
 _lidar: RPLidarA1 | None = None
+_lidar_ros: ROS2LidarBridge | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
 _human_detector: HumanDetector | None = None
 _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
+_slam_container: str = "ros2-slam"
+_lidar_container: str = "ros2-lidar"
 
 
 def _load_config() -> dict:
@@ -139,6 +148,7 @@ async def lifespan(app: FastAPI):
         _lights, \
         _ultrasonic, \
         _lidar, \
+        _lidar_ros, \
         _vision, \
         _patrol, \
         _human_detector, \
@@ -288,15 +298,28 @@ async def lifespan(app: FastAPI):
         else None
     )
 
+    # ROS2 LIDAR bridge (subscribes to /scan via docker exec)
+    _lidar_ros = ROS2LidarBridge(container=_lidar_container)
+    _lidar_ros.start()
+    log.info("ROS2LidarBridge démarré (container=%s)", _lidar_container)
+
     if _motors:
         _motors.stop()
     if _pantilt:
         _pantilt.center()
     if _lights:
         _lights.set_camera_light(False)
-    log.info("RaspRover API demarree - esp32=%s lidar=%s", bool(_motors), bool(_lidar))
+    log.info("RaspRover API demarree - esp32=%s lidar=%s ros2=%s", bool(_motors), bool(_lidar), bool(_lidar_ros))
+
+    broadcast_task = asyncio.create_task(_lidar_scan_broadcast())
 
     yield
+
+    broadcast_task.cancel()
+    try:
+        await broadcast_task
+    except asyncio.CancelledError:
+        pass
 
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
@@ -316,6 +339,8 @@ async def lifespan(app: FastAPI):
         _ultrasonic.stop()
     if _lidar:
         _lidar.stop()
+    if _lidar_ros:
+        _lidar_ros.stop()
     if _motors:
         _motors.shutdown()
     if _link:
@@ -592,6 +617,147 @@ async def set_lidar_calibration(body: dict[str, Any]) -> dict:
     return {"ok": True, **calibration}
 
 
+@app.get("/api/lidar/scan")
+async def get_lidar_scan() -> dict:
+    """Dernier scan 360° ROS2 (/scan topic via docker exec)."""
+    if _lidar_ros is None:
+        return JSONResponse(status_code=503, content={"error": "ROS2LidarBridge non démarré"})
+    snap = _lidar_ros.snapshot
+    if not snap.get("connected"):
+        return JSONResponse(
+            status_code=503,
+            content={"error": snap.get("error", "ROS2 LIDAR non connecté"), "connected": False},
+        )
+    return snap
+
+
+# ---------------------------------------------------------------------------
+# REST — SLAM (slam_toolbox via Docker)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/slam/status")
+async def slam_status() -> dict:
+    running = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _docker_running(_slam_container)
+    )
+    return {"running": running, "container": _slam_container}
+
+
+@app.post("/api/slam/start")
+async def slam_start() -> dict:
+    loop = asyncio.get_running_loop()
+    already = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
+    if already:
+        return {"ok": True, "running": True, "message": "déjà en cours"}
+
+    slam_image = await loop.run_in_executor(
+        None,
+        lambda: subprocess.run(
+            ["docker", "images", "-q", "ros2-lidar"], capture_output=True, text=True
+        ).stdout.strip(),
+    )
+    if not slam_image:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "image ros2-lidar introuvable — lance d'abord install_all.sh"},
+        )
+
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.Popen(
+                [
+                    "docker", "run", "--rm", "--name", _slam_container,
+                    "--network=host",
+                    "ros2-lidar",
+                    "ros2", "launch", "slam_toolbox", "online_async_launch.py",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ),
+        )
+        return {"ok": True, "running": True}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.post("/api/slam/stop")
+async def slam_stop() -> dict:
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["docker", "stop", _slam_container],
+                capture_output=True, text=True, timeout=10.0,
+            ),
+        )
+        ok = result.returncode == 0
+        return {"ok": ok, "running": False}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.get("/api/slam/map")
+async def slam_map() -> dict:
+    """Retourne la carte SLAM courante en PNG base64."""
+    loop = asyncio.get_running_loop()
+    running = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
+    if not running:
+        return JSONResponse(status_code=503, content={"error": "SLAM non actif"})
+
+    msg = await loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container))
+    if msg is None:
+        return JSONResponse(status_code=503, content={"error": "Aucune carte disponible"})
+
+    try:
+        png_b64 = _occupancy_grid_to_png_b64(msg)
+    except ValueError as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    info = msg.get("info", {})
+    origin = info.get("origin", {}).get("position", {})
+    return {
+        "ok": True,
+        "image": png_b64,
+        "width": info.get("width", 0),
+        "height": info.get("height", 0),
+        "resolution_m": info.get("resolution", 0.05),
+        "origin_x": origin.get("x", 0.0),
+        "origin_y": origin.get("y", 0.0),
+    }
+
+
+@app.post("/api/slam/save")
+async def slam_save(body: dict[str, Any] | None = None) -> dict:
+    """Demande au slam_toolbox de sauvegarder la carte courante."""
+    loop = asyncio.get_running_loop()
+    running = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
+    if not running:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "SLAM non actif"})
+
+    map_name = (body or {}).get("name", "/tmp/rasprover_map")
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [
+                    "docker", "exec", _slam_container,
+                    "ros2", "service", "call",
+                    "/slam_toolbox/save_map",
+                    "slam_toolbox/srv/SaveMap",
+                    f'{{name: {{data: "{map_name}"}}}}',
+                ],
+                capture_output=True, text=True, timeout=15.0,
+            ),
+        )
+        ok = result.returncode == 0
+        return {"ok": ok, "map_name": map_name, "output": result.stdout.strip()}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
 # ---------------------------------------------------------------------------
 # REST — Patrouille
 # ---------------------------------------------------------------------------
@@ -699,8 +865,124 @@ class _ConnectionManager:
             self._clients.remove(ws)
         log.info("Client WebSocket déconnecté (%d restants)", len(self._clients))
 
+    async def broadcast(self, data: dict) -> None:
+        if not self._clients:
+            return
+        msg = json.dumps(data)
+        dead: list[WebSocket] = []
+        for ws in list(self._clients):
+            try:
+                await ws.send_text(msg)
+            except Exception:  # noqa: BLE001
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
 
 _manager = _ConnectionManager()
+
+
+async def _lidar_scan_broadcast() -> None:
+    """Push 360° ROS2 scan to all WS clients at ~5 Hz."""
+    while True:
+        await asyncio.sleep(0.2)
+        if not _lidar_ros or not _manager._clients:
+            continue
+        snap = _lidar_ros.snapshot
+        if not snap.get("connected"):
+            continue
+        points = snap.get("points", [])
+        # Down-sample: keep at most 360 points for the broadcast
+        if len(points) > 360:
+            step = max(1, len(points) // 360)
+            points = points[::step]
+        try:
+            await _manager.broadcast(
+                {
+                    "type": "lidar_scan",
+                    "connected": True,
+                    "points": points,
+                    "range_min_m": snap.get("range_min_m", 0.0),
+                    "range_max_m": snap.get("range_max_m", 12.0),
+                    "updated_at": snap.get("updated_at"),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("lidar_scan broadcast: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# SLAM helpers
+# ---------------------------------------------------------------------------
+
+
+def _docker_running(name: str) -> bool:
+    try:
+        out = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True, text=True, timeout=3.0,
+        ).stdout.strip()
+        return out == "true"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _read_ros2_map_once(container: str = "ros2-slam") -> dict | None:
+    """Read one /map message from the SLAM container. Returns None on failure."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "ros2", "topic", "echo", "/map", "--once"],
+            capture_output=True, text=True, timeout=15.0,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        # Strip leading/trailing '---' document markers before parsing
+        text = result.stdout.strip().lstrip("-").strip()
+        msg = yaml.safe_load(text)
+        if not isinstance(msg, dict) or "data" not in msg:
+            return None
+        return msg
+    except Exception as exc:  # noqa: BLE001
+        log.warning("_read_ros2_map_once: %s", exc)
+        return None
+
+
+def _occupancy_grid_to_png_b64(msg: dict) -> str:
+    """Convert nav_msgs/OccupancyGrid to a base64-encoded grayscale PNG."""
+    info = msg.get("info", {})
+    width: int = int(info.get("width", 0))
+    height: int = int(info.get("height", 0))
+    raw: list[int] = msg.get("data", [])
+
+    if width <= 0 or height <= 0 or len(raw) != width * height:
+        raise ValueError(f"OccupancyGrid invalide: {width}×{height}, {len(raw)} points")
+
+    pixels = bytearray(width * height)
+    for i, v in enumerate(raw):
+        if v == -1:
+            pixels[i] = 128   # unknown → grey
+        elif v == 0:
+            pixels[i] = 255   # free → white
+        else:
+            pixels[i] = max(0, 255 - v * 2)  # occupied (100) → black
+
+    # Minimal grayscale PNG encoder (stdlib only)
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+
+    raw_rows = bytearray()
+    for y in range(height):
+        raw_rows.append(0)  # filter=None
+        raw_rows.extend(pixels[y * width:(y + 1) * width])
+    idat = chunk(b"IDAT", zlib.compress(bytes(raw_rows), 9))
+    iend = chunk(b"IEND", b"")
+
+    png_bytes = sig + ihdr + idat + iend
+    return base64.b64encode(png_bytes).decode()
 
 
 @app.websocket("/ws")

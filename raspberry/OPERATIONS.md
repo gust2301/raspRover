@@ -182,7 +182,80 @@ Pour désactiver notre service au boot : `sudo systemctl disable rasprover-contr
 
 ---
 
-## 8. Référence rapide
+## 8. ROS2 LIDAR & SLAM
+
+### Build de l'image Docker
+
+```bash
+cd /home/gust/raspRover
+docker build -t ros2-lidar raspberry/ -f raspberry/Dockerfile.lidar
+```
+
+### Service ROS2 LIDAR (ros2-lidar.service)
+
+```bash
+sudo systemctl start ros2-lidar     # démarrer
+sudo systemctl status ros2-lidar    # vérifier
+journalctl -u ros2-lidar -f         # logs
+```
+
+### Cartographie SLAM (slam_toolbox)
+
+```bash
+# Lancer le SLAM (foreground — terminal dédié)
+bash /home/gust/raspRover/raspberry/scripts/start_slam.sh
+
+# Ou via l'interface web : Dashboard → Carte SLAM → Démarrer SLAM
+```
+
+### Endpoints API ROS2 / SLAM
+
+| Endpoint | Méthode | Description |
+|---|---|---|
+| `/api/lidar/scan` | GET | Scan 360° ROS2 (JSON) |
+| `/api/slam/status` | GET | État du container ros2-slam |
+| `/api/slam/start` | POST | Démarre slam_toolbox |
+| `/api/slam/stop` | POST | Arrête slam_toolbox |
+| `/api/slam/map` | GET | Carte courante en PNG base64 |
+| `/api/slam/save` | POST | Sauvegarde la carte sur le Pi |
+
+---
+
+## 9. Scripts d'automatisation
+
+| Script | Description |
+|---|---|
+| `raspberry/scripts/install_all.sh` | Installation complète depuis zéro (Docker, image, pip, services) |
+| `raspberry/scripts/deploy.sh` | `git pull` + redémarrage des deux services |
+| `raspberry/scripts/setup_alias.sh` | Ajoute `deploy`, `rover-logs`, `lidar-logs` à `~/.bashrc` |
+| `raspberry/scripts/start_slam.sh` | Démarre le SLAM en foreground |
+
+### Installation initiale
+
+```bash
+ssh gust@192.168.1.24
+cd /home/gust/raspRover
+sudo bash raspberry/scripts/install_all.sh
+```
+
+### Déploiement rapide (mise à jour code)
+
+```bash
+bash ~/raspRover/raspberry/scripts/deploy.sh
+# ou, après setup_alias.sh :
+deploy
+```
+
+### Configurer les alias shell
+
+```bash
+bash ~/raspRover/raspberry/scripts/setup_alias.sh
+source ~/.bashrc
+```
+
+---
+
+## 10. Référence rapide
 
 | Quoi | Où |
 |---|---|
@@ -190,8 +263,11 @@ Pour désactiver notre service au boot : `sudo systemctl disable rasprover-contr
 | Configuration | `/home/gust/raspRover/raspberry/config.yaml` |
 | Logs applicatifs | `/home/gust/raspRover/raspberry/logs/rasprover.log` |
 | Logs systemd | `journalctl -u rasprover-control` |
+| Logs ROS2 LIDAR | `journalctl -u ros2-lidar` |
 | API health | `http://192.168.1.24:8080/health` |
 | API health HTTPS | `https://192.168.1.24:8443/health` |
+| API scan ROS2 | `http://192.168.1.24:8080/api/lidar/scan` |
+| API carte SLAM | `http://192.168.1.24:8080/api/slam/map` |
 | WebSocket | `ws://192.168.1.24:8080/ws` |
 | WebSocket sécurisé | `wss://192.168.1.24:8443/ws` |
 | Jupyter Waveshare | `http://192.168.1.24:8888` |
