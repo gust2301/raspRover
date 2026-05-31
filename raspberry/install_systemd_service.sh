@@ -2,9 +2,10 @@
 set -euo pipefail
 
 SERVICE_NAME="rasprover-control.service"
-PROJECT_DIR="${PROJECT_DIR:-/home/ws/raspRover/raspberry}"
+CURRENT_USER="$(whoami)"
+PROJECT_DIR="${PROJECT_DIR:-/home/${CURRENT_USER}/raspRover/raspberry}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
-RUN_USER="${RUN_USER:-ws}"
+RUN_USER="${RUN_USER:-${CURRENT_USER}}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 PORT="${PORT:-8080}"
 

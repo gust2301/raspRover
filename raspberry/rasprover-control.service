@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ws
-WorkingDirectory=/home/ws/ugvrpi/raspRover/raspberry
-ExecStart=/home/ws/ugvrpi/raspRover/raspberry/.venv/bin/python /home/ws/ugvrpi/raspRover/raspberry/run_api_server.py
+User=gust
+WorkingDirectory=/home/gust/raspRover/raspberry
+ExecStart=/home/gust/raspRover/raspberry/.venv/bin/python /home/gust/raspRover/raspberry/run_api_server.py
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

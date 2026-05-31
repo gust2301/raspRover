@@ -5,22 +5,22 @@
 Depuis n'importe quel terminal sur le même réseau WiFi :
 
 ```bash
-ssh ws@192.168.1.121
-# mot de passe : ws
+ssh gust@192.168.1.24
+# mot de passe : gust
 ```
 
-> Si l'IP change (redémarrage box), retrouve-la avec : `ping ugvrpi.local` ou regarde dans ton routeur.
+> Si l'IP change (redémarrage box), retrouve-la avec : `ping robotpi.local` ou regarde dans ton routeur.
 
 ---
 
 ## 2. Lancer le backend manuellement
 
 ```bash
-cd /home/ws/raspRover/raspberry
-/home/ws/raspRover/.venv/bin/python run_api_server.py
+cd /home/gust/raspRover/raspberry
+/home/gust/raspRover/raspberry/.venv/bin/python run_api_server.py
 ```
 
-Le serveur tourne sur `http://192.168.1.121:8080` et expose aussi `https://192.168.1.121:8443`
+Le serveur tourne sur `http://192.168.1.24:8080` et expose aussi `https://192.168.1.24:8443`
 si `api.https.enabled: true` dans `config.yaml`. Pour vérifier :
 
 ```bash
@@ -35,14 +35,14 @@ Arrêter : `Ctrl+C`
 ## 3. Mettre à jour le code
 
 ```bash
-cd /home/ws/raspRover
+cd /home/gust/raspRover
 git pull origin master
 ```
 
 Si nouvelles dépendances Python (requirements.txt modifié) :
 
 ```bash
-/home/ws/raspRover/.venv/bin/pip install -r raspberry/requirements.txt
+/home/gust/raspRover/raspberry/.venv/bin/pip install -r raspberry/requirements.txt
 ```
 
 Puis relancer le serveur ou redémarrer le service systemd.
@@ -54,7 +54,7 @@ Puis relancer le serveur ou redémarrer le service systemd.
 ### Installer le service (une seule fois)
 
 ```bash
-cd /home/ws/raspRover/raspberry
+cd /home/gust/raspRover/raspberry
 sudo bash install_systemd_service.sh
 ```
 
@@ -93,13 +93,13 @@ sudo systemctl disable rasprover-control  # ne démarre plus au boot
 
 ```bash
 # 1. Se connecter
-ssh ws@192.168.1.121
+ssh gust@192.168.1.24
 
 # 2. Mettre à jour le code
-cd /home/ws/raspRover && git pull origin master
+cd /home/gust/raspRover && git pull origin master
 
 # 3. Mettre à jour les dépendances si besoin
-/home/ws/raspRover/.venv/bin/pip install -r raspberry/requirements.txt
+/home/gust/raspRover/raspberry/.venv/bin/pip install -r raspberry/requirements.txt
 
 # 4. Redémarrer le service
 sudo systemctl restart rasprover-control
@@ -127,11 +127,11 @@ Causes fréquentes :
 ### Changer le port série
 
 ```bash
-nano /home/ws/raspRover/raspberry/config.yaml
+nano /home/gust/raspRover/raspberry/config.yaml
 # Modifier serial_port : /dev/ttyAMA0
 ```
 
-Ports disponibles sur la Pi 5 :
+Ports disponibles sur la Pi :
 - `/dev/ttyAMA0` — UART principal (ESP32 Waveshare)
 - `/dev/ttyAMA10` — UART secondaire
 
@@ -157,7 +157,7 @@ sudo systemctl stop rasprover-control
 cd ~/ugv_rpi && ugv-env/bin/python app.py
 ```
 
-L'interface Waveshare est accessible sur `http://192.168.1.121:5000` ou `:8000`.
+L'interface Waveshare est accessible sur `http://192.168.1.24:5000` ou `:8000`.
 
 Pour arrêter : `Ctrl+C` dans le terminal SSH.
 
@@ -186,12 +186,12 @@ Pour désactiver notre service au boot : `sudo systemctl disable rasprover-contr
 
 | Quoi | Où |
 |---|---|
-| Code source | `/home/ws/raspRover/raspberry/` |
-| Configuration | `/home/ws/raspRover/raspberry/config.yaml` |
-| Logs applicatifs | `/home/ws/raspRover/raspberry/logs/rasprover.log` |
+| Code source | `/home/gust/raspRover/raspberry/` |
+| Configuration | `/home/gust/raspRover/raspberry/config.yaml` |
+| Logs applicatifs | `/home/gust/raspRover/raspberry/logs/rasprover.log` |
 | Logs systemd | `journalctl -u rasprover-control` |
-| API health | `http://192.168.1.121:8080/health` |
-| API health HTTPS | `https://192.168.1.121:8443/health` |
-| WebSocket | `ws://192.168.1.121:8080/ws` |
-| WebSocket sécurisé | `wss://192.168.1.121:8443/ws` |
-| Jupyter Waveshare | `http://192.168.1.121:8888` |
+| API health | `http://192.168.1.24:8080/health` |
+| API health HTTPS | `https://192.168.1.24:8443/health` |
+| WebSocket | `ws://192.168.1.24:8080/ws` |
+| WebSocket sécurisé | `wss://192.168.1.24:8443/ws` |
+| Jupyter Waveshare | `http://192.168.1.24:8888` |

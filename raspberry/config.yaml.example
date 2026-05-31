@@ -8,7 +8,7 @@ control:
   # Port série UART de la Pi 5 vers l'ESP32 Waveshare.
   # - Matériel réel : /dev/ttyAMA0 (UART Pi 5) ou /dev/ttyUSB0 (ESP32 en USB)
   # - Émulateur   : socket://localhost:9999   (lancer `python3 -m tools.fake_esp32`)
-  serial_port: socket://localhost:9999
+  serial_port: /dev/ttyAMA0
   baudrate: 115200
   timeout_s: 1.0
   esp32_required: false       # false = l'API demarre meme si l'ESP32 est absent
@@ -47,9 +47,9 @@ api:
     certfile: certs/rasprover.crt
     keyfile: certs/rasprover.key
     auto_generate: true
-    common_name: 192.168.1.121
+    common_name: 192.168.1.24
     subject_alt_names:
-      - IP:192.168.1.121
+      - IP:192.168.1.24
       - DNS:localhost
       - IP:127.0.0.1
 
