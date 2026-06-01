@@ -5,7 +5,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
-User=gust
+User=ws
 ExecStartPre=-/usr/bin/docker rm -f ros2-lidar
 ExecStart=/usr/bin/docker run --rm --name ros2-lidar \
   --device=/dev/rplidar \
