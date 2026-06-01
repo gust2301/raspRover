@@ -9,6 +9,7 @@ User=ws
 ExecStartPre=-/usr/bin/docker rm -f ros2-lidar
 ExecStart=/usr/bin/docker run --rm --name ros2-lidar \
   --device=/dev/rplidar \
+  --device=/dev/ttyUSB0 \
   --network=host \
   ros2-lidar \
   ros2 launch rplidar_ros rplidar.launch.py
