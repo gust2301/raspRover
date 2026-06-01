@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CURRENT_USER="$(logname)"
+CURRENT_USER="$(logname 2>/dev/null || whoami)"
 PROJECT_DIR="${PROJECT_DIR:-/home/${CURRENT_USER}/raspRover/raspberry}"
 RUN_USER="${RUN_USER:-${CURRENT_USER}}"
 PYTHON_BIN="${PYTHON_BIN:-}"
@@ -50,8 +50,10 @@ WantedBy=multi-user.target
 EOF
 
 # ── ros2-lidar ───────────────────────────────────────────────────────────────
+# Patch User= with the detected user before installing so the repo value never matters.
 
-sudo cp "${SCRIPT_DIR}/ros2-lidar.service" /etc/systemd/system/ros2-lidar.service
+sed "s/^User=.*/User=${CURRENT_USER}/" "${SCRIPT_DIR}/ros2-lidar.service" \
+  | sudo tee /etc/systemd/system/ros2-lidar.service > /dev/null
 
 # ── enable & start both ──────────────────────────────────────────────────────
 
