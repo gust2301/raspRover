@@ -447,22 +447,21 @@ export function useRobotConnection(): RobotConnection {
     return () => clearInterval(id)
   }, [status, send])
 
-  // HTTP fallback: poll /api/lidar/scan every 2s; WS updates override at 5 Hz when working
+  // Poll /api/lidar/scan every 2s regardless of WS state; WS updates override at 5 Hz when working
   useEffect(() => {
-    if (status !== 'connected') return
     const poll = async () => {
       try {
         const res = await fetch(`${getRobotApiUrl(robotIp)}/api/lidar/scan`)
         const data = await res.json() as LidarScanData
         setLastScan(data)
       } catch {
-        // network error — WS path will recover
+        // network unreachable — ignore
       }
     }
     void poll()
     const id = setInterval(() => { void poll() }, 2000)
     return () => clearInterval(id)
-  }, [status, robotIp])
+  }, [robotIp])
 
   // Cleanup on unmount
   useEffect(() => () => {
