@@ -20,7 +20,7 @@ import yaml
 log = logging.getLogger(__name__)
 
 _TOPIC = "/scan"
-_DEFAULT_CONTAINER = "ros2-lidar"
+_CONTAINER_NAME = "ros2-lidar"  # always use name, never ID
 _MAX_BROADCAST_POINTS = 360
 
 
@@ -34,8 +34,7 @@ class ROS2LidarBridge:
         bridge.stop()
     """
 
-    def __init__(self, container: str = _DEFAULT_CONTAINER) -> None:
-        self._container = container
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._latest: dict[str, Any] = _empty_snapshot("non démarré")
         self._thread: threading.Thread | None = None
@@ -50,7 +49,7 @@ class ROS2LidarBridge:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="ros2-lidar-bridge")
         self._thread.start()
-        log.info("ROS2LidarBridge démarré (container=%s)", self._container)
+        log.info("ROS2LidarBridge démarré (container=%s)", _CONTAINER_NAME)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -79,16 +78,8 @@ class ROS2LidarBridge:
                 self._stop_event.wait(5.0)
 
     def _stream(self) -> None:
-        cmd = [
-            "docker",
-            "exec",
-            self._container,
-            "ros2",
-            "topic",
-            "echo",
-            _TOPIC,
-        ]
-        log.info("ROS2LidarBridge: docker exec %s ros2 topic echo %s", self._container, _TOPIC)
+        cmd = ["docker", "exec", _CONTAINER_NAME, "ros2", "topic", "echo", _TOPIC]
+        log.info("ROS2LidarBridge: docker exec %s ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
         self._proc = subprocess.Popen(  # type: ignore[assignment]
             cmd,
             stdout=subprocess.PIPE,
@@ -96,7 +87,7 @@ class ROS2LidarBridge:
             text=True,
         )
 
-        # Give the process ~2 s to either produce output or die immediately
+        # Give the process a moment to either produce output or die immediately
         # (e.g. "No such container" or "permission denied").
         try:
             first_line = self._proc.stdout.readline()  # type: ignore[union-attr]
@@ -108,7 +99,7 @@ class ROS2LidarBridge:
             _kill_proc(self._proc)
             self._proc = None
             raise RuntimeError(
-                stderr_out or f"docker exec {self._container} s'est arrêté immédiatement"
+                stderr_out or f"docker exec {_CONTAINER_NAME} s'est arrêté immédiatement"
             )
 
         buf: list[str] = []

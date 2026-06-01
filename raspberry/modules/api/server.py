@@ -66,7 +66,6 @@ _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-slam"
-_lidar_container: str = "ros2-lidar"
 
 
 def _load_config() -> dict:
@@ -299,9 +298,9 @@ async def lifespan(app: FastAPI):
     )
 
     # ROS2 LIDAR bridge (subscribes to /scan via docker exec)
-    _lidar_ros = ROS2LidarBridge(container=_lidar_container)
+    _lidar_ros = ROS2LidarBridge()
     _lidar_ros.start()
-    log.info("ROS2LidarBridge démarré (container=%s)", _lidar_container)
+    log.info("ROS2LidarBridge démarré")
 
     if _motors:
         _motors.stop()
