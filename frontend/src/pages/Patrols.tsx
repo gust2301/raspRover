@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
+import LidarRadar360 from '../components/LidarRadar360'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -413,6 +414,24 @@ export default function Patrols() {
               <div className="space-y-3 mb-4">
                 <DistanceBar cm={conn.lastStatus?.front_cm} label="Avant" />
                 <DistanceBar cm={conn.lastStatus?.rear_cm}  label="Arrière" />
+              </div>
+
+              {/* LIDAR 360° radar */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <Radar size={11} className={conn.lastScan?.connected ? 'text-cyan-400' : 'text-slate-500'} />
+                <span className="text-xs text-slate-500 uppercase tracking-wide">LIDAR 360°</span>
+                <span className={`ml-auto text-[10px] font-mono ${conn.lastScan?.connected ? 'text-cyan-400' : 'text-slate-600'}`}>
+                  {conn.lastScan?.connected ? `${conn.lastScan.points.length} pts` : 'hors ligne'}
+                </span>
+              </div>
+              <div className="flex justify-center mb-3">
+                <LidarRadar360
+                  points={conn.lastScan?.points}
+                  rangeMaxM={conn.lastScan?.range_max_m ?? 6}
+                  connected={Boolean(conn.lastScan?.connected)}
+                  error={conn.lastScan?.error}
+                  size={200}
+                />
               </div>
 
               {/* LIDAR robot frame */}

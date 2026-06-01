@@ -1037,19 +1037,17 @@ export default function Pilotage() {
             </div>
           )}
 
-          {conn.lastStatus && (
-            <LidarScanPanel
-              connected={Boolean(conn.lastStatus.lidar_connected)}
-              points={conn.lastStatus.lidar_points}
-              frontCm={conn.lastStatus.lidar_front_cm}
-              leftCm={conn.lastStatus.lidar_left_cm}
-              rightCm={conn.lastStatus.lidar_right_cm}
-              obstacle={Boolean(conn.lastStatus.lidar_obstacle_front)}
-              error={conn.lastStatus.lidar_error}
-              autoActive={patrolActive}
-              mode={conn.lastStatus.navigation_mode}
-            />
-          )}
+          <LidarScanPanel
+            connected={Boolean(conn.lastScan?.connected)}
+            points={conn.lastScan?.points?.map(p => ({ angle: p.angle_deg, distance_cm: p.distance_cm }))}
+            frontCm={conn.lastStatus?.lidar_front_cm}
+            leftCm={conn.lastStatus?.lidar_left_cm}
+            rightCm={conn.lastStatus?.lidar_right_cm}
+            obstacle={Boolean(conn.lastStatus?.lidar_obstacle_front)}
+            error={conn.lastScan?.error}
+            autoActive={patrolActive}
+            mode={conn.lastStatus?.navigation_mode}
+          />
 
           {/* Distance sensor */}
           {conn.lastStatus?.distance_cm !== undefined && (
