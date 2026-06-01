@@ -28,13 +28,13 @@ _MAX_BROADCAST_POINTS = 360
 def _container_running(name: str) -> bool:
     try:
         result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", name],
+            ["docker", "ps", "--filter", f"name={name}", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
             timeout=3.0,
         )
-        return result.stdout.strip() == "true"
-    except Exception:
+        return name in result.stdout
+    except Exception:  # noqa: BLE001
         return False
 
 
