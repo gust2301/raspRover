@@ -78,8 +78,11 @@ class ROS2LidarBridge:
                 self._stop_event.wait(5.0)
 
     def _stream(self) -> None:
-        cmd = ["docker", "exec", _CONTAINER_NAME, "ros2", "topic", "echo", _TOPIC]
-        log.info("ROS2LidarBridge: docker exec %s ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
+        cmd = [
+            "docker", "exec", _CONTAINER_NAME, "bash", "-c",
+            f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC}",
+        ]
+        log.info("ROS2LidarBridge: docker exec %s ... ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
         self._proc = subprocess.Popen(  # type: ignore[assignment]
             cmd,
             stdout=subprocess.PIPE,
