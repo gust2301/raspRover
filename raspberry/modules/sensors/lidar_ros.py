@@ -21,21 +21,7 @@ log = logging.getLogger(__name__)
 
 _TOPIC = "/scan"
 _DEFAULT_CONTAINER = "ros2-lidar"
-# Down-sample to at most this many points for the broadcast payload.
 _MAX_BROADCAST_POINTS = 360
-
-
-def _container_running(name: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={name}", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True,
-            timeout=3.0,
-        )
-        return name in result.stdout
-    except Exception:  # noqa: BLE001
-        return False
 
 
 class ROS2LidarBridge:
@@ -82,28 +68,55 @@ class ROS2LidarBridge:
     # ── background thread ─────────────────────────────────────────────────────
 
     def _run(self) -> None:
+        # No pre-check: let docker exec itself signal failure.
+        # This avoids silent permission errors from docker ps/inspect.
         while not self._stop_event.is_set():
-            if not _container_running(self._container):
-                self._set(connected=False, error=f"conteneur '{self._container}' non actif")
-                self._stop_event.wait(5.0)
-                continue
             try:
                 self._stream()
             except Exception as exc:  # noqa: BLE001
-                log.warning("ROS2LidarBridge erreur : %s", exc)
+                log.warning("ROS2LidarBridge: %s — retry in 5s", exc)
                 self._set(connected=False, error=str(exc))
-                self._stop_event.wait(3.0)
+                self._stop_event.wait(5.0)
 
     def _stream(self) -> None:
-        cmd = ["docker", "exec", self._container, "ros2", "topic", "echo", _TOPIC]
-        log.info("ROS2LidarBridge: écoute %s sur %s", _TOPIC, self._container)
+        cmd = [
+            "docker",
+            "exec",
+            self._container,
+            "ros2",
+            "topic",
+            "echo",
+            _TOPIC,
+        ]
+        log.info("ROS2LidarBridge: docker exec %s ros2 topic echo %s", self._container, _TOPIC)
         self._proc = subprocess.Popen(  # type: ignore[assignment]
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
         )
+
+        # Give the process ~2 s to either produce output or die immediately
+        # (e.g. "No such container" or "permission denied").
+        try:
+            first_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"docker exec non lisible: {exc}") from exc
+
+        if not first_line:
+            stderr_out = self._proc.stderr.read(400).strip()  # type: ignore[union-attr]
+            _kill_proc(self._proc)
+            self._proc = None
+            raise RuntimeError(
+                stderr_out or f"docker exec {self._container} s'est arrêté immédiatement"
+            )
+
         buf: list[str] = []
+        # Re-seed the buffer with the first line we already consumed
+        stripped = first_line.rstrip("\n")
+        if stripped != "---":
+            buf.append(stripped)
+
         try:
             for line in self._proc.stdout:  # type: ignore[union-attr]
                 if self._stop_event.is_set():
@@ -175,7 +188,7 @@ class ROS2LidarBridge:
 
 
 # ---------------------------------------------------------------------------
-# helpers
+# module-level helpers
 # ---------------------------------------------------------------------------
 
 
