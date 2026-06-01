@@ -79,7 +79,11 @@ class ROS2LidarBridge:
 
     def _stream(self) -> None:
         cmd = [
-            "docker", "exec", _CONTAINER_NAME, "bash", "-c",
+            "docker",
+            "exec",
+            _CONTAINER_NAME,
+            "bash",
+            "-c",
             f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC}",
         ]
         log.info("ROS2LidarBridge: docker exec %s ... ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
