@@ -14,17 +14,11 @@ git -C "${REPO_DIR}" pull origin master
 echo "==> Mise à jour des dépendances Python..."
 "${VENV}/bin/pip" install -r "${RASPBERRY_DIR}/requirements.txt" -q
 
-echo "==> Redémarrage rasprover-control..."
-sudo systemctl restart rasprover-control
-sudo systemctl status rasprover-control --no-pager -l | head -8
+echo "==> Mise à jour des services systemd..."
+bash "${RASPBERRY_DIR}/install_systemd_service.sh"
 
-echo "==> Vérification ros2-lidar..."
-if sudo systemctl is-active --quiet ros2-lidar; then
-  sudo systemctl restart ros2-lidar
-  echo "    ros2-lidar redémarré."
-else
-  echo "    ros2-lidar inactif — skippé."
-fi
+echo "==> Statut rasprover-control..."
+sudo systemctl status rasprover-control --no-pager -l | head -8
 
 echo ""
 echo "==> Déploiement terminé."
