@@ -71,7 +71,7 @@ sensors:
     obstacle_threshold_cm: 20 # Distance en cm en dessous de laquelle obstacle=true
 
   lidar:
-    enabled: true             # RPLIDAR A1 branche en USB sur la Raspberry Pi
+    enabled: false            # RPLIDAR A1 serie — desactive, ROS2 (ros2-lidar) est utilise a la place
     # port: "/dev/ttyUSB0"    # Laisser vide = auto-detection
     baudrate: 115200
     obstacle_threshold_cm: 45 # Seuil frontal utilise pour la securite manuelle

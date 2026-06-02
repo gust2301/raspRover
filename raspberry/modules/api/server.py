@@ -214,7 +214,7 @@ async def lifespan(app: FastAPI):
         log.info("Capteur ultrason désactivé (sensors.ultrasonic.enabled: false)")
 
     lidar_cfg = cfg.get("sensors", {}).get("lidar", {})
-    if lidar_cfg.get("enabled", True):
+    if lidar_cfg.get("enabled", False):
         _lidar = RPLidarA1(
             port=lidar_cfg.get("port") or None,
             baudrate=int(lidar_cfg.get("baudrate", 115200)),
