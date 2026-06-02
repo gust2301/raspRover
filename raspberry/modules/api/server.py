@@ -30,6 +30,7 @@ from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
+from modules.sensors.lidar import LidarPoint, LidarSnapshot
 from modules.sensors.lidar_ros import ROS2LidarBridge
 
 from .camera import (
@@ -58,6 +59,7 @@ _mixer: DriveMixer = DriveMixer()
 _alert: AlertPlayer = AlertPlayer()  # device configuré dans lifespan
 _ultrasonic: UltrasonicSensor | None = None
 _lidar: RPLidarA1 | None = None
+_lidar_ros_adapter: _ROS2LidarAdapter | None = None
 _lidar_ros: ROS2LidarBridge | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
@@ -148,6 +150,7 @@ async def lifespan(app: FastAPI):
         _ultrasonic, \
         _lidar, \
         _lidar_ros, \
+        _lidar_ros_adapter, \
         _vision, \
         _patrol, \
         _human_detector, \
@@ -255,12 +258,21 @@ async def lifespan(app: FastAPI):
     register_frame_callback(_human_detector.push_frame)
     log.info("HumanDetector démarré")
 
+    # ROS2 LIDAR bridge — démarré avant la patrouille pour que l'adapter soit disponible
+    _lidar_ros = ROS2LidarBridge()
+    _lidar_ros.start()
+    _lidar_ros_adapter = _ROS2LidarAdapter(
+        _lidar_ros,
+        obstacle_cm=float(lidar_cfg.get("obstacle_threshold_cm", 45.0)),
+    )
+    log.info("ROS2LidarBridge démarré")
+
     # Contrôleur de patrouille
     patrol_cfg = cfg.get("patrol", {})
     _patrol = PatrolController(
         motors=_motors,
         ultrasonic=_ultrasonic,
-        lidar=_lidar,
+        lidar=_lidar or _lidar_ros_adapter,
         vision=_vision,
         pantilt=_pantilt,
         human_detector=_human_detector,
@@ -296,11 +308,6 @@ async def lifespan(app: FastAPI):
         if _pantilt
         else None
     )
-
-    # ROS2 LIDAR bridge (subscribes to /scan via docker exec)
-    _lidar_ros = ROS2LidarBridge()
-    _lidar_ros.start()
-    log.info("ROS2LidarBridge démarré")
 
     if _motors:
         _motors.stop()
@@ -391,6 +398,73 @@ def _enrich_feedback(feedback: dict) -> dict:
     return result
 
 
+def _ros2_zone_min_cm(points: list[dict], center_deg: float, half_width: float) -> float | None:
+    dists = [
+        p["distance_cm"]
+        for p in points
+        if abs(((p["angle_deg"] - center_deg + 180.0) % 360.0) - 180.0) <= half_width
+    ]
+    return min(dists) if dists else None
+
+
+class _ROS2LidarAdapter:
+    """Wraps ROS2LidarBridge to expose the same snapshot/to_dict interface as RPLidarA1."""
+
+    def __init__(self, bridge: ROS2LidarBridge, obstacle_cm: float = 45.0) -> None:
+        self._bridge = bridge
+        self._obstacle_cm = obstacle_cm
+
+    @property
+    def snapshot(self) -> LidarSnapshot:
+        snap = self._bridge.snapshot
+        if not snap.get("connected"):
+            return LidarSnapshot(connected=False, error=snap.get("error") or "ROS2 hors ligne")
+        points = tuple(
+            LidarPoint(angle_deg=p["angle_deg"], distance_mm=p["distance_m"] * 1000.0)
+            for p in snap.get("points", [])
+        )
+        raw = snap.get("points", [])
+        front_cm = _ros2_zone_min_cm(raw, 0.0, 30.0)
+        right_cm = _ros2_zone_min_cm(raw, 90.0, 30.0)
+        rear_cm = _ros2_zone_min_cm(raw, 180.0, 35.0)
+        left_cm = _ros2_zone_min_cm(raw, 270.0, 30.0)
+        return LidarSnapshot(
+            connected=True,
+            points=points,
+            front_distance_cm=front_cm,
+            right_distance_cm=right_cm,
+            rear_distance_cm=rear_cm,
+            left_distance_cm=left_cm,
+            obstacle_front=front_cm is not None and front_cm < self._obstacle_cm,
+        )
+
+    def to_dict(self) -> dict:
+        snap = self.snapshot
+        pts = snap.points
+        front_pts = [
+            {"angle": round(p.angle_deg, 1), "distance_cm": round(p.distance_mm / 10.0, 1)}
+            for p in pts
+            if abs(((p.angle_deg + 180.0) % 360.0) - 180.0) <= 90.0
+        ]
+        if len(front_pts) > 180:
+            step = max(1, len(front_pts) // 180)
+            front_pts = front_pts[::step]
+        return {
+            "lidar_connected": snap.connected,
+            "lidar_port": "ros2",
+            "lidar_error": snap.error if not snap.connected else None,
+            "lidar_points": front_pts,
+            "lidar_front_cm": snap.front_distance_cm,
+            "lidar_left_cm": snap.left_distance_cm,
+            "lidar_right_cm": snap.right_distance_cm,
+            "lidar_rear_cm": snap.rear_distance_cm,
+            "lidar_obstacle_front": snap.obstacle_front,
+            "lidar_updated_at": self._bridge.snapshot.get("updated_at"),
+            "lidar_angle_offset_deg": 0.0,
+            "lidar_invert_angles": False,
+        }
+
+
 def _obstacle_front() -> bool:
     """
     Obstacle devant pour la sécurité anti-collision (pilotage manuel).
@@ -405,6 +479,10 @@ def _obstacle_front() -> bool:
         snap = _lidar.snapshot
         if snap.connected and snap.obstacle_front:
             return True
+    elif _lidar_ros_adapter:
+        snap = _lidar_ros_adapter.snapshot
+        if snap.connected and snap.obstacle_front:
+            return True
     return _ultrasonic.reading.front.obstacle if _ultrasonic else False
 
 
@@ -416,7 +494,12 @@ def _system_status() -> dict:
     human_data = _human_detector.to_dict() if _human_detector else {}
     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
     vision_data = _vision.to_dict() if _vision else {}
-    lidar_data = _lidar.to_dict() if _lidar else {"lidar_connected": False}
+    if _lidar:
+        lidar_data = _lidar.to_dict()
+    elif _lidar_ros_adapter:
+        lidar_data = _lidar_ros_adapter.to_dict()
+    else:
+        lidar_data = {"lidar_connected": False}
     return {
         "esp32_connected": bool(_link and _link.is_open),
         "control_available": _motors is not None,
