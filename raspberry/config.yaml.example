@@ -72,16 +72,13 @@ sensors:
 
   lidar:
     enabled: false            # RPLIDAR A1 serie — desactive, ROS2 (ros2-lidar) est utilise a la place
-    # port: "/dev/ttyUSB0"    # Laisser vide = auto-detection
-    baudrate: 115200
-    obstacle_threshold_cm: 45 # Seuil frontal utilise pour la securite manuelle
-    front_fov_deg: 55         # Cone avant analyse par le planner
-    min_quality: 5
-    max_distance_mm: 6000
-    motor_dtr: false          # RPLIDAR A1 USB courant : false demarre le moteur
-    motor_start_delay_s: 0.8  # Laisse le temps au moteur de prendre sa vitesse
-    lidar_angle_offset_deg: 0   # Offset applique: angle_corrige=(angle_brut+offset)%360
-    lidar_invert_angles: false  # true si le sens angulaire brut du LIDAR est inverse
+
+  ros2_lidar:
+    # Offset pour aligner le 0° du scan ROS2 avec l'avant du robot.
+    # Mesure : mettre un objet devant le robot, lire l'angle_deg du point le plus proche
+    # dans /api/lidar/scan, puis angle_offset_deg = (360 - angle_mesure) % 360
+    angle_offset_deg: 140     # 221° scan → (221+140)%360 = 1° ≈ avant robot
+    obstacle_threshold_cm: 45 # Seuil frontal pour la securite manuelle et la patrouille
 
   vision:
     enabled: true             # Détection d'obstacles par caméra (OpenCV dual-méthode)

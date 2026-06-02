@@ -261,9 +261,13 @@ async def lifespan(app: FastAPI):
     # ROS2 LIDAR bridge — démarré avant la patrouille pour que l'adapter soit disponible
     _lidar_ros = ROS2LidarBridge()
     _lidar_ros.start()
+    ros2_cfg = cfg.get("sensors", {}).get("ros2_lidar", {})
     _lidar_ros_adapter = _ROS2LidarAdapter(
         _lidar_ros,
-        obstacle_cm=float(lidar_cfg.get("obstacle_threshold_cm", 45.0)),
+        obstacle_cm=float(
+            ros2_cfg.get("obstacle_threshold_cm", lidar_cfg.get("obstacle_threshold_cm", 45.0))
+        ),
+        angle_offset_deg=float(ros2_cfg.get("angle_offset_deg", 140.0)),
     )
     log.info("ROS2LidarBridge démarré")
 
@@ -410,24 +414,38 @@ def _ros2_zone_min_cm(points: list[dict], center_deg: float, half_width: float) 
 class _ROS2LidarAdapter:
     """Wraps ROS2LidarBridge to expose the same snapshot/to_dict interface as RPLidarA1."""
 
-    def __init__(self, bridge: ROS2LidarBridge, obstacle_cm: float = 45.0) -> None:
+    def __init__(
+        self, bridge: ROS2LidarBridge, obstacle_cm: float = 45.0, angle_offset_deg: float = 0.0
+    ) -> None:
         self._bridge = bridge
         self._obstacle_cm = obstacle_cm
+        self._angle_offset_deg = angle_offset_deg % 360.0
+
+    def _correct(self, angle_deg: float) -> float:
+        return (angle_deg + self._angle_offset_deg) % 360.0
 
     @property
     def snapshot(self) -> LidarSnapshot:
         snap = self._bridge.snapshot
         if not snap.get("connected"):
             return LidarSnapshot(connected=False, error=snap.get("error") or "ROS2 hors ligne")
-        points = tuple(
-            LidarPoint(angle_deg=p["angle_deg"], distance_mm=p["distance_m"] * 1000.0, quality=15)
-            for p in snap.get("points", [])
-        )
         raw = snap.get("points", [])
-        front_cm = _ros2_zone_min_cm(raw, 0.0, 30.0)
-        right_cm = _ros2_zone_min_cm(raw, 90.0, 30.0)
-        rear_cm = _ros2_zone_min_cm(raw, 180.0, 35.0)
-        left_cm = _ros2_zone_min_cm(raw, 270.0, 30.0)
+        points = tuple(
+            LidarPoint(
+                angle_deg=self._correct(p["angle_deg"]),
+                distance_mm=p["distance_m"] * 1000.0,
+                quality=15,
+            )
+            for p in raw
+        )
+        corrected = [
+            {"angle_deg": self._correct(p["angle_deg"]), "distance_cm": p["distance_cm"]}
+            for p in raw
+        ]
+        front_cm = _ros2_zone_min_cm(corrected, 0.0, 30.0)
+        right_cm = _ros2_zone_min_cm(corrected, 90.0, 30.0)
+        rear_cm = _ros2_zone_min_cm(corrected, 180.0, 35.0)
+        left_cm = _ros2_zone_min_cm(corrected, 270.0, 30.0)
         return LidarSnapshot(
             connected=True,
             points=points,
@@ -460,7 +478,7 @@ class _ROS2LidarAdapter:
             "lidar_rear_cm": snap.rear_distance_cm,
             "lidar_obstacle_front": snap.obstacle_front,
             "lidar_updated_at": self._bridge.snapshot.get("updated_at"),
-            "lidar_angle_offset_deg": 0.0,
+            "lidar_angle_offset_deg": self._angle_offset_deg,
             "lidar_invert_angles": False,
         }
 
