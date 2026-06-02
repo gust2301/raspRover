@@ -420,7 +420,7 @@ class _ROS2LidarAdapter:
         if not snap.get("connected"):
             return LidarSnapshot(connected=False, error=snap.get("error") or "ROS2 hors ligne")
         points = tuple(
-            LidarPoint(angle_deg=p["angle_deg"], distance_mm=p["distance_m"] * 1000.0)
+            LidarPoint(angle_deg=p["angle_deg"], distance_mm=p["distance_m"] * 1000.0, quality=15)
             for p in snap.get("points", [])
         )
         raw = snap.get("points", [])
