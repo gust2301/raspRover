@@ -54,11 +54,12 @@ class ZoneStats:
 
     @property
     def safe(self) -> bool:
-        return self.danger == ZoneDanger.CLEAR
+        # UNKNOWN (no reflection) = nothing detected = treat as open space
+        return self.danger in (ZoneDanger.CLEAR, ZoneDanger.UNKNOWN)
 
     @property
     def blocked(self) -> bool:
-        return self.danger in (ZoneDanger.DANGER, ZoneDanger.UNKNOWN)
+        return self.danger == ZoneDanger.DANGER
 
 
 @dataclass(frozen=True)
@@ -288,7 +289,7 @@ class LidarAvoidancePlanner:
     def _corridor_clear(self, stats: tuple[ZoneStats, ...], clearance_cm: float) -> bool:
         for stat in stats:
             if stat.points < self.scan_zone_min_points or stat.min_cm is None:
-                return False
+                continue  # no data = no obstacle detected = passable
             if stat.min_cm < clearance_cm:
                 return False
         return True
