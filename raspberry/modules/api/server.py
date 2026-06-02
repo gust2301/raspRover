@@ -267,7 +267,7 @@ async def lifespan(app: FastAPI):
         obstacle_cm=float(
             ros2_cfg.get("obstacle_threshold_cm", lidar_cfg.get("obstacle_threshold_cm", 45.0))
         ),
-        angle_offset_deg=float(ros2_cfg.get("angle_offset_deg", 140.0)),
+        angle_offset_deg=float(ros2_cfg.get("angle_offset_deg", 320.0)),
     )
     log.info("ROS2LidarBridge démarré")
 

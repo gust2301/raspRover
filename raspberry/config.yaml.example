@@ -77,7 +77,7 @@ sensors:
     # Offset pour aligner le 0° du scan ROS2 avec l'avant du robot.
     # Mesure : mettre un objet devant le robot, lire l'angle_deg du point le plus proche
     # dans /api/lidar/scan, puis angle_offset_deg = (360 - angle_mesure) % 360
-    angle_offset_deg: 140     # 221° scan → (221+140)%360 = 1° ≈ avant robot
+    angle_offset_deg: 320     # (scan_angle + 320) % 360 = angle robot. Ajuster si avant/arriere inverses (+/-180)
     obstacle_threshold_cm: 45 # Seuil frontal pour la securite manuelle et la patrouille
 
   vision:
