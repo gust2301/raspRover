@@ -138,9 +138,32 @@ class LidarAvoidancePlanner:
         rear_right = zones["rear_right"]
 
         if front.min_cm is not None and front.min_cm <= self.stop_cm:
+            # Try to turn before hard-stopping
+            left_clear = self._turn_clear("left", zones)
+            right_clear = self._turn_clear("right", zones)
+            if left_clear or right_clear:
+                target = self._choose_turn_side(zones)
+                if target == "left" and left_clear:
+                    return self._turn_decision(
+                        "left", zones, f"danger frontal {front.min_cm:.0f}cm, pivot gauche"
+                    )
+                if target == "right" and right_clear:
+                    return self._turn_decision(
+                        "right", zones, f"danger frontal {front.min_cm:.0f}cm, pivot droite"
+                    )
+            rear_open = self._corridor_clear((rear, rear_left, rear_right), self.rear_clearance_cm)
+            if rear_open:
+                return AvoidanceDecision(
+                    AvoidanceAction.BACK_UP,
+                    f"danger frontal {front.min_cm:.0f}cm, recul",
+                    front.min_cm,
+                    180.0,
+                    zones=zones,
+                    confidence=1.0,
+                )
             return AvoidanceDecision(
                 AvoidanceAction.STOP,
-                f"danger frontal immediat {front.min_cm:.0f}cm",
+                f"danger frontal immediat {front.min_cm:.0f}cm, aucune issue",
                 front.min_cm,
                 zones=zones,
                 confidence=1.0,
