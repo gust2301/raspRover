@@ -1,24 +1,45 @@
 #!/usr/bin/env bash
-# Pull the latest code and restart both services.
+# Pull the latest code and restart only what changed.
 # Usage (on the Pi): bash ~/raspRover/raspberry/scripts/deploy.sh
 set -euo pipefail
 
-CURRENT_USER="$(logname)"
+CURRENT_USER="$(logname 2>/dev/null || whoami)"
 REPO_DIR="/home/${CURRENT_USER}/raspRover"
 RASPBERRY_DIR="${REPO_DIR}/raspberry"
 VENV="${RASPBERRY_DIR}/.venv"
 
 echo "==> Mise à jour du code..."
+BEFORE=$(git -C "${REPO_DIR}" rev-parse HEAD)
 git -C "${REPO_DIR}" pull origin master
+AFTER=$(git -C "${REPO_DIR}" rev-parse HEAD)
 
 echo "==> Mise à jour des dépendances Python..."
 "${VENV}/bin/pip" install -r "${RASPBERRY_DIR}/requirements.txt" -q
 
-echo "==> Mise à jour des services systemd..."
-bash "${RASPBERRY_DIR}/install_systemd_service.sh"
+# Détecte si le fichier service lidar a changé entre les deux commits
+LIDAR_SERVICE_CHANGED=false
+if [ "${BEFORE}" != "${AFTER}" ]; then
+  if git -C "${REPO_DIR}" diff --name-only "${BEFORE}" "${AFTER}" | grep -q "ros2-lidar.service"; then
+    LIDAR_SERVICE_CHANGED=true
+  fi
+fi
 
-echo "==> Statut rasprover-control..."
-sudo systemctl status rasprover-control --no-pager -l | head -8
+# Toujours redémarre l'API Python
+echo "==> Redémarrage rasprover-control..."
+sudo systemctl restart rasprover-control.service
+echo "  OK"
+
+# Redémarre le lidar uniquement si son .service a changé
+if [ "${LIDAR_SERVICE_CHANGED}" = "true" ]; then
+  echo "==> ros2-lidar.service modifié — mise à jour et redémarrage..."
+  sed "s/^User=.*/User=${CURRENT_USER}/" "${RASPBERRY_DIR}/ros2-lidar.service" \
+    | sudo tee /etc/systemd/system/ros2-lidar.service > /dev/null
+  sudo systemctl daemon-reload
+  sudo systemctl restart ros2-lidar.service
+  echo "  OK"
+else
+  echo "==> ros2-lidar inchangé — ROS non redémarré."
+fi
 
 echo ""
 echo "==> Déploiement terminé."
