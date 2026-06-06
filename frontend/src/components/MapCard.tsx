@@ -46,7 +46,11 @@ export default function MapCard() {
     finally { setStarting(false) }
   }
 
-  useEffect(() => { void fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    void fetchStatus()
+    const id = setInterval(() => { void fetchStatus() }, 5000)
+    return () => clearInterval(id)
+  }, [fetchStatus])
 
   useEffect(() => {
     if (!slamRunning || !isOnline) return
