@@ -1135,7 +1135,7 @@ def _read_ros2_map_once(container: str = "ros2-slam") -> dict | None:
                 container,
                 "bash",
                 "-c",
-                "source /opt/ros/jazzy/setup.bash && ros2 topic echo /map --once",
+                "source /opt/ros/jazzy/setup.bash && ros2 topic echo /map --once --qos-durability transient_local",
             ],
             capture_output=True,
             text=True,

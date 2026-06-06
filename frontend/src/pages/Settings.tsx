@@ -48,6 +48,9 @@ export default function Settings() {
       const data = await res.json() as { ok?: boolean; angle_offset_deg?: number; error?: string }
       if (data.ok) {
         setAutoCalibMsg(`✓ Offset appliqué : ${data.angle_offset_deg?.toFixed(0)}° — sauvegardé`)
+        // force immediate refresh x3 to flush stale WS state
+        await conn.refreshLidarCalibration()
+        await new Promise(r => setTimeout(r, 400))
         await conn.refreshLidarCalibration()
       } else {
         setAutoCalibMsg(`Erreur : ${data.error ?? 'inconnu'}`)
