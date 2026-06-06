@@ -860,10 +860,9 @@ async def slam_start() -> dict:
                     _slam_container,
                     "--network=host",
                     "ros2-lidar",
-                    "ros2",
-                    "launch",
-                    "slam_toolbox",
-                    "online_async_launch.py",
+                    "bash",
+                    "-c",
+                    "source /opt/ros/jazzy/setup.bash && ros2 launch slam_toolbox online_async_launch.py",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -940,12 +939,9 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
                     "docker",
                     "exec",
                     _slam_container,
-                    "ros2",
-                    "service",
-                    "call",
-                    "/slam_toolbox/save_map",
-                    "slam_toolbox/srv/SaveMap",
-                    f'{{name: {{data: "{map_name}"}}}}',
+                    "bash",
+                    "-c",
+                    f"source /opt/ros/jazzy/setup.bash && ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap '{{name: {{data: \"{map_name}\"}}}}'",
                 ],
                 capture_output=True,
                 text=True,
@@ -1133,14 +1129,21 @@ def _read_ros2_map_once(container: str = "ros2-slam") -> dict | None:
     """Read one /map message from the SLAM container. Returns None on failure."""
     try:
         result = subprocess.run(
-            ["docker", "exec", container, "ros2", "topic", "echo", "/map", "--once"],
+            [
+                "docker",
+                "exec",
+                container,
+                "bash",
+                "-c",
+                "source /opt/ros/jazzy/setup.bash && ros2 topic echo /map --once",
+            ],
             capture_output=True,
             text=True,
             timeout=15.0,
         )
         if result.returncode != 0 or not result.stdout.strip():
+            log.warning("_read_ros2_map_once stderr: %s", result.stderr[:200])
             return None
-        # Strip leading/trailing '---' document markers before parsing
         text = result.stdout.strip().lstrip("-").strip()
         msg = yaml.safe_load(text)
         if not isinstance(msg, dict) or "data" not in msg:
