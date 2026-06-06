@@ -7,6 +7,7 @@ import base64
 import datetime
 import json
 import logging
+import math
 import pathlib
 import struct
 import subprocess
@@ -411,6 +412,17 @@ def _ros2_zone_min_cm(points: list[dict], center_deg: float, half_width: float) 
     return min(dists) if dists else None
 
 
+def _ros2_zone_name(corrected_deg: float) -> str:
+    a = corrected_deg % 360.0
+    if a <= 45 or a >= 315:
+        return "front"
+    if 45 < a <= 135:
+        return "right"
+    if 135 < a <= 225:
+        return "rear"
+    return "left"
+
+
 class _ROS2LidarAdapter:
     """Wraps ROS2LidarBridge to expose the same snapshot/to_dict interface as RPLidarA1."""
 
@@ -426,6 +438,16 @@ class _ROS2LidarAdapter:
 
     def calibration_to_dict(self) -> dict:
         snap = self.snapshot
+        raw = self._bridge.snapshot.get("points", [])
+        debug = [
+            {
+                "raw_angle": round(p["angle_deg"], 1),
+                "corrected_angle": round(self._correct(p["angle_deg"]), 1),
+                "zone": _ros2_zone_name(self._correct(p["angle_deg"])),
+                "distance_cm": round(p["distance_cm"], 1),
+            }
+            for p in sorted(raw, key=lambda x: x["distance_cm"])[:24]
+        ]
         return {
             "angle_offset_deg": self._angle_offset_deg,
             "invert_angles": False,
@@ -438,6 +460,7 @@ class _ROS2LidarAdapter:
                 "rear": snap.rear_distance_cm,
                 "left": snap.left_distance_cm,
             },
+            "debug_points": debug,
         }
 
     def _correct(self, angle_deg: float) -> float:
@@ -461,10 +484,10 @@ class _ROS2LidarAdapter:
             {"angle_deg": self._correct(p["angle_deg"]), "distance_cm": p["distance_cm"]}
             for p in raw
         ]
-        front_cm = _ros2_zone_min_cm(corrected, 0.0, 30.0)
-        right_cm = _ros2_zone_min_cm(corrected, 90.0, 30.0)
-        rear_cm = _ros2_zone_min_cm(corrected, 180.0, 35.0)
-        left_cm = _ros2_zone_min_cm(corrected, 270.0, 30.0)
+        front_cm = _ros2_zone_min_cm(corrected, 0.0, 45.0)
+        right_cm = _ros2_zone_min_cm(corrected, 90.0, 45.0)
+        rear_cm = _ros2_zone_min_cm(corrected, 180.0, 45.0)
+        left_cm = _ros2_zone_min_cm(corrected, 270.0, 45.0)
         return LidarSnapshot(
             connected=True,
             points=points,
@@ -744,6 +767,36 @@ async def set_lidar_calibration(body: dict[str, Any]) -> dict:
         return {"ok": True, **_lidar_ros_adapter.calibration_to_dict()}
 
     return JSONResponse(status_code=503, content={"error": "Aucun LIDAR actif"})
+
+
+@app.post("/api/lidar/calibrate/auto")
+async def auto_calibrate_lidar() -> dict:
+    """Pointe automatiquement l'avant du robot vers le cluster de points le plus proche.
+
+    Place le robot face à un obstacle, puis appelle cet endpoint.
+    L'offset est calculé pour que la direction des points les plus proches devienne l'avant (0°).
+    """
+    if _lidar_ros_adapter is None or _lidar_ros is None:
+        return JSONResponse(status_code=503, content={"error": "ROS2 LIDAR non actif"})
+    snap = _lidar_ros.snapshot
+    if not snap.get("connected"):
+        return JSONResponse(status_code=503, content={"error": "ROS2 LIDAR non connecté"})
+    points = snap.get("points", [])
+    if not points:
+        return JSONResponse(status_code=503, content={"error": "Scan vide"})
+    closest = sorted(points, key=lambda p: p["distance_cm"])[:15]
+    angles = [p["angle_deg"] for p in closest]
+    sin_sum = sum(math.sin(math.radians(a)) for a in angles)
+    cos_sum = sum(math.cos(math.radians(a)) for a in angles)
+    mean_raw = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
+    new_offset = (360.0 - mean_raw) % 360.0
+    _lidar_ros_adapter.set_angle_offset(new_offset)
+    _persist_lidar_calibration(new_offset, False)
+    return {
+        "ok": True,
+        "angle_offset_deg": round(new_offset, 1),
+        **_lidar_ros_adapter.calibration_to_dict(),
+    }
 
 
 @app.get("/api/lidar/scan")
