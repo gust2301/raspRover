@@ -123,7 +123,7 @@ export default function Network() {
     }
   }
 
-  const isConnected = conn.status === 'connected'
+  const hasRobot = !!robotIp
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
@@ -138,10 +138,10 @@ export default function Network() {
         </div>
       </div>
 
-      {!isConnected && (
+      {!hasRobot && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <WifiOff size={14} />
-          Connecte-toi au robot pour gérer le Wi-Fi.
+          Aucun robot configuré — entre l'IP du robot sur l'écran de connexion.
         </div>
       )}
 
@@ -154,7 +154,7 @@ export default function Network() {
           </div>
           <button
             onClick={refreshStatus}
-            disabled={!isConnected || statusLoading}
+            disabled={!hasRobot || statusLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-300 border border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
           >
             <RefreshCw size={12} className={statusLoading ? 'animate-spin' : ''} />
@@ -202,7 +202,7 @@ export default function Network() {
           </div>
           <button
             onClick={handleScan}
-            disabled={!isConnected || scanLoading}
+            disabled={!hasRobot || scanLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-blue-300 border border-blue-600/40 bg-blue-600/15 hover:bg-blue-600/25 disabled:opacity-40 transition-colors"
           >
             <Search size={12} className={scanLoading ? 'animate-pulse' : ''} />
@@ -356,7 +356,7 @@ export default function Network() {
           ) : (
             <button
               onClick={handleConnectClick}
-              disabled={!isConnected || connectLoading || password.length === 0}
+              disabled={!hasRobot || connectLoading || password.length === 0}
               className="w-full py-2.5 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {connectLoading ? (
