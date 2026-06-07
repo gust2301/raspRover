@@ -57,6 +57,13 @@ def _nmcli_status() -> dict:
 
 def _nmcli_scan() -> list[dict]:
     """Retourne la liste des réseaux Wi-Fi détectés."""
+    # Déclenche le rescan hardware en best-effort (peut échouer sans privilèges élevés)
+    subprocess.run(
+        ["nmcli", "dev", "wifi", "rescan", "ifname", _IFACE],
+        capture_output=True,
+        timeout=10.0,
+    )
+
     try:
         r = _run(
             [
@@ -67,18 +74,21 @@ def _nmcli_scan() -> list[dict]:
                 "dev",
                 "wifi",
                 "list",
-                "--rescan",
-                "yes",
+                "ifname",
+                _IFACE,
             ],
-            timeout=20.0,
+            timeout=15.0,
         )
         networks: list[dict] = []
         seen: set[str] = set()
-        for line in r.stdout.splitlines():
-            parts = line.split(":", 2)
+        for raw_line in r.stdout.splitlines():
+            # nmcli --terse escape les ':' internes en '\:' — split sur ':' non échappés
+            parts = re.split(r"(?<!\\):", raw_line)
             if len(parts) < 3:
                 continue
-            ssid, signal_str, security = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            ssid = parts[0].replace("\\:", ":").strip()
+            signal_str = parts[1].strip()
+            security = parts[2].replace("\\:", ":").strip()
             if not ssid or ssid in seen:
                 continue
             seen.add(ssid)
