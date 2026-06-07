@@ -23,10 +23,26 @@ def _run(cmd: list[str], timeout: float = 15.0) -> subprocess.CompletedProcess:
 def _nmcli_status() -> dict:
     """Retourne connected, ssid, ipAddress via nmcli."""
     try:
-        r = _run(["nmcli", "-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "dev", "show", _IFACE])
-        state_line = next((l for l in r.stdout.splitlines() if l.startswith("GENERAL.STATE")), "")
-        conn_line = next((l for l in r.stdout.splitlines() if l.startswith("GENERAL.CONNECTION")), "")
-        ip_line = next((l for l in r.stdout.splitlines() if l.startswith("IP4.ADDRESS")), "")
+        r = _run(
+            [
+                "nmcli",
+                "-t",
+                "-f",
+                "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS",
+                "dev",
+                "show",
+                _IFACE,
+            ]
+        )
+        state_line = next(
+            (line for line in r.stdout.splitlines() if line.startswith("GENERAL.STATE")), ""
+        )
+        conn_line = next(
+            (line for line in r.stdout.splitlines() if line.startswith("GENERAL.CONNECTION")), ""
+        )
+        ip_line = next(
+            (line for line in r.stdout.splitlines() if line.startswith("IP4.ADDRESS")), ""
+        )
 
         connected = "100" in state_line
         ssid = conn_line.split(":", 1)[1].strip() if ":" in conn_line else None
@@ -43,7 +59,17 @@ def _nmcli_scan() -> list[dict]:
     """Retourne la liste des réseaux Wi-Fi détectés."""
     try:
         r = _run(
-            ["nmcli", "--terse", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+            [
+                "nmcli",
+                "--terse",
+                "-f",
+                "SSID,SIGNAL,SECURITY",
+                "dev",
+                "wifi",
+                "list",
+                "--rescan",
+                "yes",
+            ],
             timeout=20.0,
         )
         networks: list[dict] = []
@@ -60,11 +86,13 @@ def _nmcli_scan() -> list[dict]:
                 signal = int(signal_str)
             except ValueError:
                 signal = 0
-            networks.append({
-                "ssid": ssid,
-                "signal": signal,
-                "security": security if security and security != "--" else None,
-            })
+            networks.append(
+                {
+                    "ssid": ssid,
+                    "signal": signal,
+                    "security": security if security and security != "--" else None,
+                }
+            )
         networks.sort(key=lambda n: n["signal"], reverse=True)
         return networks
     except Exception as exc:
@@ -84,12 +112,18 @@ def _nmcli_connect(ssid: str, password: str) -> dict:
         new_ip: str | None = None
         if success:
             ip_r = _run(["nmcli", "-t", "-f", "IP4.ADDRESS", "dev", "show", _IFACE])
-            ip_line = next((l for l in ip_r.stdout.splitlines() if l.startswith("IP4.ADDRESS")), "")
+            ip_line = next(
+                (line for line in ip_r.stdout.splitlines() if line.startswith("IP4.ADDRESS")), ""
+            )
             ip_raw = ip_line.split(":", 1)[1].strip() if ":" in ip_line else None
             new_ip = ip_raw.split("/")[0] if ip_raw else None
         return {"success": success, "message": message, "newIpAddress": new_ip}
     except subprocess.TimeoutExpired:
-        return {"success": False, "message": "Timeout — vérifiez le SSID et le mot de passe.", "newIpAddress": None}
+        return {
+            "success": False,
+            "message": "Timeout — vérifiez le SSID et le mot de passe.",
+            "newIpAddress": None,
+        }
     except Exception as exc:
         log.warning("nmcli connect failed: %s", exc)
         return {"success": False, "message": str(exc), "newIpAddress": None}
@@ -120,7 +154,9 @@ async def wifi_connect(body: dict) -> dict:
         return JSONResponse(status_code=400, content={"error": "password requis"})
     # Reject obviously malicious chars (newline, semicolon) — nmcli takes args as list so shell injection is already avoided
     if re.search(r"[\r\n;`$|&]", ssid + password):
-        return JSONResponse(status_code=400, content={"error": "Caractères non autorisés dans SSID ou mot de passe"})
+        return JSONResponse(
+            status_code=400, content={"error": "Caractères non autorisés dans SSID ou mot de passe"}
+        )
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: _nmcli_connect(ssid, password))
     status_code = 200 if result["success"] else 502
