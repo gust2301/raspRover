@@ -47,6 +47,7 @@ from .camera import (
 )
 from .db import init_db, list_incidents, list_incidents_by_date, log_incident, update_media_key
 from .media import get_r2_client
+from .network import router as network_router
 
 log = logging.getLogger(__name__)
 
@@ -576,6 +577,7 @@ def _system_status() -> dict:
 
 
 app = FastAPI(title="RaspRover Control API", version="1.0.0", lifespan=lifespan)
+app.include_router(network_router)
 
 # CORS : autorise le front Vercel + réseau local
 app.add_middleware(

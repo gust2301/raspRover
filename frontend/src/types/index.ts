@@ -39,3 +39,21 @@ export interface SystemLog {
   time: string
   type: 'info' | 'success' | 'warning' | 'error'
 }
+
+export interface NetworkStatus {
+  connected: boolean
+  ssid: string | null
+  ipAddress: string | null
+}
+
+export interface WifiNetwork {
+  ssid: string
+  signal: number
+  security: string | null
+}
+
+export interface WifiConnectResult {
+  success: boolean
+  message: string
+  newIpAddress: string | null
+}

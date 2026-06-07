@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Route, AlertTriangle,
-  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map,
+  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map, Network,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/robots', icon: Bot, label: 'Robots', highlight: false },
   { to: '/sites', icon: MapPin, label: 'Sites', highlight: false },
   { to: '/reports', icon: FileText, label: 'Rapports', highlight: false },
+  { to: '/network', icon: Network, label: 'Wi-Fi', highlight: false },
   { to: '/settings', icon: Settings, label: 'Paramètres', highlight: false },
 ]
 

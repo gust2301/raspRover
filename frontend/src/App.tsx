@@ -10,6 +10,7 @@ import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Pilotage from './pages/Pilotage'
 import MapView from './pages/MapView'
+import Network from './pages/Network'
 import ConnectScreen from './pages/ConnectScreen'
 import { RobotConnectionProvider } from './context/RobotConnectionContext'
 import UpdatePrompt from './components/UpdatePrompt'
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="sites" element={<Sites />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="network" element={<Network />} />
             <Route path="map" element={<MapView />} />
           </Route>
         </Routes>
