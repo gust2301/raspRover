@@ -68,7 +68,7 @@ _human_detector: HumanDetector | None = None
 _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
-_slam_container: str = "ros2-slam"
+_slam_container: str = "ros2-lidar"   # SLAM runs inside the lidar container to share DDS
 
 
 def _load_config() -> dict:
@@ -818,52 +818,43 @@ async def get_lidar_scan() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _slam_running() -> bool:
+    """True si async_slam_toolbox_node tourne dans le container lidar."""
+    r = subprocess.run(
+        ["docker", "exec", _slam_container, "pgrep", "-f", "async_slam_toolbox_node"],
+        capture_output=True,
+    )
+    return r.returncode == 0
+
+
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
-    running = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: _docker_running(_slam_container)
-    )
-    return {"running": running, "container": _slam_container}
+    running = await asyncio.get_running_loop().run_in_executor(None, _slam_running)
+    return {"running": running}
 
 
 @app.post("/api/slam/start")
 async def slam_start() -> dict:
     loop = asyncio.get_running_loop()
-    already = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
-    if already:
+    if await loop.run_in_executor(None, _slam_running):
         return {"ok": True, "running": True, "message": "déjà en cours"}
 
-    slam_image = await loop.run_in_executor(
-        None,
-        lambda: subprocess.run(
-            ["docker", "images", "-q", "ros2-lidar"], capture_output=True, text=True
-        ).stdout.strip(),
-    )
-    if not slam_image:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "ok": False,
-                "error": "image ros2-lidar introuvable — lance d'abord install_all.sh",
-            },
-        )
+    if not await loop.run_in_executor(None, lambda: _docker_running(_slam_container)):
+        return JSONResponse(status_code=503, content={"ok": False, "error": "container ros2-lidar absent"})
 
+    cmd = (
+        "source /opt/ros/jazzy/setup.bash && "
+        "ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id laser & "
+        "python3 /opt/map_writer.py & "
+        "ros2 run slam_toolbox async_slam_toolbox_node --ros-args "
+        "-p base_frame:=laser -p odom_frame:=odom -p scan_topic:=/scan "
+        "-p use_lifecycle_manager:=false -p use_sim_time:=false"
+    )
     try:
         await loop.run_in_executor(
             None,
             lambda: subprocess.Popen(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--name",
-                    _slam_container,
-                    "--network=host",
-                    "ros2-lidar",
-                    "bash",
-                    "-c",
-                    "source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id laser & python3 /opt/map_writer.py & sleep 2 && ros2 run slam_toolbox async_slam_toolbox_node --ros-args -p base_frame:=laser -p odom_frame:=odom -p scan_topic:=/scan -p use_lifecycle_manager:=false -p use_sim_time:=false",
-                ],
+                ["docker", "exec", "-d", _slam_container, "bash", "-c", cmd],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ),
@@ -877,17 +868,23 @@ async def slam_start() -> dict:
 async def slam_stop() -> dict:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(
+        await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["docker", "stop", _slam_container],
+                ["docker", "exec", _slam_container, "pkill", "-f", "async_slam_toolbox_node"],
                 capture_output=True,
-                text=True,
                 timeout=10.0,
             ),
         )
-        ok = result.returncode == 0
-        return {"ok": ok, "running": False}
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["docker", "exec", _slam_container, "pkill", "-f", "map_writer"],
+                capture_output=True,
+                timeout=5.0,
+            ),
+        )
+        return {"ok": True, "running": False}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
@@ -896,8 +893,7 @@ async def slam_stop() -> dict:
 async def slam_map() -> dict:
     """Retourne la carte SLAM courante en PNG base64."""
     loop = asyncio.get_running_loop()
-    running = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
-    if not running:
+    if not await loop.run_in_executor(None, _slam_running):
         return JSONResponse(status_code=503, content={"error": "SLAM non actif"})
 
     msg = await loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container))
@@ -926,8 +922,7 @@ async def slam_map() -> dict:
 async def slam_save(body: dict[str, Any] | None = None) -> dict:
     """Demande au slam_toolbox de sauvegarder la carte courante."""
     loop = asyncio.get_running_loop()
-    running = await loop.run_in_executor(None, lambda: _docker_running(_slam_container))
-    if not running:
+    if not await loop.run_in_executor(None, _slam_running):
         return JSONResponse(status_code=503, content={"ok": False, "error": "SLAM non actif"})
 
     map_name = (body or {}).get("name", "/tmp/rasprover_map")
