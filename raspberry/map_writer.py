@@ -1,6 +1,7 @@
 """Runs inside the ros2-slam container. Subscribes to /map and writes
 the latest OccupancyGrid to /tmp/current_map.json so the API can read
 it with a simple 'docker exec cat' instead of fragile ros2 topic echo."""
+
 import json
 
 import rclpy

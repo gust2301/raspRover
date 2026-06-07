@@ -68,7 +68,7 @@ _human_detector: HumanDetector | None = None
 _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
-_slam_container: str = "ros2-lidar"   # SLAM runs inside the lidar container to share DDS
+_slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
 
 
 def _load_config() -> dict:
@@ -840,7 +840,9 @@ async def slam_start() -> dict:
         return {"ok": True, "running": True, "message": "déjà en cours"}
 
     if not await loop.run_in_executor(None, lambda: _docker_running(_slam_container)):
-        return JSONResponse(status_code=503, content={"ok": False, "error": "container ros2-lidar absent"})
+        return JSONResponse(
+            status_code=503, content={"ok": False, "error": "container ros2-lidar absent"}
+        )
 
     cmd = (
         "source /opt/ros/jazzy/setup.bash && "
