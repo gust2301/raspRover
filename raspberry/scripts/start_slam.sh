@@ -16,4 +16,4 @@ echo ""
 docker run --rm --name "${CONTAINER_NAME}" \
   --network=host \
   ros2-lidar \
-  bash -c "source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id base_footprint & ros2 run tf2_ros static_transform_publisher --frame-id base_footprint --child-frame-id laser & ros2 launch slam_toolbox online_async_launch.py"
+  bash -c "source /opt/ros/jazzy/setup.bash && printf 'slam_toolbox:\n  ros__parameters:\n    base_frame: laser\n    odom_frame: laser\n    map_frame: map\n    scan_topic: /scan\n    use_sim_time: false\n    provide_odom_frame: false\n' > /tmp/slam_params.yaml && ros2 launch slam_toolbox online_async_launch.py params_file:=/tmp/slam_params.yaml"
