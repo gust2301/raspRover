@@ -57,9 +57,9 @@ def _nmcli_status() -> dict:
 
 def _nmcli_scan() -> list[dict]:
     """Retourne la liste des réseaux Wi-Fi détectés."""
-    # Déclenche le rescan hardware en best-effort (peut échouer sans privilèges élevés)
+    # Déclenche le rescan hardware (sudo via /etc/sudoers.d/rasprover-nmcli)
     subprocess.run(
-        ["nmcli", "dev", "wifi", "rescan", "ifname", _IFACE],
+        ["sudo", "nmcli", "dev", "wifi", "rescan", "ifname", _IFACE],
         capture_output=True,
         timeout=10.0,
     )
@@ -114,7 +114,7 @@ def _nmcli_connect(ssid: str, password: str) -> dict:
     """Lance nmcli dev wifi connect et retourne le résultat."""
     try:
         r = _run(
-            ["nmcli", "dev", "wifi", "connect", ssid, "password", password],
+            ["sudo", "nmcli", "dev", "wifi", "connect", ssid, "password", password],
             timeout=30.0,
         )
         success = r.returncode == 0
