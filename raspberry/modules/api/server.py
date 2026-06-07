@@ -862,7 +862,7 @@ async def slam_start() -> dict:
                     "ros2-lidar",
                     "bash",
                     "-c",
-                    "source /opt/ros/jazzy/setup.bash && printf 'slam_toolbox:\\n  ros__parameters:\\n    base_frame: laser\\n    odom_frame: laser\\n    map_frame: map\\n    scan_topic: /scan\\n    use_sim_time: false\\n    provide_odom_frame: false\\n' > /tmp/slam_params.yaml && ros2 launch slam_toolbox online_async_launch.py params_file:=/tmp/slam_params.yaml",
+                    "source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id laser & python3 /opt/map_writer.py & sleep 2 && ros2 run slam_toolbox async_slam_toolbox_node --ros-args -p base_frame:=laser -p odom_frame:=odom -p scan_topic:=/scan -p use_lifecycle_manager:=false -p use_sim_time:=false",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1126,26 +1126,17 @@ def _docker_running(name: str) -> bool:
 
 
 def _read_ros2_map_once(container: str = "ros2-slam") -> dict | None:
-    """Read one /map message from the SLAM container. Returns None on failure."""
+    """Read the latest map from the JSON file written by map_writer.py."""
     try:
         result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                container,
-                "bash",
-                "-c",
-                "source /opt/ros/jazzy/setup.bash && ros2 topic echo /map --once --qos-durability transient_local",
-            ],
+            ["docker", "exec", container, "cat", "/tmp/current_map.json"],
             capture_output=True,
             text=True,
-            timeout=15.0,
+            timeout=5.0,
         )
         if result.returncode != 0 or not result.stdout.strip():
-            log.warning("_read_ros2_map_once stderr: %s", result.stderr[:200])
             return None
-        text = result.stdout.strip().lstrip("-").strip()
-        msg = yaml.safe_load(text)
+        msg = json.loads(result.stdout)
         if not isinstance(msg, dict) or "data" not in msg:
             return None
         return msg

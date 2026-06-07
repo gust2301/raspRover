@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Source ROS on every exec (needed for docker exec ros2 ... calls)
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
 
+COPY map_writer.py /opt/map_writer.py
+
 SHELL ["/bin/bash", "-c"]
 ENTRYPOINT ["/ros_entrypoint.sh"]
 CMD ["bash"]
