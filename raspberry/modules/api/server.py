@@ -862,7 +862,7 @@ async def slam_start() -> dict:
                     "ros2-lidar",
                     "bash",
                     "-c",
-                    "source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros static_transform_publisher --frame-id base_footprint --child-frame-id laser & ros2 launch slam_toolbox online_async_launch.py",
+                    "source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id base_footprint & ros2 run tf2_ros static_transform_publisher --frame-id base_footprint --child-frame-id laser & ros2 launch slam_toolbox online_async_launch.py",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
