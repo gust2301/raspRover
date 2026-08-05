@@ -3,6 +3,7 @@ the latest OccupancyGrid to /tmp/current_map.json so the API can read
 it with a simple 'docker exec cat' instead of fragile ros2 topic echo."""
 
 import json
+import os
 
 import rclpy
 from nav_msgs.msg import OccupancyGrid
@@ -33,8 +34,12 @@ class MapWriter(Node):
             },
             "data": list(msg.data),
         }
-        with open("/tmp/current_map.json", "w") as f:
+        temporary_path = "/tmp/current_map.json.tmp"
+        with open(temporary_path, "w") as f:
             json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, "/tmp/current_map.json")
 
 
 rclpy.init()

@@ -94,6 +94,19 @@ class TestESP32Link:
 
 
 class TestMotorController:
+    def test_command_observer_receives_clamped_drive_and_stop(self, emulator):
+        observed = []
+        with ESP32Link(port=emulator["url"]) as link:
+            motors = MotorController(
+                link,
+                max_speed=0.5,
+                watchdog_s=None,
+                command_observer=lambda left, right: observed.append((left, right)),
+            )
+            motors.drive(0.8, -0.7)
+            motors.stop()
+            assert observed == [(0.5, -0.5), (0.0, 0.0)]
+
     def test_forward_sets_both_sides_positive(self, emulator):
         with ESP32Link(port=emulator["url"]) as link:
             motors = MotorController(link, max_speed=0.5, default_speed=0.4, watchdog_s=None)

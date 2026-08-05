@@ -201,6 +201,13 @@ journalctl -u ros2-lidar -f         # logs
 
 ### Cartographie SLAM (slam_toolbox)
 
+Après chaque mise à jour des fichiers ROS, reconstruire l'image :
+
+```bash
+docker build -t ros2-lidar raspberry/ -f raspberry/Dockerfile.lidar
+sudo systemctl restart ros2-lidar rasprover-control
+```
+
 ```bash
 # Lancer le SLAM (foreground — terminal dédié)
 bash /home/gust/raspRover/raspberry/scripts/start_slam.sh
@@ -208,12 +215,23 @@ bash /home/gust/raspRover/raspberry/scripts/start_slam.sh
 # Ou via l'interface web : Dashboard → Carte SLAM → Démarrer SLAM
 ```
 
+Le SLAM utilise une odométrie différentielle estimée depuis les commandes moteurs,
+puis corrigée par le scan matching. Les paramètres physiques sont dans la section
+`slam` de `config.yaml`. Pour calibrer :
+
+1. ajuster `max_linear_speed_m_s` après un trajet rectiligne mesuré ;
+2. ajuster `wheel_separation_m` après une rotation complète sur place ;
+3. renseigner la position et l'orientation réelles du LIDAR avec `laser_x_m`,
+   `laser_y_m` et `laser_yaw_deg`.
+
+Le statut doit indiquer `ready: true` et les trois topics `scan`, `odom` et `map`.
+
 ### Endpoints API ROS2 / SLAM
 
 | Endpoint | Méthode | Description |
 |---|---|---|
 | `/api/lidar/scan` | GET | Scan 360° ROS2 (JSON) |
-| `/api/slam/status` | GET | État du container ros2-slam |
+| `/api/slam/status` | GET | État SLAM et disponibilité de `/scan`, `/odom`, `/map` |
 | `/api/slam/start` | POST | Démarre slam_toolbox |
 | `/api/slam/stop` | POST | Arrête slam_toolbox |
 | `/api/slam/map` | GET | Carte courante en PNG base64 |

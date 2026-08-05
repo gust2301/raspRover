@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import pathlib
+import re
 import struct
 import subprocess
 import time
@@ -27,6 +28,7 @@ from modules.control import ESP32Link, LightController, MotorController, PanTilt
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
+from modules.control.odometry import OdometryCommandPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
@@ -70,6 +72,7 @@ _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
+_odometry_commands: OdometryCommandPublisher | None = None
 
 
 def _load_config() -> dict:
@@ -157,7 +160,8 @@ async def lifespan(app: FastAPI):
         _patrol, \
         _human_detector, \
         _tracker, \
-        _rover_name
+        _rover_name, \
+        _odometry_commands
 
     global _mixer
     cfg = _load_config()
@@ -170,14 +174,19 @@ async def lifespan(app: FastAPI):
     baudrate = ctrl.get("baudrate", 115200)
     timeout_s = ctrl.get("timeout_s", 1.0)
     pt_cfg = ctrl.get("pantilt", {})
+    slam_cfg = cfg.get("slam", {})
 
     _link = ESP32Link(port=port, baudrate=baudrate, timeout_s=timeout_s)
     try:
         _link.open()
+        _odometry_commands = OdometryCommandPublisher(
+            port=int(slam_cfg.get("odometry_udp_port", 7667))
+        )
         _motors = MotorController(
             _link,
             max_speed=ctrl.get("motor_max_speed", 0.5),
             default_speed=ctrl.get("motor_default_speed", 0.35),
+            command_observer=_odometry_commands.publish,
         )
         _pantilt = PanTiltController(
             _link,
@@ -360,6 +369,9 @@ async def lifespan(app: FastAPI):
         _lidar_ros.stop()
     if _motors:
         _motors.shutdown()
+    if _odometry_commands:
+        _odometry_commands.close()
+        _odometry_commands = None
     if _link:
         _link.close()
     _alert.close()
@@ -829,10 +841,41 @@ def _slam_running() -> bool:
     return r.returncode == 0
 
 
+def _slam_topics() -> set[str]:
+    """Retourne les topics ROS visibles, sans faire échouer le statut API."""
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                _slam_container,
+                "bash",
+                "-c",
+                "source /opt/ros/jazzy/setup.bash && ros2 topic list",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        return set(result.stdout.splitlines()) if result.returncode == 0 else set()
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+
+
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
-    running = await asyncio.get_running_loop().run_in_executor(None, _slam_running)
-    return {"running": running}
+    loop = asyncio.get_running_loop()
+    running, topics = await asyncio.gather(
+        loop.run_in_executor(None, _slam_running),
+        loop.run_in_executor(None, _slam_topics),
+    )
+    required = {"/scan", "/odom", "/map"}
+    return {
+        "running": running,
+        "ready": running and required.issubset(topics),
+        "container": _slam_container,
+        "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
+    }
 
 
 @app.post("/api/slam/start")
@@ -846,19 +889,24 @@ async def slam_start() -> dict:
             status_code=503, content={"ok": False, "error": "container ros2-lidar absent"}
         )
 
-    cmd = (
-        "source /opt/ros/jazzy/setup.bash && "
-        "ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id laser & "
-        "python3 /opt/map_writer.py & "
-        "ros2 run slam_toolbox async_slam_toolbox_node --ros-args "
-        "-p base_frame:=laser -p odom_frame:=odom -p scan_topic:=/scan "
-        "-p use_lifecycle_manager:=false -p use_sim_time:=false"
-    )
+    cfg = _load_config().get("slam", {})
+    environment = [
+        "-e",
+        f"RASPROVER_MAX_SPEED_M_S={float(cfg.get('max_linear_speed_m_s', 0.65))}",
+        "-e",
+        f"RASPROVER_WHEEL_SEPARATION_M={float(cfg.get('wheel_separation_m', 0.18))}",
+        "-e",
+        f"RASPROVER_LASER_X_M={float(cfg.get('laser_x_m', 0.0))}",
+        "-e",
+        f"RASPROVER_LASER_Y_M={float(cfg.get('laser_y_m', 0.0))}",
+        "-e",
+        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 140.0))}",
+    ]
     try:
         await loop.run_in_executor(
             None,
             lambda: subprocess.Popen(
-                ["docker", "exec", "-d", _slam_container, "bash", "-c", cmd],
+                ["docker", "exec", "-d", *environment, _slam_container, "/opt/rasprover/start_slam.sh"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ),
@@ -929,7 +977,15 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
     if not await loop.run_in_executor(None, _slam_running):
         return JSONResponse(status_code=503, content={"ok": False, "error": "SLAM non actif"})
 
-    map_name = (body or {}).get("name", "/tmp/rasprover_map")
+    requested_name = str((body or {}).get("name", "rasprover_map"))
+    safe_name = pathlib.Path(requested_name).name
+    valid_path = requested_name in {safe_name, f"/tmp/{safe_name}"}
+    if not valid_path or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", safe_name) is None:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Nom de carte invalide"},
+        )
+    map_name = f"/tmp/{safe_name}"
     try:
         result = await loop.run_in_executor(
             None,
@@ -940,7 +996,9 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
                     _slam_container,
                     "bash",
                     "-c",
-                    f"source /opt/ros/jazzy/setup.bash && ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap '{{name: {{data: \"{map_name}\"}}}}'",
+                    "source /opt/ros/jazzy/setup.bash && "
+                    "ros2 service call /slam_toolbox/save_map "
+                    f"slam_toolbox/srv/SaveMap '{{name: {{data: \"{map_name}\"}}}}'",
                 ],
                 capture_output=True,
                 text=True,

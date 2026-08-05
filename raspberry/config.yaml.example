@@ -90,6 +90,19 @@ sensors:
                               # Réduire (ex: 12) si faux positifs sur sol uniforme
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
 
+slam:
+  # Odometrie estimee depuis les consignes moteurs. A calibrer sur le robot reel :
+  # faire rouler 2 m en ligne droite, puis ajuster max_linear_speed_m_s.
+  max_linear_speed_m_s: 0.65
+  # Distance effective entre les roues pour le skid-steer. Faire un tour complet
+  # sur place et ajuster jusqu'a ce que l'orientation odometrique soit proche de 360°.
+  wheel_separation_m: 0.18
+  odometry_udp_port: 7667
+  # Pose physique du centre optique LIDAR par rapport au centre du chassis.
+  laser_x_m: 0.0
+  laser_y_m: 0.0
+  laser_yaw_deg: 140.0
+
 patrol:
   navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY
   speed: 0.3                # Vitesse d'avance (0-1)

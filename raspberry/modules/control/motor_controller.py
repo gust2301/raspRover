@@ -17,6 +17,7 @@ import enum
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 from .esp32_link import CMD_SPEED_CTRL, ESP32Link
 from .exceptions import InvalidParameterError
@@ -57,6 +58,7 @@ class MotorController:
         max_speed: float = 0.5,
         default_speed: float = 0.35,
         watchdog_s: float | None = 1.0,
+        command_observer: Callable[[float, float], None] | None = None,
     ) -> None:
         if not (0.0 < max_speed <= 1.0):
             raise InvalidParameterError(f"max_speed doit être dans ]0, 1], reçu {max_speed}")
@@ -68,6 +70,7 @@ class MotorController:
         self.max_speed = max_speed
         self.default_speed = default_speed
         self.watchdog_s = watchdog_s
+        self._command_observer = command_observer
 
         self._last_cmd_ts = 0.0
         self._last_cmd: tuple[float, float] = (0.0, 0.0)
@@ -117,6 +120,7 @@ class MotorController:
         left = self._clamp(left)
         right = self._clamp(right)
         self._link.send({"T": CMD_SPEED_CTRL, "L": left, "R": right})
+        self._notify_observer(left, right)
         self._last_cmd = (left, right)
         self._last_cmd_ts = time.time()
         log.debug("drive(L=%.2f, R=%.2f)", left, right)
@@ -155,6 +159,7 @@ class MotorController:
     def stop(self) -> None:
         """Arrête immédiatement les 4 moteurs."""
         self._link.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
+        self._notify_observer(0.0, 0.0)
         self._last_cmd = (0.0, 0.0)
         self._last_cmd_ts = time.time()
         log.debug("stop()")
@@ -176,6 +181,14 @@ class MotorController:
         if v != v:  # NaN
             raise InvalidParameterError("Vitesse NaN")
         return max(-self.max_speed, min(self.max_speed, float(v)))
+
+    def _notify_observer(self, left: float, right: float) -> None:
+        if self._command_observer is None:
+            return
+        try:
+            self._command_observer(left, right)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Observateur de commande moteur indisponible: %s", exc)
 
     @property
     def last_command(self) -> tuple[float, float]:
