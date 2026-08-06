@@ -45,6 +45,8 @@ fi
 # ── 4. Python venv + dépendances ─────────────────────────────────────────────
 echo ""
 echo "==> Installation des dépendances Python..."
+apt-get update
+apt-get install -y python3-opencv python3-numpy
 VENV="${RASPBERRY_DIR}/.venv"
 if [[ ! -d "${VENV}" ]]; then
   sudo -u "${CURRENT_USER}" python3 -m venv "${VENV}"

@@ -8,11 +8,18 @@ le poids de confiance HOG. Dégradé si OpenCV absent : person_detected = False.
 from __future__ import annotations
 
 import logging
+import pathlib
 import queue
+import sys
 import threading
 import time
 
 log = logging.getLogger(__name__)
+
+# Les paquets caméra/OpenCV de Raspberry Pi OS vivent hors du venv.
+_SYSTEM_SITE = "/usr/lib/python3/dist-packages"
+if pathlib.Path(_SYSTEM_SITE).exists() and _SYSTEM_SITE not in sys.path:
+    sys.path.append(_SYSTEM_SITE)
 
 try:
     import cv2  # type: ignore[import-not-found]
@@ -29,6 +36,7 @@ _HOG_WIN_STRIDE = (8, 8)
 _HOG_PADDING = (4, 4)
 _HOG_SCALE = 1.05
 _MIN_WEIGHT = -0.3  # seuil de confiance HOG (valeurs > 0 = haute confiance)
+_TARGET_STALE_S = 1.5
 
 
 class HumanDetector:
@@ -58,12 +66,13 @@ class HumanDetector:
     def best_target(self) -> tuple[float, float, float] | None:
         """(cx, cy, weight) normalisé, ou None si pas de personne."""
         with self._lock:
+            if time.monotonic() - self._last_update_ts > _TARGET_STALE_S:
+                return None
             return self._best_target
 
     @property
     def person_detected(self) -> bool:
-        with self._lock:
-            return self._best_target is not None
+        return self.best_target is not None
 
     @property
     def last_update_ts(self) -> float:
@@ -71,8 +80,7 @@ class HumanDetector:
             return self._last_update_ts
 
     def to_dict(self) -> dict:
-        with self._lock:
-            target = self._best_target
+        target = self.best_target
         if target:
             cx, cy, weight = target
             return {
@@ -80,12 +88,14 @@ class HumanDetector:
                 "tracking_cx": round(cx, 3),
                 "tracking_cy": round(cy, 3),
                 "tracking_confidence": round(weight, 3),
+                "tracking_detector_available": _CV2_AVAILABLE,
             }
         return {
             "tracking_person_detected": False,
             "tracking_cx": None,
             "tracking_cy": None,
             "tracking_confidence": 0.0,
+            "tracking_detector_available": _CV2_AVAILABLE,
         }
 
     # ------------------------------------------------------------------

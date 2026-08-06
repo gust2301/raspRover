@@ -4,6 +4,7 @@ it with a simple 'docker exec cat' instead of fragile ros2 topic echo."""
 
 import json
 import os
+import time
 
 import rclpy
 from nav_msgs.msg import OccupancyGrid
@@ -21,6 +22,7 @@ class MapWriter(Node):
 
     def _cb(self, msg: OccupancyGrid) -> None:
         payload = {
+            "updated_at": time.time(),
             "info": {
                 "width": msg.info.width,
                 "height": msg.info.height,

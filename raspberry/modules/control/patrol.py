@@ -30,7 +30,11 @@ import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
 
-from modules.control.lidar_avoidance import AvoidanceAction, LidarAvoidancePlanner
+from modules.control.lidar_avoidance import (
+    AvoidanceAction,
+    AvoidanceDecision,
+    LidarAvoidancePlanner,
+)
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +80,13 @@ _HUMAN_POLL = 0.5  # intervalle de vérification de la détection humaine (s)
 _SCAN_ANGLES = (-50, 0, 50)
 _SCAN_SETTLE = 0.6
 _SCAN_READ_SECS = 0.5
+
+# LIDAR_ONLY : séquences d'échappement engagées pour éviter avant/arrière et toupie.
+_LIDAR_REVERSE_COMMIT_S = 0.65
+_LIDAR_ESCAPE_TURN_S = 0.90
+_LIDAR_MAX_TURN_S = 1.40
+_LIDAR_TURN_PAUSE_S = 0.30
+_LIDAR_SCAN_PULSE_S = 0.55
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +194,13 @@ class PatrolController:
         self._last_human_capture_ts: float = 0.0  # timestamp de la dernière capture humaine
         self._last_decision: str = "idle"
         self._last_decision_reason: str = ""
+        self._maneuver_action: AvoidanceAction | None = None
+        self._maneuver_started_ts: float = 0.0
+        self._forced_turn: AvoidanceAction | None = None
+        self._forced_turn_until: float = 0.0
+        self._turn_pause_until: float = 0.0
+        self._last_escape_turn = AvoidanceAction.TURN_RIGHT
+        self._scan_turn = AvoidanceAction.TURN_RIGHT
 
     # ------------------------------------------------------------------
     # Propriétés
@@ -217,6 +235,10 @@ class PatrolController:
         self._last_turn_dir = None
         self._last_record_ts = 0.0
         self._last_human_capture_ts = 0.0
+        self._maneuver_action = None
+        self._forced_turn = None
+        self._forced_turn_until = 0.0
+        self._turn_pause_until = 0.0
         self._task = asyncio.create_task(self._run(loop))
         if self._on_incident:
             self._on_incident(
@@ -330,6 +352,7 @@ class PatrolController:
         keepalive_ts = 0.0
         while True:
             decision = self._lidar_planner.decide(self._lidar.snapshot)
+            decision = self._guard_lidar_decision(decision, time.monotonic())
             self._last_decision = decision.action.value
             self._last_decision_reason = decision.reason
             now = time.monotonic()
@@ -414,6 +437,108 @@ class PatrolController:
                 )
                 keepalive_ts = now
             await asyncio.sleep(_POLL)
+
+    def _guard_lidar_decision(
+        self, decision: AvoidanceDecision, now: float
+    ) -> AvoidanceDecision:
+        """Engage les manœuvres LIDAR assez longtemps sans sacrifier le STOP sécurité.
+
+        Un recul est toujours suivi d'une rotation franche. Les rotations sont
+        plafonnées et séparées par une pause, ce qui empêche le rover de rester
+        en marche avant/arrière ou de tourner indéfiniment sur place.
+        """
+        if decision.action == AvoidanceAction.STOP:
+            self._remember_maneuver(decision.action, now)
+            self._forced_turn = None
+            return decision
+
+        if now < self._turn_pause_until:
+            return self._override_decision(decision, AvoidanceAction.STOP, "pause de réévaluation")
+
+        if self._forced_turn is not None:
+            if now < self._forced_turn_until:
+                return self._override_decision(
+                    decision, self._forced_turn, "rotation engagée après recul"
+                )
+            self._forced_turn = None
+            self._turn_pause_until = now + _LIDAR_TURN_PAUSE_S
+            self._remember_maneuver(AvoidanceAction.STOP, now)
+            return self._override_decision(decision, AvoidanceAction.STOP, "fin rotation engagée")
+
+        if self._maneuver_action == AvoidanceAction.BACK_UP:
+            elapsed = now - self._maneuver_started_ts
+            if elapsed < _LIDAR_REVERSE_COMMIT_S:
+                return self._override_decision(
+                    decision, AvoidanceAction.BACK_UP, "recul engagé anti-oscillation"
+                )
+            turn = self._choose_escape_turn(decision)
+            self._forced_turn = turn
+            self._forced_turn_until = now + _LIDAR_ESCAPE_TURN_S
+            self._last_escape_turn = turn
+            self._remember_maneuver(turn, now)
+            return self._override_decision(decision, turn, "sortie latérale après recul")
+
+        if decision.action == AvoidanceAction.BACK_UP:
+            self._remember_maneuver(decision.action, now)
+            return decision
+
+        if decision.action == AvoidanceAction.SCAN_ROTATE:
+            if self._maneuver_action != AvoidanceAction.SCAN_ROTATE:
+                self._scan_turn = (
+                    AvoidanceAction.TURN_LEFT
+                    if self._scan_turn == AvoidanceAction.TURN_RIGHT
+                    else AvoidanceAction.TURN_RIGHT
+                )
+                self._remember_maneuver(AvoidanceAction.SCAN_ROTATE, now)
+            if now - self._maneuver_started_ts >= _LIDAR_SCAN_PULSE_S:
+                self._turn_pause_until = now + _LIDAR_TURN_PAUSE_S
+                self._remember_maneuver(AvoidanceAction.STOP, now)
+                return self._override_decision(decision, AvoidanceAction.STOP, "pause après scan")
+            return self._override_decision(decision, self._scan_turn, "impulsion de scan alternée")
+
+        turning = decision.action in (
+            AvoidanceAction.TURN_LEFT,
+            AvoidanceAction.TURN_RIGHT,
+            AvoidanceAction.ARC_LEFT,
+            AvoidanceAction.ARC_RIGHT,
+        )
+        if turning and self._maneuver_action == decision.action:
+            if now - self._maneuver_started_ts >= _LIDAR_MAX_TURN_S:
+                self._turn_pause_until = now + _LIDAR_TURN_PAUSE_S
+                self._remember_maneuver(AvoidanceAction.STOP, now)
+                return self._override_decision(decision, AvoidanceAction.STOP, "rotation maximale atteinte")
+        elif self._maneuver_action != decision.action:
+            self._remember_maneuver(decision.action, now)
+        return decision
+
+    def _choose_escape_turn(self, decision: AvoidanceDecision) -> AvoidanceAction:
+        zones = decision.zones or {}
+        left_score = sum(zones[name].score for name in ("front_left", "left") if name in zones)
+        right_score = sum(zones[name].score for name in ("front_right", "right") if name in zones)
+        if abs(left_score - right_score) < 20.0:
+            return (
+                AvoidanceAction.TURN_LEFT
+                if self._last_escape_turn == AvoidanceAction.TURN_RIGHT
+                else AvoidanceAction.TURN_RIGHT
+            )
+        return AvoidanceAction.TURN_LEFT if left_score > right_score else AvoidanceAction.TURN_RIGHT
+
+    def _remember_maneuver(self, action: AvoidanceAction, now: float) -> None:
+        self._maneuver_action = action
+        self._maneuver_started_ts = now
+
+    @staticmethod
+    def _override_decision(
+        decision: AvoidanceDecision, action: AvoidanceAction, reason: str
+    ) -> AvoidanceDecision:
+        return AvoidanceDecision(
+            action=action,
+            reason=f"{reason} ({decision.reason})",
+            front_cm=decision.front_cm,
+            target_angle_deg=decision.target_angle_deg,
+            confidence=decision.confidence,
+            zones=decision.zones,
+        )
 
     # ------------------------------------------------------------------
     # Auto-enregistrement

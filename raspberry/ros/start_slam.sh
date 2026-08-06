@@ -8,7 +8,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Nettoie les auxiliaires orphelins d'un lancement précédent interrompu.
+pkill -f '[c]ommand_odometry.py' 2>/dev/null || true
+pkill -f '[m]ap_writer.py' 2>/dev/null || true
+
 python3 /opt/rasprover/command_odometry.py --ros-args \
+  -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
   -p max_linear_speed_m_s:="${RASPROVER_MAX_SPEED_M_S:-0.65}" \
   -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.18}" \
   -p laser_x_m:="${RASPROVER_LASER_X_M:-0.0}" \

@@ -12,6 +12,7 @@ interface SlamMap {
   resolution_m: number
   origin_x: number
   origin_y: number
+  updated_at?: number
 }
 
 export default function MapView() {

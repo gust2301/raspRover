@@ -258,7 +258,6 @@ async def lifespan(app: FastAPI):
         )
         _vision.start()
         register_frame_callback(_vision.push_frame)
-        start_standalone_vision_producer()
         log.info("VisionObstacleDetector démarré")
     else:
         log.info("Détecteur vision désactivé (sensors.vision.enabled: false)")
@@ -267,6 +266,8 @@ async def lifespan(app: FastAPI):
     _human_detector = HumanDetector()
     _human_detector.start()
     register_frame_callback(_human_detector.push_frame)
+    # Nécessaire au tracking même lorsque sensors.vision.enabled=false.
+    start_standalone_vision_producer()
     log.info("HumanDetector démarré")
 
     # ROS2 LIDAR bridge — démarré avant la patrouille pour que l'adapter soit disponible
@@ -357,8 +358,8 @@ async def lifespan(app: FastAPI):
     if _human_detector:
         unregister_frame_callback(_human_detector.push_frame)
         _human_detector.stop()
+    stop_standalone_vision_producer()
     if _vision:
-        stop_standalone_vision_producer()
         unregister_frame_callback(_vision.push_frame)
         _vision.stop()
     if _ultrasonic:
@@ -862,12 +863,27 @@ def _slam_topics() -> set[str]:
         return set()
 
 
+def _slam_log_tail() -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", _slam_container, "tail", "-n", "20", "/tmp/rasprover_slam.log"],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        text = result.stdout.strip()
+        return text[-3000:] if result.returncode == 0 and text else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
     loop = asyncio.get_running_loop()
-    running, topics = await asyncio.gather(
+    running, topics, slam_log = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _slam_topics),
+        loop.run_in_executor(None, _slam_log_tail),
     )
     required = {"/scan", "/odom", "/map"}
     return {
@@ -875,6 +891,7 @@ async def slam_status() -> dict:
         "ready": running and required.issubset(topics),
         "container": _slam_container,
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
+        "error": None if running else slam_log,
     }
 
 
@@ -901,16 +918,38 @@ async def slam_start() -> dict:
         f"RASPROVER_LASER_Y_M={float(cfg.get('laser_y_m', 0.0))}",
         "-e",
         f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 140.0))}",
+        "-e",
+        f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
     ]
     try:
         await loop.run_in_executor(
             None,
             lambda: subprocess.Popen(
-                ["docker", "exec", "-d", *environment, _slam_container, "/opt/rasprover/start_slam.sh"],
+                [
+                    "docker",
+                    "exec",
+                    "-d",
+                    *environment,
+                    _slam_container,
+                    "bash",
+                    "-c",
+                    "/opt/rasprover/start_slam.sh >/tmp/rasprover_slam.log 2>&1",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ),
         )
+        await asyncio.sleep(2.0)
+        if not await loop.run_in_executor(None, _slam_running):
+            slam_log = await loop.run_in_executor(None, _slam_log_tail)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "ok": False,
+                    "running": False,
+                    "error": slam_log or "Le processus SLAM s'est arrêté au démarrage",
+                },
+            )
         return {"ok": True, "running": True}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
@@ -932,6 +971,21 @@ async def slam_stop() -> dict:
             None,
             lambda: subprocess.run(
                 ["docker", "exec", _slam_container, "pkill", "-f", "map_writer"],
+                capture_output=True,
+                timeout=5.0,
+            ),
+        )
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    _slam_container,
+                    "bash",
+                    "-c",
+                    "pkill -f '[c]ommand_odometry.py' || true",
+                ],
                 capture_output=True,
                 timeout=5.0,
             ),
@@ -967,6 +1021,7 @@ async def slam_map() -> dict:
         "resolution_m": info.get("resolution", 0.05),
         "origin_x": origin.get("x", 0.0),
         "origin_y": origin.get("y", 0.0),
+        "updated_at": msg.get("updated_at"),
     }
 
 
