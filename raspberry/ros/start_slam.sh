@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
+# Les scripts d'environnement ROS 2 lisent certaines variables optionnelles
+# avant de les initialiser et ne sont donc pas compatibles avec `set -u`.
 source /opt/ros/jazzy/setup.bash
+set -u
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
