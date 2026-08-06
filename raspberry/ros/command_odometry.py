@@ -90,7 +90,9 @@ class CommandOdometry(Node):
         velocity_right = self._right * self._max_speed
         linear = (velocity_left + velocity_right) / 2.0
         angular = (velocity_right - velocity_left) / self._wheel_separation
-        self._yaw = math.atan2(math.sin(self._yaw + angular * dt), math.cos(self._yaw + angular * dt))
+        self._yaw = math.atan2(
+            math.sin(self._yaw + angular * dt), math.cos(self._yaw + angular * dt)
+        )
         self._x += linear * math.cos(self._yaw) * dt
         self._y += linear * math.sin(self._yaw) * dt
 

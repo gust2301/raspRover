@@ -168,7 +168,10 @@ sudo bash install_systemd_service.sh
 sudo systemctl status rasprover-control
 ```
 
-Voir aussi [raspberry/OPERATIONS.md](raspberry/OPERATIONS.md) pour les commandes d'exploitation sur le robot.
+Documentation d'exploitation :
+
+- [Connexion SSH et déploiement](raspberry/SSH_DEPLOYMENT.md)
+- [Commandes opérationnelles](raspberry/OPERATIONS.md)
 
 ## API principale
 

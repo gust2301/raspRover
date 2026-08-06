@@ -438,9 +438,7 @@ class PatrolController:
                 keepalive_ts = now
             await asyncio.sleep(_POLL)
 
-    def _guard_lidar_decision(
-        self, decision: AvoidanceDecision, now: float
-    ) -> AvoidanceDecision:
+    def _guard_lidar_decision(self, decision: AvoidanceDecision, now: float) -> AvoidanceDecision:
         """Engage les manœuvres LIDAR assez longtemps sans sacrifier le STOP sécurité.
 
         Un recul est toujours suivi d'une rotation franche. Les rotations sont
@@ -506,7 +504,9 @@ class PatrolController:
             if now - self._maneuver_started_ts >= _LIDAR_MAX_TURN_S:
                 self._turn_pause_until = now + _LIDAR_TURN_PAUSE_S
                 self._remember_maneuver(AvoidanceAction.STOP, now)
-                return self._override_decision(decision, AvoidanceAction.STOP, "rotation maximale atteinte")
+                return self._override_decision(
+                    decision, AvoidanceAction.STOP, "rotation maximale atteinte"
+                )
         elif self._maneuver_action != decision.action:
             self._remember_maneuver(decision.action, now)
         return decision
