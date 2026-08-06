@@ -31,4 +31,28 @@ ros2 run slam_toolbox async_slam_toolbox_node --ros-args \
   --params-file /opt/rasprover/slam_toolbox.yaml &
 SLAM_PID=$!
 
+# async_slam_toolbox_node est un noeud lifecycle. Lancé directement (sans le
+# launch ROS officiel), il faut explicitement le configurer puis l'activer.
+SLAM_DISCOVERED=false
+for _attempt in $(seq 1 30); do
+  if ros2 lifecycle get /slam_toolbox >/dev/null 2>&1; then
+    SLAM_DISCOVERED=true
+    break
+  fi
+  if ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+    echo "slam_toolbox s'est arrêté avant son activation" >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+
+if [ "${SLAM_DISCOVERED}" != "true" ]; then
+  echo "slam_toolbox lifecycle introuvable après 6 secondes" >&2
+  exit 1
+fi
+
+ros2 lifecycle set /slam_toolbox configure
+ros2 lifecycle set /slam_toolbox activate
+echo "slam_toolbox configuré et actif"
+
 wait -n "${ODOM_PID}" "${MAP_WRITER_PID}" "${SLAM_PID}"

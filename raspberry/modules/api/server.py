@@ -880,15 +880,16 @@ def _slam_log_tail() -> str | None:
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
     loop = asyncio.get_running_loop()
-    running, topics, slam_log = await asyncio.gather(
+    running, topics, slam_log, current_map = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _slam_topics),
         loop.run_in_executor(None, _slam_log_tail),
+        loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
     )
     required = {"/scan", "/odom", "/map"}
     return {
         "running": running,
-        "ready": running and required.issubset(topics),
+        "ready": running and required.issubset(topics) and current_map is not None,
         "container": _slam_container,
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
         "error": None if running else slam_log,
