@@ -133,8 +133,18 @@ Puis lancer :
 deploy
 ```
 
-Par défaut, `deploy` met à jour la branche déjà active. Pour tester une feature
-avant sa fusion dans `master`, préciser la branche :
+Par défaut, `deploy` met à jour la branche déjà active. Lors du premier passage
+depuis une ancienne version du script, récupérer et activer manuellement la
+branche :
+
+```bash
+cd ~/raspRover
+git fetch origin codex/nav2-persistent-maps
+git switch --track -c codex/nav2-persistent-maps origin/codex/nav2-persistent-maps
+deploy
+```
+
+Pour les déploiements suivants, préciser directement la branche :
 
 ```bash
 deploy codex/nav2-persistent-maps

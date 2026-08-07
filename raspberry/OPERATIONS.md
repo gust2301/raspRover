@@ -248,12 +248,18 @@ perdre les cartes. Ne supprimez pas ce volume lors d'un nettoyage Docker.
 
 ### Validation d'une feature Nav2 sur la Pi
 
-Après publication de la branche distante :
+Lors du tout premier essai (la version actuelle de `deploy` sur `master` ne
+connaît pas encore les branches) :
 
 ```bash
 ssh ws@192.168.1.24
-deploy codex/nav2-persistent-maps
+cd ~/raspRover
+git fetch origin codex/nav2-persistent-maps
+git switch --track -c codex/nav2-persistent-maps origin/codex/nav2-persistent-maps
+deploy
 ```
+
+Pour les essais suivants, `deploy codex/nav2-persistent-maps` suffit.
 
 Le dépôt de la Pi doit être propre. Pour revenir à la version stable :
 
