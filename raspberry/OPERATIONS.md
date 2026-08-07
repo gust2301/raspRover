@@ -230,11 +230,52 @@ Le statut doit indiquer `ready: true` et les trois topics `scan`, `odom` et `map
 | Endpoint | Méthode | Description |
 |---|---|---|
 | `/api/lidar/scan` | GET | Scan 360° ROS2 (JSON) |
-| `/api/slam/status` | GET | État SLAM et disponibilité de `/scan`, `/odom`, `/map` |
+| `/api/slam/status` | GET | État cartographie/navigation, pose et topics ROS |
 | `/api/slam/start` | POST | Démarre slam_toolbox |
 | `/api/slam/stop` | POST | Arrête slam_toolbox |
 | `/api/slam/map` | GET | Carte courante en PNG base64 |
-| `/api/slam/save` | POST | Sauvegarde la carte sur le Pi |
+| `/api/slam/maps` | GET | Liste les cartes persistantes |
+| `/api/slam/save` | POST | Sauvegarde dans le volume `rasprover-maps` |
+| `/api/slam/load` | POST | Charge une carte et démarre AMCL + Nav2 |
+| `/api/slam/pose` | GET | Position `x`, `y`, `yaw` du rover dans la carte |
+| `/api/nav2/patrol/start` | POST | Lance une patrouille par points de passage |
+| `/api/nav2/patrol/stop` | POST | Annule la patrouille et arrête les moteurs |
+| `/api/nav2/patrol/status` | GET | Progression de la patrouille Nav2 |
+
+Les fichiers YAML/PGM sont conservés dans le volume Docker nommé
+`rasprover-maps`. Le conteneur peut donc être reconstruit ou supprimé sans
+perdre les cartes. Ne supprimez pas ce volume lors d'un nettoyage Docker.
+
+### Validation d'une feature Nav2 sur la Pi
+
+Après publication de la branche distante :
+
+```bash
+ssh ws@192.168.1.24
+deploy codex/nav2-persistent-maps
+```
+
+Le dépôt de la Pi doit être propre. Pour revenir à la version stable :
+
+```bash
+deploy master
+```
+
+Après le premier déploiement, vérifier sans faire bouger le rover :
+
+```bash
+curl http://localhost:8080/api/slam/maps
+curl http://localhost:8080/api/slam/status
+docker volume inspect rasprover-maps
+```
+
+Depuis l'écran Carte, enregistrer une carte, redémarrer le conteneur et confirmer
+qu'elle reste listée. Charger ensuite la carte avec le rover placé à l'origine
+connue. Tester d'abord un seul point proche, roues levées ou dans une zone très
+dégagée, puis valider l'arrêt avant une séquence de plusieurs points.
+
+Le pont moteur Nav2 ignore les commandes tant qu'une mission n'a pas été lancée
+par l'API. Il arrête aussi les moteurs si les commandes ROS cessent plus de 0,6 s.
 
 ---
 
