@@ -1359,6 +1359,7 @@ async def slam_load(body: dict[str, Any]) -> dict:
         bridge_ready = (
             bridge_status is not None
             and time.time() - float(bridge_status.get("updated_at", 0.0)) <= 2.0
+            and bool(bridge_status.get("action_server_ready"))
         )
         if navigation and not mapping and bridge_ready:
             navigation_started = True
@@ -1377,6 +1378,10 @@ async def slam_load(body: dict[str, Any]) -> dict:
                 "error": "Nav2 non démarré. Consultez le journal ROS sur la Pi.",
             },
         )
+    # La première pose peut être publiée pendant la configuration d'AMCL et
+    # être explicitement ignorée. À ce stade tous les nœuds Nav2 sont actifs :
+    # republie donc la position de départ avant d'attendre la transformation.
+    await loop.run_in_executor(None, lambda: _nav2_motors.set_initial_pose(pose_values))
     localized = False
     for _attempt in range(30):
         pose = await loop.run_in_executor(

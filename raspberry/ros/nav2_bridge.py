@@ -155,6 +155,8 @@ class Nav2Bridge(Node):
         self._goal_handle = future.result()
         if not self._goal_handle.accepted:
             self._set_status("error", error="Patrouille refusée par Nav2")
+            self._goal_handle = None
+            self._send_stop(mission_finished=True)
             return
         self._set_status("running")
         result = self._goal_handle.get_result_async()
@@ -177,7 +179,7 @@ class Nav2Bridge(Node):
             error=None if succeeded else "Un ou plusieurs points sont inaccessibles",
         )
         self._goal_handle = None
-        self._send_stop()
+        self._send_stop(mission_finished=True)
 
     def _cancel(self) -> None:
         if self._goal_handle is not None:
@@ -186,8 +188,11 @@ class Nav2Bridge(Node):
         self._set_status("cancelled")
         self._send_stop()
 
-    def _send_stop(self) -> None:
-        self._socket.sendto(b'{"left":0.0,"right":0.0}', ("127.0.0.1", self._motor_port))
+    def _send_stop(self, *, mission_finished: bool = False) -> None:
+        payload = json.dumps(
+            {"left": 0.0, "right": 0.0, "mission_finished": mission_finished}
+        ).encode()
+        self._socket.sendto(payload, ("127.0.0.1", self._motor_port))
 
     def _set_status(self, state: str, **extra) -> None:
         self._status.update(extra)
@@ -195,6 +200,7 @@ class Nav2Bridge(Node):
         self._status["updated_at"] = time.time()
 
     def _write_status(self) -> None:
+        self._status["action_server_ready"] = self._client.server_is_ready()
         temporary_path = "/tmp/nav2_status.json.tmp"
         with open(temporary_path, "w", encoding="utf-8") as stream:
             json.dump(self._status, stream)

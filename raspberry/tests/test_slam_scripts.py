@@ -77,3 +77,5 @@ def test_api_detects_composed_nav2_container():
 
     assert '"pgrep", "-f", "[n]av2_container"' in server
     assert '"pgrep", "-f", "bt_navigator"' not in server
+    assert 'bridge_status.get("action_server_ready")' in server
+    assert "_nav2_motors.set_initial_pose(pose_values)" in server

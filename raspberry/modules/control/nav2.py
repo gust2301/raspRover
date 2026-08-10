@@ -99,6 +99,7 @@ class Nav2MotorBridge:
                 command = json.loads(raw)
                 left = max(-1.0, min(1.0, float(command["left"])))
                 right = max(-1.0, min(1.0, float(command["right"])))
+                mission_finished = bool(command.get("mission_finished", False))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 log.warning("Commande moteur Nav2 UDP invalide")
                 continue
@@ -111,3 +112,5 @@ class Nav2MotorBridge:
                 self._received_command = True
             stopped_for_timeout = False
             self._drive(left, right)
+            if mission_finished:
+                self.disable()
