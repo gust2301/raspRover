@@ -59,3 +59,17 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert 'basename "${MAP_YAML}" .yaml > /tmp/active_map_name' in script
     assert "pkill -f '[a]sync_slam_toolbox_node'" in script
     assert "Impossible d'arrêter slam_toolbox avant Nav2" in script
+
+
+def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
+    bridge = (Path(__file__).parents[1] / "ros" / "nav2_bridge.py").read_text()
+
+    assert "get_subscription_count()" in bridge
+    assert "message.header.stamp = self.get_clock().now().to_msg()" not in bridge
+
+
+def test_api_detects_composed_nav2_container():
+    server = (Path(__file__).parents[1] / "modules" / "api" / "server.py").read_text()
+
+    assert '"pgrep", "-f", "[n]av2_container"' in server
+    assert '"pgrep", "-f", "bt_navigator"' not in server

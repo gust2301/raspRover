@@ -50,7 +50,7 @@ class Nav2Bridge(Node):
         self.create_subscription(Twist, "/cmd_vel", self._on_velocity, 10)
         self.create_timer(0.1, self._receive_commands)
         self.create_timer(0.5, self._write_status)
-        self.create_timer(0.5, self._repeat_initial_pose)
+        self.create_timer(0.1, self._publish_initial_pose_when_ready)
         self._set_initial_pose(
             {
                 "x": float(self.get_parameter("initial_pose_x").value),
@@ -91,19 +91,22 @@ class Nav2Bridge(Node):
             "y": float(value.get("y", 0.0)),
             "yaw": float(value.get("yaw", 0.0)),
         }
-        self._initial_pose_repeats = 60
-        self._publish_initial_pose()
-        self.get_logger().info(
-            "Pose initiale publiée: "
-            f"x={self._initial_pose['x']:.2f}, y={self._initial_pose['y']:.2f}, "
-            f"yaw={self._initial_pose['yaw']:.2f}"
-        )
+        self._initial_pose_repeats = 300
 
-    def _repeat_initial_pose(self) -> None:
+    def _publish_initial_pose_when_ready(self) -> None:
         if self._initial_pose_repeats <= 0:
             return
         self._initial_pose_repeats -= 1
+        if self._initial_pose_pub.get_subscription_count() <= 0:
+            return
         self._publish_initial_pose()
+        self._initial_pose_repeats = 0
+        if self._initial_pose is not None:
+            self.get_logger().info(
+                "Pose initiale publiée: "
+                f"x={self._initial_pose['x']:.2f}, y={self._initial_pose['y']:.2f}, "
+                f"yaw={self._initial_pose['yaw']:.2f}"
+            )
 
     def _publish_initial_pose(self) -> None:
         if self._initial_pose is None:
@@ -113,7 +116,8 @@ class Nav2Bridge(Node):
         yaw = self._initial_pose["yaw"]
         message = PoseWithCovarianceStamped()
         message.header.frame_id = "map"
-        message.header.stamp = self.get_clock().now().to_msg()
+        # Un timestamp nul demande à TF la dernière transformation disponible
+        # et évite une extrapolation de quelques millisecondes vers le futur.
         message.pose.pose.position.x = x
         message.pose.pose.position.y = y
         message.pose.pose.orientation.z = math.sin(yaw / 2.0)

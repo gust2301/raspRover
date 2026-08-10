@@ -873,7 +873,7 @@ def _slam_running() -> bool:
 
 def _nav2_running() -> bool:
     result = subprocess.run(
-        ["docker", "exec", _slam_container, "pgrep", "-f", "bt_navigator"],
+        ["docker", "exec", _slam_container, "pgrep", "-f", "[n]av2_container"],
         capture_output=True,
     )
     return result.returncode == 0
@@ -1357,9 +1357,14 @@ async def slam_load(body: dict[str, Any]) -> dict:
         error = await loop.run_in_executor(
             None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
         )
+        if error:
+            log.error("Échec du démarrage Nav2:\n%s", error)
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": error or "Pont Nav2 non démarré"},
+            content={
+                "ok": False,
+                "error": "Nav2 non démarré. Consultez le journal ROS sur la Pi.",
+            },
         )
     localized = False
     for _attempt in range(30):
