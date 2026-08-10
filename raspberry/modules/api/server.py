@@ -9,7 +9,6 @@ import json
 import logging
 import math
 import pathlib
-import re
 import struct
 import subprocess
 import time
@@ -32,6 +31,7 @@ from modules.control.nav2 import Nav2MotorBridge
 from modules.control.odometry import OdometryCommandPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
+from modules.map_names import normalize_map_name, validate_map_name
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
 from modules.sensors.lidar import LidarPoint, LidarSnapshot
@@ -870,15 +870,6 @@ def _nav2_running() -> bool:
     return result.returncode == 0
 
 
-def _valid_map_name(requested_name: object) -> str | None:
-    name = pathlib.Path(str(requested_name)).name
-    if name != str(requested_name):
-        return None
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name) is None:
-        return None
-    return name.removesuffix(".yaml").removesuffix(".pgm")
-
-
 def _saved_maps() -> list[dict[str, Any]]:
     result = subprocess.run(
         [
@@ -1190,7 +1181,8 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
     if not await loop.run_in_executor(None, _slam_running):
         return JSONResponse(status_code=503, content={"ok": False, "error": "SLAM non actif"})
 
-    safe_name = _valid_map_name((body or {}).get("name", "rasprover_map"))
+    requested_name = (body or {}).get("name", "rasprover_map")
+    safe_name = normalize_map_name(requested_name)
     if safe_name is None:
         return JSONResponse(
             status_code=400,
@@ -1221,7 +1213,12 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
             capture_output=True,
         ).returncode == 0
         ok = result.returncode == 0 and verified
-        response = {"ok": ok, "name": safe_name, "map_name": map_name}
+        response = {
+            "ok": ok,
+            "name": safe_name,
+            "requested_name": str(requested_name),
+            "map_name": map_name,
+        }
         if not ok:
             response["error"] = result.stderr.strip() or result.stdout.strip() or "Fichiers absents"
         return response
@@ -1232,7 +1229,7 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
 @app.post("/api/slam/load")
 async def slam_load(body: dict[str, Any]) -> dict:
     """Load a persistent map and start AMCL + Nav2 localization."""
-    safe_name = _valid_map_name(body.get("name", ""))
+    safe_name = validate_map_name(body.get("name", ""))
     if safe_name is None:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
     loop = asyncio.get_running_loop()
