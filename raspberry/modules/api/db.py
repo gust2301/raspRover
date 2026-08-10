@@ -29,6 +29,15 @@ def init_db(path: pathlib.Path = _DEFAULT_PATH) -> None:
             media_key TEXT
         )
     """)
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS map_homes (
+            map_name   TEXT PRIMARY KEY,
+            x          REAL NOT NULL,
+            y          REAL NOT NULL,
+            yaw        REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
     _conn.commit()
     cleanup_old()
 
@@ -100,3 +109,37 @@ def cleanup_old(days: int = 7) -> int:
         cur = _conn.execute("DELETE FROM incidents WHERE ts < ?", (cutoff,))
         _conn.commit()
         return cur.rowcount
+
+
+def set_map_home(map_name: str, x: float, y: float, yaw: float) -> dict:
+    """Create or replace the fixed home pose associated with a SLAM map."""
+    if _conn is None:
+        raise RuntimeError("Base SQLite non initialisée")
+    updated_at = datetime.utcnow().isoformat(timespec="seconds")
+    with _lock:
+        _conn.execute(
+            """
+            INSERT INTO map_homes (map_name, x, y, yaw, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(map_name) DO UPDATE SET
+                x = excluded.x,
+                y = excluded.y,
+                yaw = excluded.yaw,
+                updated_at = excluded.updated_at
+            """,
+            (map_name, x, y, yaw, updated_at),
+        )
+        _conn.commit()
+    return {"map_name": map_name, "x": x, "y": y, "yaw": yaw, "updated_at": updated_at}
+
+
+def get_map_home(map_name: str) -> dict | None:
+    """Return the fixed home pose for a map, if one was configured."""
+    if _conn is None:
+        return None
+    with _lock:
+        row = _conn.execute(
+            "SELECT map_name, x, y, yaw, updated_at FROM map_homes WHERE map_name = ?",
+            (map_name,),
+        ).fetchone()
+    return dict(row) if row else None

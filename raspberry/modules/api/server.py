@@ -49,7 +49,15 @@ from .camera import (
     stop_video_recording,
     unregister_frame_callback,
 )
-from .db import init_db, list_incidents, list_incidents_by_date, log_incident, update_media_key
+from .db import (
+    get_map_home,
+    init_db,
+    list_incidents,
+    list_incidents_by_date,
+    log_incident,
+    set_map_home,
+    update_media_key,
+)
 from .media import get_r2_client
 from .network import router as network_router
 
@@ -939,6 +947,19 @@ def _read_process_log(path: str) -> str | None:
         return None
 
 
+def _active_map_name() -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", _slam_container, "cat", "/tmp/active_map_name"],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        return validate_map_name(result.stdout.strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _publish_initial_pose(value: object) -> bool:
     pose = value if isinstance(value, dict) else {}
     try:
@@ -1067,6 +1088,44 @@ async def slam_pose() -> dict:
     if pose is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Pose indisponible"})
     return {"ok": True, **pose}
+
+
+@app.get("/api/slam/home")
+async def slam_home() -> dict:
+    loop = asyncio.get_running_loop()
+    map_name = await loop.run_in_executor(None, _active_map_name)
+    if map_name is None:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Aucune carte chargée"})
+    home = await loop.run_in_executor(None, lambda: get_map_home(map_name))
+    return {"ok": True, "map_name": map_name, "home": home}
+
+
+@app.post("/api/slam/home")
+async def slam_set_home() -> dict:
+    """Persist the rover's current localized pose as this map's fixed home."""
+    loop = asyncio.get_running_loop()
+    map_name, pose = await asyncio.gather(
+        loop.run_in_executor(None, _active_map_name),
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+    )
+    if map_name is None:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Aucune carte chargée"})
+    updated_at = float(pose.get("updated_at", 0.0)) if pose else 0.0
+    if pose is None or time.time() - updated_at > 5.0:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Position du rover indisponible ou trop ancienne"},
+        )
+    try:
+        values = (float(pose["x"]), float(pose["y"]), float(pose["yaw"]))
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError
+        home = await loop.run_in_executor(
+            None, lambda: set_map_home(map_name, values[0], values[1], values[2])
+        )
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Position invalide"})
+    return {"ok": True, "home": home}
 
 
 @app.post("/api/slam/start")
@@ -1360,16 +1419,16 @@ async def nav2_patrol_start(body: dict[str, Any]) -> dict:
     home_pose: dict[str, Any] | None = None
     home_added = False
     if return_home:
-        home_pose = await loop.run_in_executor(
-            None, lambda: _read_container_json("/tmp/current_pose.json")
+        map_name = await loop.run_in_executor(None, _active_map_name)
+        home_pose = (
+            await loop.run_in_executor(None, lambda: get_map_home(map_name)) if map_name else None
         )
-        updated_at = float(home_pose.get("updated_at", 0.0)) if home_pose else 0.0
-        if home_pose is None or time.time() - updated_at > 5.0:
+        if home_pose is None:
             return JSONResponse(
                 status_code=409,
                 content={
                     "ok": False,
-                    "error": "Position de départ indisponible ou trop ancienne",
+                    "error": "Maison non définie pour cette carte",
                 },
             )
         try:

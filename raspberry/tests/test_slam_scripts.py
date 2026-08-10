@@ -37,3 +37,4 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert "nav2_bringup bringup_launch.py" in script
     assert "nav2_bridge.py" in script
     assert "pose_writer.py" in script
+    assert 'basename "${MAP_YAML}" .yaml > /tmp/active_map_name' in script

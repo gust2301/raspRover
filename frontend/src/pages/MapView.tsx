@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle } from 'lucide-react'
+import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle, House } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
 
@@ -12,6 +12,7 @@ interface SlamStatus {
 }
 interface SavedMap { name: string; modified_at: number; size_bytes: number }
 interface Waypoint { x: number; y: number; yaw: number }
+interface MapHome extends RoverPose { map_name: string; updated_at?: number }
 interface SlamMap {
   ok: boolean
   image: string
@@ -35,6 +36,8 @@ export default function MapView() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([])
   const [navState, setNavState] = useState('idle')
   const [returnHome, setReturnHome] = useState(true)
+  const [home, setHome] = useState<MapHome | null>(null)
+  const [savingHome, setSavingHome] = useState(false)
   const [mapData, setMapData] = useState<SlamMap | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -90,6 +93,15 @@ export default function MapView() {
       const r = await fetch(`${apiBase}/api/nav2/patrol/status`)
       const d = await r.json()
       setNavState(d.state ?? 'unavailable')
+    } catch { /* ignore */ }
+  }, [apiBase, isOnline, mode])
+
+  const fetchHome = useCallback(async () => {
+    if (!isOnline || mode !== 'navigation') return
+    try {
+      const r = await fetch(`${apiBase}/api/slam/home`)
+      const d = await r.json()
+      if (r.ok) setHome(d.home ?? null)
     } catch { /* ignore */ }
   }, [apiBase, isOnline, mode])
 
@@ -160,7 +172,8 @@ export default function MapView() {
       setSlamRunning(true)
       setMode('navigation')
       setWaypoints([])
-      window.setTimeout(() => { void fetchMap(); void fetchStatus() }, 1500)
+      setHome(null)
+      window.setTimeout(() => { void fetchMap(); void fetchStatus(); void fetchHome() }, 1500)
     } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
     finally { setLoading(false) }
   }
@@ -193,6 +206,19 @@ export default function MapView() {
     setNavState('cancelled')
   }
 
+  async function handleSetHome() {
+    setSavingHome(true)
+    setError(null)
+    try {
+      const r = await fetch(`${apiBase}/api/slam/home`, { method: 'POST' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error ?? 'Maison non enregistrée')
+      setHome(d.home)
+      setNotice('La position actuelle est maintenant la maison du rover')
+    } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
+    finally { setSavingHome(false) }
+  }
+
   // ── effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => { void fetchStatus(); void fetchSavedMaps() }, [fetchStatus, fetchSavedMaps])
@@ -208,11 +234,11 @@ export default function MapView() {
     if (slamRunning && isOnline) {
       void fetchMap()
       pollRef.current = setInterval(() => {
-        void fetchMap(); void fetchStatus(); void fetchNavStatus()
+        void fetchMap(); void fetchStatus(); void fetchNavStatus(); void fetchHome()
       }, 2000)
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [slamRunning, isOnline, fetchMap, fetchStatus, fetchNavStatus])
+  }, [slamRunning, isOnline, fetchMap, fetchStatus, fetchNavStatus, fetchHome])
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -341,6 +367,14 @@ export default function MapView() {
                   <div className="absolute left-1/2 top-[-7px] w-0.5 h-2 bg-blue-500" />
                 </div>
               })()}
+              {home && (() => {
+                const left = (home.x - mapData.origin_x) / mapData.resolution_m / mapData.width * 100
+                const top = 100 - (home.y - mapData.origin_y) / mapData.resolution_m / mapData.height * 100
+                return <div className="absolute -ml-3 -mt-3 w-6 h-6 rounded-full bg-amber-500 border-2 border-white text-white flex items-center justify-center shadow-lg"
+                  style={{ left: `${left}%`, top: `${top}%` }} title="Maison du rover">
+                  <House size={13} />
+                </div>
+              })()}
               {waypoints.map((point, index) => {
                 const left = (point.x - mapData.origin_x) / mapData.resolution_m / mapData.width * 100
                 const top = 100 - (point.y - mapData.origin_y) / mapData.resolution_m / mapData.height * 100
@@ -369,8 +403,13 @@ export default function MapView() {
             <input type="checkbox" checked={returnHome}
               onChange={event => setReturnHome(event.target.checked)}
               className="accent-blue-500" />
-            Retourner au départ
+            Retourner à la maison
           </label>
+          <button onClick={() => { void handleSetHome() }} disabled={savingHome || !pose}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 text-xs text-amber-300 disabled:opacity-40">
+            <House size={14} />
+            {savingHome ? 'Enregistrement…' : home ? 'Redéfinir la maison' : 'Définir comme maison'}
+          </button>
           <button onClick={() => setWaypoints([])} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300">Effacer</button>
           {navState === 'running' || navState === 'starting' ? (
             <button onClick={() => { void handleStopNavPatrol() }} className="px-3 py-2 rounded-lg bg-red-600/30 text-xs text-red-300">Arrêter</button>

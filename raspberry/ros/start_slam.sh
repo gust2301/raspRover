@@ -15,7 +15,7 @@ trap cleanup EXIT INT TERM
 pkill -f '[c]ommand_odometry.py' 2>/dev/null || true
 pkill -f '[m]ap_writer.py' 2>/dev/null || true
 pkill -f '[p]ose_writer.py' 2>/dev/null || true
-rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json
+rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json /tmp/active_map_name
 
 python3 /opt/rasprover/command_odometry.py --ros-args \
   -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
