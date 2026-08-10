@@ -34,6 +34,7 @@ export default function MapView() {
   const [savedMaps, setSavedMaps] = useState<SavedMap[]>([])
   const [waypoints, setWaypoints] = useState<Waypoint[]>([])
   const [navState, setNavState] = useState('idle')
+  const [returnHome, setReturnHome] = useState(true)
   const [mapData, setMapData] = useState<SlamMap | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -180,7 +181,7 @@ export default function MapView() {
     if (!waypoints.length) return
     const r = await fetch(`${apiBase}/api/nav2/patrol/start`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waypoints }),
+      body: JSON.stringify({ waypoints, return_home: returnHome }),
     })
     const d = await r.json()
     if (!r.ok) setError(d.error ?? 'Patrouille Nav2 impossible')
@@ -364,6 +365,12 @@ export default function MapView() {
             <p className="text-sm text-slate-200">Patrouille Nav2 · {navState}</p>
             <p className="text-xs text-slate-500">Clique sur la carte pour ajouter les points dans l’ordre.</p>
           </div>
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" checked={returnHome}
+              onChange={event => setReturnHome(event.target.checked)}
+              className="accent-blue-500" />
+            Retourner au départ
+          </label>
           <button onClick={() => setWaypoints([])} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300">Effacer</button>
           {navState === 'running' || navState === 'starting' ? (
             <button onClick={() => { void handleStopNavPatrol() }} className="px-3 py-2 rounded-lg bg-red-600/30 text-xs text-red-300">Arrêter</button>

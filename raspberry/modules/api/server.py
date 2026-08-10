@@ -32,6 +32,7 @@ from modules.control.odometry import OdometryCommandPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
 from modules.map_names import normalize_map_name, validate_map_name
+from modules.navigation_plan import add_return_home
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
 from modules.sensors.lidar import LidarPoint, LidarSnapshot
@@ -1355,10 +1356,40 @@ async def nav2_patrol_start(body: dict[str, Any]) -> dict:
     except (KeyError, TypeError, ValueError):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Points invalides"})
 
+    return_home = bool(body.get("return_home", True))
+    home_pose: dict[str, Any] | None = None
+    home_added = False
+    if return_home:
+        home_pose = await loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/current_pose.json")
+        )
+        updated_at = float(home_pose.get("updated_at", 0.0)) if home_pose else 0.0
+        if home_pose is None or time.time() - updated_at > 5.0:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error": "Position de départ indisponible ou trop ancienne",
+                },
+            )
+        try:
+            waypoints, home_added = add_return_home(waypoints, home_pose)
+        except (KeyError, TypeError, ValueError):
+            return JSONResponse(
+                status_code=409, content={"ok": False, "error": "Position de départ invalide"}
+            )
+
     if _patrol and _patrol.active:
         await _patrol.stop(loop)
     await loop.run_in_executor(None, lambda: _nav2_motors.follow_waypoints(waypoints))
-    return {"ok": True, "state": "starting", "waypoint_count": len(waypoints)}
+    return {
+        "ok": True,
+        "state": "starting",
+        "waypoint_count": len(waypoints),
+        "return_home": return_home,
+        "home_added": home_added,
+        "home": home_pose if return_home else None,
+    }
 
 
 @app.post("/api/nav2/patrol/stop")
