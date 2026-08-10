@@ -979,21 +979,46 @@ def _publish_initial_pose(value: object) -> bool:
         "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "
         "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}"
     )
-    result = subprocess.run(
-        [
-            "docker",
-            "exec",
-            _slam_container,
-            "bash",
-            "-c",
-            "source /opt/ros/jazzy/setup.bash && "
-            f"ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped '{message}'",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=8.0,
-    )
-    return result.returncode == 0
+    published = False
+    for _attempt in range(3):
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                _slam_container,
+                "bash",
+                "-c",
+                "source /opt/ros/jazzy/setup.bash && "
+                "ros2 topic pub --once /initialpose "
+                f"geometry_msgs/msg/PoseWithCovarianceStamped '{message}'",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8.0,
+        )
+        published = published or result.returncode == 0
+        time.sleep(0.4)
+    return published
+
+
+def _lifecycle_active(node: str) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                _slam_container,
+                "bash",
+                "-c",
+                f"source /opt/ros/jazzy/setup.bash && ros2 lifecycle get {node}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=4.0,
+        )
+        return result.returncode == 0 and "active" in result.stdout.lower()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _stop_ros_navigation_processes() -> bool:
@@ -1350,25 +1375,45 @@ async def slam_load(body: dict[str, Any]) -> dict:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    navigation_ready = False
+    amcl_ready = False
     for _attempt in range(40):
         navigation, mapping = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
         )
-        if navigation and not mapping:
-            navigation_ready = True
+        if navigation and not mapping and await loop.run_in_executor(
+            None, lambda: _lifecycle_active("/amcl")
+        ):
+            amcl_ready = True
             break
         await asyncio.sleep(0.5)
-    if not navigation_ready:
+    if not amcl_ready:
         error = await loop.run_in_executor(
             None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
         )
         return JSONResponse(
-            status_code=500, content={"ok": False, "error": error or "Nav2 non démarré"}
+            status_code=500, content={"ok": False, "error": error or "AMCL non actif"}
         )
     initial_pose = body.get("initial_pose", {})
-    await loop.run_in_executor(None, lambda: _publish_initial_pose(initial_pose))
+    published = await loop.run_in_executor(None, lambda: _publish_initial_pose(initial_pose))
+    if not published:
+        return JSONResponse(
+            status_code=500, content={"ok": False, "error": "Pose initiale non publiée"}
+        )
+    localized = False
+    for _attempt in range(30):
+        pose = await loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/current_pose.json")
+        )
+        if pose is not None and time.time() - float(pose.get("updated_at", 0.0)) <= 2.0:
+            localized = True
+            break
+        await asyncio.sleep(0.5)
+    if not localized:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "AMCL actif mais transformation map → base_link absente"},
+        )
     return {"ok": True, "mode": "navigation", "map": safe_name}
 
 
