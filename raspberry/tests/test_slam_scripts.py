@@ -69,6 +69,8 @@ def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
     bridge = (Path(__file__).parents[1] / "ros" / "nav2_bridge.py").read_text()
 
     assert "get_subscription_count()" in bridge
+    assert 'create_client(GetState, "/amcl/get_state")' in bridge
+    assert "State.PRIMARY_STATE_ACTIVE" in bridge
     assert "message.header.stamp = self.get_clock().now().to_msg()" not in bridge
 
 

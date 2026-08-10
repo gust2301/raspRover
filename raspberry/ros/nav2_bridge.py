@@ -11,6 +11,8 @@ import time
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from lifecycle_msgs.msg import State
+from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -45,6 +47,8 @@ class Nav2Bridge(Node):
         self._goal_handle = None
         self._initial_pose: dict[str, float] | None = None
         self._initial_pose_repeats = 0
+        self._amcl_state_client = self.create_client(GetState, "/amcl/get_state")
+        self._amcl_state_future = None
         self._status = {"state": "idle", "current_waypoint": None, "updated_at": time.time()}
 
         self.create_subscription(Twist, "/cmd_vel", self._on_velocity, 10)
@@ -96,8 +100,18 @@ class Nav2Bridge(Node):
     def _publish_initial_pose_when_ready(self) -> None:
         if self._initial_pose_repeats <= 0:
             return
-        self._initial_pose_repeats -= 1
         if self._initial_pose_pub.get_subscription_count() <= 0:
+            return
+        if not self._amcl_state_client.service_is_ready():
+            return
+        if self._amcl_state_future is None:
+            self._amcl_state_future = self._amcl_state_client.call_async(GetState.Request())
+            return
+        if not self._amcl_state_future.done():
+            return
+        response = self._amcl_state_future.result()
+        self._amcl_state_future = None
+        if response is None or response.current_state.id != State.PRIMARY_STATE_ACTIVE:
             return
         self._publish_initial_pose()
         self._initial_pose_repeats = 0
