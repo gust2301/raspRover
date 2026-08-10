@@ -12,6 +12,7 @@ ExecStart=/usr/bin/docker run --rm --name ros2-lidar \
   --device=/dev/ttyUSB0 \
   --network=host \
   --volume=rasprover-maps:/maps \
+  --env=FASTDDS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml \
   ros2-lidar \
   ros2 launch rplidar_ros rplidar.launch.py
 ExecStop=/usr/bin/docker stop -t 10 ros2-lidar

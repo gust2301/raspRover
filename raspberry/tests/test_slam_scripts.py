@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -27,6 +28,17 @@ def test_lidar_service_mounts_persistent_map_volume():
     service = (Path(__file__).parents[1] / "ros2-lidar.service").read_text()
 
     assert "--volume=rasprover-maps:/maps" in service
+    assert "FASTDDS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml" in service
+
+
+def test_fastdds_profile_disables_shm_and_keeps_udp_transport():
+    profile = Path(__file__).parents[1] / "ros" / "fastdds_udp_only.xml"
+    root = ET.parse(profile).getroot()
+    xml = ET.tostring(root, encoding="unicode")
+
+    assert "UDPv4" in xml
+    assert "<ns0:useBuiltinTransports>false</ns0:useBuiltinTransports>" in xml
+    assert "SHM" not in xml
 
 
 def test_navigation_starts_nav2_with_selected_persistent_map():
