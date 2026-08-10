@@ -103,6 +103,11 @@ class Nav2MotorBridge:
                 log.warning("Commande moteur Nav2 UDP invalide")
                 continue
             self._last_command = time.monotonic()
-            self._received_command = True
+            # Nav2 peut publier un zéro, puis rester silencieux pendant que le
+            # planificateur prépare le premier trajet. Ne démarre le watchdog
+            # qu'au premier mouvement réel, sinon la mission est désarmée avant
+            # que sa première commande non nulle atteigne les moteurs.
+            if abs(left) > 1e-6 or abs(right) > 1e-6:
+                self._received_command = True
             stopped_for_timeout = False
             self._drive(left, right)

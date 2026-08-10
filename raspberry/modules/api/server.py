@@ -1051,9 +1051,7 @@ async def slam_maps() -> dict:
 @app.get("/api/slam/pose")
 async def slam_pose() -> dict:
     loop = asyncio.get_running_loop()
-    pose = await loop.run_in_executor(
-        None, lambda: _read_container_json("/tmp/current_pose.json")
-    )
+    pose = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json"))
     if pose is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Pose indisponible"})
     return {"ok": True, **pose}
@@ -1237,10 +1235,13 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
                 timeout=15.0,
             ),
         )
-        verified = subprocess.run(
-            ["docker", "exec", _slam_container, "test", "-s", f"{map_name}.yaml"],
-            capture_output=True,
-        ).returncode == 0
+        verified = (
+            subprocess.run(
+                ["docker", "exec", _slam_container, "test", "-s", f"{map_name}.yaml"],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
         ok = result.returncode == 0 and verified
         response = {
             "ok": ok,
@@ -1267,10 +1268,12 @@ async def slam_load(body: dict[str, Any]) -> dict:
     yaml_path = f"/maps/{safe_name}.yaml"
     exists = await loop.run_in_executor(
         None,
-        lambda: subprocess.run(
-            ["docker", "exec", _slam_container, "test", "-s", yaml_path], capture_output=True
-        ).returncode
-        == 0,
+        lambda: (
+            subprocess.run(
+                ["docker", "exec", _slam_container, "test", "-s", yaml_path], capture_output=True
+            ).returncode
+            == 0
+        ),
     )
     if not exists:
         return JSONResponse(status_code=404, content={"ok": False, "error": "Carte inconnue"})
@@ -1341,9 +1344,7 @@ async def slam_load(body: dict[str, Any]) -> dict:
         navigation, mapping, bridge_status = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
-            loop.run_in_executor(
-                None, lambda: _read_container_json("/tmp/nav2_status.json")
-            ),
+            loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
         )
         bridge_ready = (
             bridge_status is not None
@@ -1378,7 +1379,10 @@ async def slam_load(body: dict[str, Any]) -> dict:
     if not localized:
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": "AMCL actif mais transformation map → base_link absente"},
+            content={
+                "ok": False,
+                "error": "AMCL actif mais transformation map → base_link absente",
+            },
         )
     return {"ok": True, "mode": "navigation", "map": safe_name}
 
@@ -1426,9 +1430,7 @@ async def nav2_patrol_start(body: dict[str, Any]) -> dict:
         return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
     raw_waypoints = body.get("waypoints")
     if not isinstance(raw_waypoints, list) or not 1 <= len(raw_waypoints) <= 50:
-        return JSONResponse(
-            status_code=400, content={"ok": False, "error": "1 à 50 points requis"}
-        )
+        return JSONResponse(status_code=400, content={"ok": False, "error": "1 à 50 points requis"})
     waypoints: list[dict[str, float]] = []
     try:
         for item in raw_waypoints:
@@ -1493,9 +1495,7 @@ async def nav2_patrol_stop() -> dict:
 @app.get("/api/nav2/patrol/status")
 async def nav2_patrol_status() -> dict:
     loop = asyncio.get_running_loop()
-    status = await loop.run_in_executor(
-        None, lambda: _read_container_json("/tmp/nav2_status.json")
-    )
+    status = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json"))
     return {
         "ok": status is not None,
         "authorized": bool(_nav2_motors and _nav2_motors.enabled),

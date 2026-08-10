@@ -63,6 +63,32 @@ def test_nav2_motor_bridge_stops_after_command_timeout():
         bridge.close()
 
 
+def test_nav2_motor_bridge_waits_for_first_real_command_before_timeout():
+    commands: list[tuple[float, float]] = []
+    motor_port = _free_udp_port()
+    bridge = Nav2MotorBridge(
+        lambda left, right: commands.append((left, right)),
+        lambda: None,
+        motor_port=motor_port,
+        command_port=_free_udp_port(),
+        timeout_s=0.1,
+    )
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        bridge.enable()
+        sender.sendto(b'{"left":0.0,"right":0.0}', ("127.0.0.1", motor_port))
+        time.sleep(0.25)
+
+        assert bridge.enabled is True
+
+        sender.sendto(b'{"left":-0.2,"right":-0.2}', ("127.0.0.1", motor_port))
+        time.sleep(0.15)
+        assert (-0.2, -0.2) in commands
+    finally:
+        sender.close()
+        bridge.close()
+
+
 def test_nav2_motor_bridge_sends_initial_pose_to_ros_bridge():
     motor_port = _free_udp_port()
     command_port = _free_udp_port()
