@@ -10,10 +10,11 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 
 class Nav2Bridge(Node):
@@ -32,6 +33,12 @@ class Nav2Bridge(Node):
         self._command_socket.bind(("127.0.0.1", int(self.get_parameter("command_udp_port").value)))
         self._command_socket.setblocking(False)
         self._client = ActionClient(self, FollowWaypoints, "/follow_waypoints")
+        initial_pose_qos = QoSProfile(depth=1)
+        initial_pose_qos.reliability = ReliabilityPolicy.RELIABLE
+        initial_pose_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self._initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "/initialpose", initial_pose_qos
+        )
         self._goal_handle = None
         self._status = {"state": "idle", "current_waypoint": None, "updated_at": time.time()}
 
@@ -58,10 +65,29 @@ class Nav2Bridge(Node):
                 action = command.get("action")
                 if action == "follow_waypoints":
                     self._follow(command.get("waypoints", []))
+                elif action == "set_initial_pose":
+                    self._set_initial_pose(command.get("pose", {}))
                 elif action == "cancel":
                     self._cancel()
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 self.get_logger().warning(f"Commande Nav2 invalide: {exc}")
+
+    def _set_initial_pose(self, value: dict) -> None:
+        x = float(value.get("x", 0.0))
+        y = float(value.get("y", 0.0))
+        yaw = float(value.get("yaw", 0.0))
+        message = PoseWithCovarianceStamped()
+        message.header.frame_id = "map"
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.pose.pose.position.x = x
+        message.pose.pose.position.y = y
+        message.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        message.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        message.pose.covariance[0] = 0.25
+        message.pose.covariance[7] = 0.25
+        message.pose.covariance[35] = 0.068
+        self._initial_pose_pub.publish(message)
+        self.get_logger().info(f"Pose initiale publiée: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
 
     def _follow(self, waypoints: list[dict]) -> None:
         if not waypoints:

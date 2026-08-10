@@ -960,72 +960,6 @@ def _active_map_name() -> str | None:
         return None
 
 
-def _publish_initial_pose(value: object) -> bool:
-    pose = value if isinstance(value, dict) else {}
-    try:
-        x = float(pose.get("x", 0.0))
-        y = float(pose.get("y", 0.0))
-        yaw = float(pose.get("yaw", 0.0))
-    except (TypeError, ValueError):
-        return False
-    if not all(math.isfinite(item) for item in (x, y, yaw)):
-        return False
-    z = math.sin(yaw / 2.0)
-    w = math.cos(yaw / 2.0)
-    message = (
-        "{header: {frame_id: map}, pose: {pose: {position: "
-        f"{{x: {x}, y: {y}, z: 0.0}}, orientation: {{z: {z}, w: {w}}}}}, "
-        "covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, "
-        "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "
-        "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}"
-    )
-    published = False
-    for _attempt in range(3):
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                _slam_container,
-                "bash",
-                "-c",
-                "source /opt/ros/jazzy/setup.bash && "
-                "ros2 topic pub --once /initialpose "
-                f"geometry_msgs/msg/PoseWithCovarianceStamped '{message}'",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=8.0,
-        )
-        published = published or result.returncode == 0
-        time.sleep(0.4)
-    return published
-
-
-def _topic_has_subscription(topic: str) -> bool:
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                _slam_container,
-                "bash",
-                "-c",
-                f"source /opt/ros/jazzy/setup.bash && ros2 topic info {topic}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=4.0,
-        )
-        if result.returncode != 0:
-            return False
-        for line in result.stdout.splitlines():
-            if line.strip().startswith("Subscription count:"):
-                return int(line.rsplit(":", 1)[1].strip()) > 0
-        return False
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return False
-
-
 def _stop_ros_navigation_processes() -> bool:
     subprocess.run(
         [
@@ -1327,6 +1261,8 @@ async def slam_load(body: dict[str, Any]) -> dict:
     safe_name = validate_map_name(body.get("name", ""))
     if safe_name is None:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
+    if _nav2_motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Pont Nav2 absent"})
     loop = asyncio.get_running_loop()
     yaml_path = f"/maps/{safe_name}.yaml"
     exists = await loop.run_in_executor(
@@ -1380,32 +1316,38 @@ async def slam_load(body: dict[str, Any]) -> dict:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    initial_pose_ready = False
+    navigation_started = False
     for _attempt in range(40):
         navigation, mapping = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
         )
-        if navigation and not mapping and await loop.run_in_executor(
-            None, lambda: _topic_has_subscription("/initialpose")
-        ):
-            initial_pose_ready = True
+        if navigation and not mapping:
+            navigation_started = True
             break
         await asyncio.sleep(0.5)
-    if not initial_pose_ready:
+    if not navigation_started:
         error = await loop.run_in_executor(
             None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
         )
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": error or "Subscriber AMCL initialpose absent"},
+            content={"ok": False, "error": error or "Nav2 non démarré"},
         )
     initial_pose = body.get("initial_pose", {})
-    published = await loop.run_in_executor(None, lambda: _publish_initial_pose(initial_pose))
-    if not published:
+    try:
+        pose_values = {
+            "x": float(initial_pose.get("x", 0.0)),
+            "y": float(initial_pose.get("y", 0.0)),
+            "yaw": float(initial_pose.get("yaw", 0.0)),
+        }
+        if not all(math.isfinite(value) for value in pose_values.values()):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
         return JSONResponse(
-            status_code=500, content={"ok": False, "error": "Pose initiale non publiée"}
+            status_code=400, content={"ok": False, "error": "Pose initiale invalide"}
         )
+    await loop.run_in_executor(None, lambda: _nav2_motors.set_initial_pose(pose_values))
     localized = False
     for _attempt in range(30):
         pose = await loop.run_in_executor(

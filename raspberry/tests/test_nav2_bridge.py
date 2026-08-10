@@ -61,3 +61,27 @@ def test_nav2_motor_bridge_stops_after_command_timeout():
         assert bridge.enabled is False
     finally:
         bridge.close()
+
+
+def test_nav2_motor_bridge_sends_initial_pose_to_ros_bridge():
+    motor_port = _free_udp_port()
+    command_port = _free_udp_port()
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", command_port))
+    receiver.settimeout(1.0)
+    bridge = Nav2MotorBridge(
+        lambda _left, _right: None,
+        lambda: None,
+        motor_port=motor_port,
+        command_port=command_port,
+    )
+    try:
+        bridge.set_initial_pose({"x": 1.2, "y": -0.4, "yaw": 0.75})
+        payload, _address = receiver.recvfrom(4096)
+        assert json.loads(payload) == {
+            "action": "set_initial_pose",
+            "pose": {"x": 1.2, "y": -0.4, "yaw": 0.75},
+        }
+    finally:
+        receiver.close()
+        bridge.close()

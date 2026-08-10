@@ -56,6 +56,13 @@ class Nav2MotorBridge:
         self.enable()
         self._send_command({"action": "follow_waypoints", "waypoints": waypoints})
 
+    def set_initial_pose(self, pose: dict[str, float]) -> None:
+        """Send the localization seed repeatedly while the ROS bridge starts."""
+        payload = {"action": "set_initial_pose", "pose": pose}
+        for _attempt in range(3):
+            self._send_command(payload)
+            time.sleep(0.2)
+
     def cancel(self) -> None:
         self._send_command({"action": "cancel"})
         self.disable()
