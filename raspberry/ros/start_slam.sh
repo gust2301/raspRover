@@ -14,6 +14,8 @@ trap cleanup EXIT INT TERM
 # Nettoie les auxiliaires orphelins d'un lancement précédent interrompu.
 pkill -f '[c]ommand_odometry.py' 2>/dev/null || true
 pkill -f '[m]ap_writer.py' 2>/dev/null || true
+pkill -f '[p]ose_writer.py' 2>/dev/null || true
+rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json
 
 python3 /opt/rasprover/command_odometry.py --ros-args \
   -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
@@ -26,6 +28,9 @@ ODOM_PID=$!
 
 python3 /opt/rasprover/map_writer.py &
 MAP_WRITER_PID=$!
+
+python3 /opt/rasprover/pose_writer.py &
+POSE_WRITER_PID=$!
 
 ros2 run slam_toolbox async_slam_toolbox_node --ros-args \
   --params-file /opt/rasprover/slam_toolbox.yaml &
@@ -55,4 +60,4 @@ ros2 lifecycle set /slam_toolbox configure
 ros2 lifecycle set /slam_toolbox activate
 echo "slam_toolbox configuré et actif"
 
-wait -n "${ODOM_PID}" "${MAP_WRITER_PID}" "${SLAM_PID}"
+wait -n "${ODOM_PID}" "${MAP_WRITER_PID}" "${POSE_WRITER_PID}" "${SLAM_PID}"

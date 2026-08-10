@@ -192,6 +192,7 @@ class PatrolController:
         self._last_turn_dir = None  # Direction | None — conservé entre évitements
         self._last_record_ts: float = 0.0  # timestamp du dernier auto-enregistrement
         self._last_human_capture_ts: float = 0.0  # timestamp de la dernière capture humaine
+        self._human_detection_latched = False
         self._last_decision: str = "idle"
         self._last_decision_reason: str = ""
         self._maneuver_action: AvoidanceAction | None = None
@@ -235,6 +236,7 @@ class PatrolController:
         self._last_turn_dir = None
         self._last_record_ts = 0.0
         self._last_human_capture_ts = 0.0
+        self._human_detection_latched = False
         self._maneuver_action = None
         self._forced_turn = None
         self._forced_turn_until = 0.0
@@ -570,12 +572,11 @@ class PatrolController:
         """
         while True:
             await asyncio.sleep(_HUMAN_POLL)
-            if not self._human_detector or not self._human_detector.person_detected:
+            if not self._human_detector:
                 continue
             now = time.monotonic()
-            if now - self._last_human_capture_ts < _HUMAN_CAPTURE_COOLDOWN:
+            if not self._should_capture_human(self._human_detector.person_detected, now):
                 continue
-            self._last_human_capture_ts = now
             incident_id = -1
             if self._on_incident:
                 try:
@@ -588,6 +589,19 @@ class PatrolController:
                     log.warning("Patrol human incident error: %s", exc)
             self._trigger_human_capture(incident_id)
             log.info("Patrol: personne détectée → photo déclenchée (incident=%d)", incident_id)
+
+    def _should_capture_human(self, detected: bool, now: float) -> bool:
+        """Capture once per encounter, with a cooldown between distinct encounters."""
+        if not detected:
+            self._human_detection_latched = False
+            return False
+        if self._human_detection_latched:
+            return False
+        self._human_detection_latched = True
+        if now - self._last_human_capture_ts < _HUMAN_CAPTURE_COOLDOWN:
+            return False
+        self._last_human_capture_ts = now
+        return True
 
     def _trigger_human_capture(self, incident_id: int) -> None:
         """Déclenche une capture photo de la personne détectée."""

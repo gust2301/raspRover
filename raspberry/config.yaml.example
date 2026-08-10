@@ -98,6 +98,8 @@ slam:
   # sur place et ajuster jusqu'a ce que l'orientation odometrique soit proche de 360°.
   wheel_separation_m: 0.18
   odometry_udp_port: 7667
+  nav2_motor_udp_port: 7668
+  nav2_command_udp_port: 7669
   # Pose physique du centre optique LIDAR par rapport au centre du chassis.
   laser_x_m: 0.0
   laser_y_m: 0.0

@@ -9,7 +9,6 @@ import json
 import logging
 import math
 import pathlib
-import re
 import struct
 import subprocess
 import time
@@ -28,9 +27,11 @@ from modules.control import ESP32Link, LightController, MotorController, PanTilt
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
+from modules.control.nav2 import Nav2MotorBridge
 from modules.control.odometry import OdometryCommandPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
+from modules.map_names import normalize_map_name, validate_map_name
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
 from modules.sensors.lidar import LidarPoint, LidarSnapshot
@@ -73,6 +74,7 @@ _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
 _odometry_commands: OdometryCommandPublisher | None = None
+_nav2_motors: Nav2MotorBridge | None = None
 
 
 def _load_config() -> dict:
@@ -161,7 +163,8 @@ async def lifespan(app: FastAPI):
         _human_detector, \
         _tracker, \
         _rover_name, \
-        _odometry_commands
+        _odometry_commands, \
+        _nav2_motors
 
     global _mixer
     cfg = _load_config()
@@ -187,6 +190,12 @@ async def lifespan(app: FastAPI):
             max_speed=ctrl.get("motor_max_speed", 0.5),
             default_speed=ctrl.get("motor_default_speed", 0.35),
             command_observer=_odometry_commands.publish,
+        )
+        _nav2_motors = Nav2MotorBridge(
+            _motors.drive,
+            _motors.stop,
+            motor_port=int(slam_cfg.get("nav2_motor_udp_port", 7668)),
+            command_port=int(slam_cfg.get("nav2_command_udp_port", 7669)),
         )
         _pantilt = PanTiltController(
             _link,
@@ -368,6 +377,9 @@ async def lifespan(app: FastAPI):
         _lidar.stop()
     if _lidar_ros:
         _lidar_ros.stop()
+    if _nav2_motors:
+        _nav2_motors.close()
+        _nav2_motors = None
     if _motors:
         _motors.shutdown()
     if _odometry_commands:
@@ -564,6 +576,9 @@ def _system_status() -> dict:
     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
     light_state = _lights.state if _lights else {"camera_light": False}
     patrol_data = _patrol.to_dict() if _patrol else {"patrol_active": False, "patrol_state": "idle"}
+    nav2_active = bool(_nav2_motors and _nav2_motors.enabled)
+    if nav2_active:
+        patrol_data = {**patrol_data, "patrol_active": True, "patrol_state": "nav2"}
     tracker_data = _tracker.to_dict() if _tracker else {"tracker_active": False}
     human_data = _human_detector.to_dict() if _human_detector else {}
     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
@@ -577,6 +592,7 @@ def _system_status() -> dict:
     return {
         "esp32_connected": bool(_link and _link.is_open),
         "control_available": _motors is not None,
+        "nav2_active": nav2_active,
         "pan": pan,
         "tilt": tilt,
         **light_state,
@@ -629,6 +645,8 @@ async def video_stream() -> StreamingResponse:
 async def motors_move(body: dict[str, Any]) -> dict:
     if _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
+    if _nav2_motors and _nav2_motors.enabled:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 actif"})
     direction_str = body.get("direction", "forward")
     speed = body.get("speed")
     speed_f = float(speed) if speed is not None else None
@@ -652,6 +670,8 @@ async def motors_stop() -> dict:
     if _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
     loop = asyncio.get_running_loop()
+    if _nav2_motors and _nav2_motors.enabled:
+        await loop.run_in_executor(None, _nav2_motors.cancel)
     await loop.run_in_executor(None, _motors.stop)
     return {"ok": True}
 
@@ -842,6 +862,134 @@ def _slam_running() -> bool:
     return r.returncode == 0
 
 
+def _nav2_running() -> bool:
+    result = subprocess.run(
+        ["docker", "exec", _slam_container, "pgrep", "-f", "bt_navigator"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _saved_maps() -> list[dict[str, Any]]:
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            _slam_container,
+            "find",
+            "/maps",
+            "-maxdepth",
+            "1",
+            "-type",
+            "f",
+            "-name",
+            "*.yaml",
+            "-printf",
+            "%f|%T@|%s\\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5.0,
+    )
+    if result.returncode != 0:
+        return []
+    maps = []
+    for line in result.stdout.splitlines():
+        try:
+            filename, modified, size = line.split("|", 2)
+            maps.append(
+                {
+                    "name": filename.removesuffix(".yaml"),
+                    "yaml": f"/maps/{filename}",
+                    "modified_at": float(modified),
+                    "size_bytes": int(size),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return sorted(maps, key=lambda item: item["modified_at"], reverse=True)
+
+
+def _read_container_json(path: str) -> dict | None:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", _slam_container, "cat", path],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        value = json.loads(result.stdout) if result.returncode == 0 else None
+        return value if isinstance(value, dict) else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+
+
+def _read_process_log(path: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", _slam_container, "tail", "-n", "40", path],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        output = result.stdout.strip()
+        return output[-5000:] if result.returncode == 0 and output else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _publish_initial_pose(value: object) -> bool:
+    pose = value if isinstance(value, dict) else {}
+    try:
+        x = float(pose.get("x", 0.0))
+        y = float(pose.get("y", 0.0))
+        yaw = float(pose.get("yaw", 0.0))
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(item) for item in (x, y, yaw)):
+        return False
+    z = math.sin(yaw / 2.0)
+    w = math.cos(yaw / 2.0)
+    message = (
+        "{header: {frame_id: map}, pose: {pose: {position: "
+        f"{{x: {x}, y: {y}, z: 0.0}}, orientation: {{z: {z}, w: {w}}}}}, "
+        "covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, "
+        "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "
+        "0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}"
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            _slam_container,
+            "bash",
+            "-c",
+            "source /opt/ros/jazzy/setup.bash && "
+            f"ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped '{message}'",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8.0,
+    )
+    return result.returncode == 0
+
+
+def _stop_ros_navigation_processes() -> None:
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            _slam_container,
+            "bash",
+            "-c",
+            "pkill -f '[s]tart_navigation.sh|[b]t_navigator|[a]sync_slam_toolbox_node|"
+            "[m]ap_writer.py|[p]ose_writer.py|[n]av2_bridge.py|[c]ommand_odometry.py' || true",
+        ],
+        capture_output=True,
+        timeout=10.0,
+    )
+
+
 def _slam_topics() -> set[str]:
     """Retourne les topics ROS visibles, sans faire échouer le statut API."""
     try:
@@ -880,20 +1028,44 @@ def _slam_log_tail() -> str | None:
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
     loop = asyncio.get_running_loop()
-    running, topics, slam_log, current_map = await asyncio.gather(
+    running, navigation, topics, slam_log, current_map, pose = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
+        loop.run_in_executor(None, _nav2_running),
         loop.run_in_executor(None, _slam_topics),
         loop.run_in_executor(None, _slam_log_tail),
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
     )
     required = {"/scan", "/odom", "/map"}
     return {
-        "running": running,
-        "ready": running and required.issubset(topics) and current_map is not None,
+        "running": running or navigation,
+        "mode": "mapping" if running else "navigation" if navigation else "stopped",
+        "ready": (running or navigation) and required.issubset(topics) and current_map is not None,
         "container": _slam_container,
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
-        "error": None if running else slam_log,
+        "error": None if running or navigation else slam_log,
+        "pose": pose,
     }
+
+
+@app.get("/api/slam/maps")
+async def slam_maps() -> dict:
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, lambda: _docker_running(_slam_container)):
+        return JSONResponse(status_code=503, content={"ok": False, "error": "container absent"})
+    maps = await loop.run_in_executor(None, _saved_maps)
+    return {"ok": True, "maps": maps}
+
+
+@app.get("/api/slam/pose")
+async def slam_pose() -> dict:
+    loop = asyncio.get_running_loop()
+    pose = await loop.run_in_executor(
+        None, lambda: _read_container_json("/tmp/current_pose.json")
+    )
+    if pose is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Pose indisponible"})
+    return {"ok": True, **pose}
 
 
 @app.post("/api/slam/start")
@@ -923,6 +1095,7 @@ async def slam_start() -> dict:
         f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
     ]
     try:
+        await loop.run_in_executor(None, _stop_ros_navigation_processes)
         await loop.run_in_executor(
             None,
             lambda: subprocess.Popen(
@@ -960,37 +1133,9 @@ async def slam_start() -> dict:
 async def slam_stop() -> dict:
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["docker", "exec", _slam_container, "pkill", "-f", "async_slam_toolbox_node"],
-                capture_output=True,
-                timeout=10.0,
-            ),
-        )
-        await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["docker", "exec", _slam_container, "pkill", "-f", "map_writer"],
-                capture_output=True,
-                timeout=5.0,
-            ),
-        )
-        await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    _slam_container,
-                    "bash",
-                    "-c",
-                    "pkill -f '[c]ommand_odometry.py' || true",
-                ],
-                capture_output=True,
-                timeout=5.0,
-            ),
-        )
+        if _nav2_motors:
+            await loop.run_in_executor(None, _nav2_motors.cancel)
+        await loop.run_in_executor(None, _stop_ros_navigation_processes)
         return {"ok": True, "running": False}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
@@ -1000,8 +1145,11 @@ async def slam_stop() -> dict:
 async def slam_map() -> dict:
     """Retourne la carte SLAM courante en PNG base64."""
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, _slam_running):
-        return JSONResponse(status_code=503, content={"error": "SLAM non actif"})
+    mapping, navigation = await asyncio.gather(
+        loop.run_in_executor(None, _slam_running), loop.run_in_executor(None, _nav2_running)
+    )
+    if not mapping and not navigation:
+        return JSONResponse(status_code=503, content={"error": "Cartographie non active"})
 
     msg = await loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container))
     if msg is None:
@@ -1033,15 +1181,14 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
     if not await loop.run_in_executor(None, _slam_running):
         return JSONResponse(status_code=503, content={"ok": False, "error": "SLAM non actif"})
 
-    requested_name = str((body or {}).get("name", "rasprover_map"))
-    safe_name = pathlib.Path(requested_name).name
-    valid_path = requested_name in {safe_name, f"/tmp/{safe_name}"}
-    if not valid_path or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", safe_name) is None:
+    requested_name = (body or {}).get("name", "rasprover_map")
+    safe_name = normalize_map_name(requested_name)
+    if safe_name is None:
         return JSONResponse(
             status_code=400,
             content={"ok": False, "error": "Nom de carte invalide"},
         )
-    map_name = f"/tmp/{safe_name}"
+    map_name = f"/maps/{safe_name}"
     try:
         result = await loop.run_in_executor(
             None,
@@ -1061,10 +1208,89 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
                 timeout=15.0,
             ),
         )
-        ok = result.returncode == 0
-        return {"ok": ok, "map_name": map_name, "output": result.stdout.strip()}
+        verified = subprocess.run(
+            ["docker", "exec", _slam_container, "test", "-s", f"{map_name}.yaml"],
+            capture_output=True,
+        ).returncode == 0
+        ok = result.returncode == 0 and verified
+        response = {
+            "ok": ok,
+            "name": safe_name,
+            "requested_name": str(requested_name),
+            "map_name": map_name,
+        }
+        if not ok:
+            response["error"] = result.stderr.strip() or result.stdout.strip() or "Fichiers absents"
+        return response
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.post("/api/slam/load")
+async def slam_load(body: dict[str, Any]) -> dict:
+    """Load a persistent map and start AMCL + Nav2 localization."""
+    safe_name = validate_map_name(body.get("name", ""))
+    if safe_name is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
+    loop = asyncio.get_running_loop()
+    yaml_path = f"/maps/{safe_name}.yaml"
+    exists = await loop.run_in_executor(
+        None,
+        lambda: subprocess.run(
+            ["docker", "exec", _slam_container, "test", "-s", yaml_path], capture_output=True
+        ).returncode
+        == 0,
+    )
+    if not exists:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Carte inconnue"})
+
+    cfg = _load_config().get("slam", {})
+    environment = [
+        "-e",
+        f"RASPROVER_MAP_YAML={yaml_path}",
+        "-e",
+        f"RASPROVER_MAX_SPEED_M_S={float(cfg.get('max_linear_speed_m_s', 0.65))}",
+        "-e",
+        f"RASPROVER_WHEEL_SEPARATION_M={float(cfg.get('wheel_separation_m', 0.18))}",
+        "-e",
+        f"RASPROVER_LASER_X_M={float(cfg.get('laser_x_m', 0.0))}",
+        "-e",
+        f"RASPROVER_LASER_Y_M={float(cfg.get('laser_y_m', 0.0))}",
+        "-e",
+        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 140.0))}",
+        "-e",
+        f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
+        "-e",
+        f"RASPROVER_NAV2_MOTOR_UDP_PORT={int(cfg.get('nav2_motor_udp_port', 7668))}",
+        "-e",
+        f"RASPROVER_NAV2_COMMAND_UDP_PORT={int(cfg.get('nav2_command_udp_port', 7669))}",
+    ]
+    await loop.run_in_executor(None, _stop_ros_navigation_processes)
+    subprocess.Popen(
+        [
+            "docker",
+            "exec",
+            "-d",
+            *environment,
+            _slam_container,
+            "bash",
+            "-c",
+            "/opt/rasprover/start_navigation.sh >/tmp/rasprover_navigation.log 2>&1",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    await asyncio.sleep(3.0)
+    if not await loop.run_in_executor(None, _nav2_running):
+        error = await loop.run_in_executor(
+            None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
+        )
+        return JSONResponse(
+            status_code=500, content={"ok": False, "error": error or "Nav2 non démarré"}
+        )
+    initial_pose = body.get("initial_pose", {})
+    await loop.run_in_executor(None, lambda: _publish_initial_pose(initial_pose))
+    return {"ok": True, "mode": "navigation", "map": safe_name}
 
 
 # ---------------------------------------------------------------------------
@@ -1078,6 +1304,8 @@ async def patrol_start() -> dict:
     if _patrol is None or _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
     loop = asyncio.get_running_loop()
+    if _nav2_motors and _nav2_motors.enabled:
+        await loop.run_in_executor(None, _nav2_motors.cancel)
     await _patrol.start(loop)
     return {"ok": True, **_patrol.to_dict()}
 
@@ -1097,6 +1325,62 @@ async def patrol_status() -> dict:
     if _patrol is None:
         return {"patrol_active": False, "patrol_state": "idle"}
     return _patrol.to_dict()
+
+
+@app.post("/api/nav2/patrol/start")
+async def nav2_patrol_start(body: dict[str, Any]) -> dict:
+    if _nav2_motors is None or _motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _nav2_running):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
+    raw_waypoints = body.get("waypoints")
+    if not isinstance(raw_waypoints, list) or not 1 <= len(raw_waypoints) <= 50:
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "1 à 50 points requis"}
+        )
+    waypoints: list[dict[str, float]] = []
+    try:
+        for item in raw_waypoints:
+            if not isinstance(item, dict):
+                raise TypeError
+            waypoint = {
+                "x": float(item["x"]),
+                "y": float(item["y"]),
+                "yaw": float(item.get("yaw", 0.0)),
+            }
+            if not all(math.isfinite(value) for value in waypoint.values()):
+                raise ValueError
+            waypoints.append(waypoint)
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Points invalides"})
+
+    if _patrol and _patrol.active:
+        await _patrol.stop(loop)
+    await loop.run_in_executor(None, lambda: _nav2_motors.follow_waypoints(waypoints))
+    return {"ok": True, "state": "starting", "waypoint_count": len(waypoints)}
+
+
+@app.post("/api/nav2/patrol/stop")
+async def nav2_patrol_stop() -> dict:
+    if _nav2_motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Nav2 indisponible"})
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _nav2_motors.cancel)
+    return {"ok": True, "state": "cancelled"}
+
+
+@app.get("/api/nav2/patrol/status")
+async def nav2_patrol_status() -> dict:
+    loop = asyncio.get_running_loop()
+    status = await loop.run_in_executor(
+        None, lambda: _read_container_json("/tmp/nav2_status.json")
+    )
+    return {
+        "ok": status is not None,
+        "authorized": bool(_nav2_motors and _nav2_motors.enabled),
+        **(status or {"state": "unavailable"}),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1313,7 +1597,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "message": "not ready"})
                     continue
                 # Patrouille active → ignore les commandes manuelles
-                if _patrol and _patrol.active:
+                if (_patrol and _patrol.active) or (_nav2_motors and _nav2_motors.enabled):
                     await ws.send_json(
                         {"type": "error", "message": "Patrouille active — arrête-la d'abord"}
                     )
@@ -1362,7 +1646,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "message": str(exc)})
 
             elif msg_type == "stop":
-                if _motors:
+                if _motors and not (_nav2_motors and _nav2_motors.enabled):
                     await loop.run_in_executor(None, _motors.stop)
 
             elif msg_type == "obstacle_override":
@@ -1532,7 +1816,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         _manager.disconnect(ws)
-        if _motors:
+        autonomous = (_patrol and _patrol.active) or (_nav2_motors and _nav2_motors.enabled)
+        if _motors and not autonomous:
             try:
                 await loop.run_in_executor(None, _motors.stop)
             except Exception:  # noqa: BLE001

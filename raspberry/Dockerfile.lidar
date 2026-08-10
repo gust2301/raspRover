@@ -1,10 +1,11 @@
 FROM ros:jazzy-ros-base
 
-# Install RPLIDAR driver + SLAM toolbox + map server in a single layer
+# Install RPLIDAR, SLAM toolbox and the Nav2 runtime in a single layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-rplidar-ros \
     ros-jazzy-slam-toolbox \
-    ros-jazzy-nav2-map-server \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
     && rm -rf /var/lib/apt/lists/*
 
 # Source ROS on every exec (needed for docker exec ros2 ... calls)
@@ -12,7 +13,7 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
 
 COPY map_writer.py /opt/rasprover/map_writer.py
 COPY ros/ /opt/rasprover/
-RUN chmod +x /opt/rasprover/start_slam.sh
+RUN chmod +x /opt/rasprover/start_slam.sh /opt/rasprover/start_navigation.sh
 
 SHELL ["/bin/bash", "-c"]
 ENTRYPOINT ["/ros_entrypoint.sh"]

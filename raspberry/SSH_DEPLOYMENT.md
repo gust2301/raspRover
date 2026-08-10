@@ -121,7 +121,7 @@ Les alias disponibles sont :
 
 ## 4. Déploiement quotidien
 
-Après avoir poussé du code sur `origin/master`, se connecter à la Pi :
+Après avoir poussé du code sur la branche à tester, se connecter à la Pi :
 
 ```bash
 ssh ws@192.168.1.24
@@ -133,6 +133,26 @@ Puis lancer :
 deploy
 ```
 
+Par défaut, `deploy` met à jour la branche déjà active. Lors du premier passage
+depuis une ancienne version du script, récupérer et activer manuellement la
+branche :
+
+```bash
+cd ~/raspRover
+git fetch origin codex/nav2-persistent-maps
+git switch --track -c codex/nav2-persistent-maps origin/codex/nav2-persistent-maps
+deploy
+```
+
+Pour les déploiements suivants, préciser directement la branche :
+
+```bash
+deploy codex/nav2-persistent-maps
+```
+
+Le script refuse de changer de branche si le dépôt contient des modifications
+locales. Pour revenir à la version stable : `deploy master`.
+
 Sans alias :
 
 ```bash
@@ -141,7 +161,7 @@ bash ~/raspRover/raspberry/scripts/deploy.sh
 
 Le script effectue automatiquement :
 
-1. `git pull origin master` ;
+1. récupération et mise à jour en avance rapide de la branche demandée ;
 2. la mise à jour des dépendances Python ;
 3. l'installation d'OpenCV système si nécessaire ;
 4. la reconstruction de `ros2-lidar` si Docker, ROS ou SLAM ont changé ;

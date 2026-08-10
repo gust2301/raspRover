@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pull the latest code and restart only what changed.
-# Usage (on the Pi): bash ~/raspRover/raspberry/scripts/deploy.sh
+# Usage (on the Pi): bash ~/raspRover/raspberry/scripts/deploy.sh [branch]
 set -euo pipefail
 
 CURRENT_USER="$(logname 2>/dev/null || whoami)"
@@ -9,8 +9,19 @@ RASPBERRY_DIR="${REPO_DIR}/raspberry"
 VENV="${RASPBERRY_DIR}/.venv"
 
 echo "==> Mise à jour du code..."
+BRANCH="${1:-$(git -C "${REPO_DIR}" branch --show-current)}"
+if [ -n "$(git -C "${REPO_DIR}" status --porcelain)" ]; then
+  echo "Le dépôt contient des modifications locales. Déploiement annulé." >&2
+  exit 1
+fi
 BEFORE=$(git -C "${REPO_DIR}" rev-parse HEAD)
-git -C "${REPO_DIR}" pull origin master
+git -C "${REPO_DIR}" fetch origin "${BRANCH}"
+if git -C "${REPO_DIR}" show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+  git -C "${REPO_DIR}" switch "${BRANCH}"
+else
+  git -C "${REPO_DIR}" switch --track -c "${BRANCH}" "origin/${BRANCH}"
+fi
+git -C "${REPO_DIR}" pull --ff-only origin "${BRANCH}"
 AFTER=$(git -C "${REPO_DIR}" rev-parse HEAD)
 
 echo "==> Mise à jour des dépendances Python..."
