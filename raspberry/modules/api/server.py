@@ -1318,11 +1318,18 @@ async def slam_load(body: dict[str, Any]) -> dict:
     )
     navigation_started = False
     for _attempt in range(40):
-        navigation, mapping = await asyncio.gather(
+        navigation, mapping, bridge_status = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
+            loop.run_in_executor(
+                None, lambda: _read_container_json("/tmp/nav2_status.json")
+            ),
         )
-        if navigation and not mapping:
+        bridge_ready = (
+            bridge_status is not None
+            and time.time() - float(bridge_status.get("updated_at", 0.0)) <= 2.0
+        )
+        if navigation and not mapping and bridge_ready:
             navigation_started = True
             break
         await asyncio.sleep(0.5)
@@ -1332,7 +1339,7 @@ async def slam_load(body: dict[str, Any]) -> dict:
         )
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": error or "Nav2 non démarré"},
+            content={"ok": False, "error": error or "Pont Nav2 non démarré"},
         )
     initial_pose = body.get("initial_pose", {})
     try:
