@@ -1001,7 +1001,7 @@ def _publish_initial_pose(value: object) -> bool:
     return published
 
 
-def _lifecycle_active(node: str) -> bool:
+def _topic_has_subscription(topic: str) -> bool:
     try:
         result = subprocess.run(
             [
@@ -1010,14 +1010,19 @@ def _lifecycle_active(node: str) -> bool:
                 _slam_container,
                 "bash",
                 "-c",
-                f"source /opt/ros/jazzy/setup.bash && ros2 lifecycle get {node}",
+                f"source /opt/ros/jazzy/setup.bash && ros2 topic info {topic}",
             ],
             capture_output=True,
             text=True,
             timeout=4.0,
         )
-        return result.returncode == 0 and "active" in result.stdout.lower()
-    except (OSError, subprocess.TimeoutExpired):
+        if result.returncode != 0:
+            return False
+        for line in result.stdout.splitlines():
+            if line.strip().startswith("Subscription count:"):
+                return int(line.rsplit(":", 1)[1].strip()) > 0
+        return False
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
 
 
@@ -1375,24 +1380,25 @@ async def slam_load(body: dict[str, Any]) -> dict:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    amcl_ready = False
+    initial_pose_ready = False
     for _attempt in range(40):
         navigation, mapping = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
         )
         if navigation and not mapping and await loop.run_in_executor(
-            None, lambda: _lifecycle_active("/amcl")
+            None, lambda: _topic_has_subscription("/initialpose")
         ):
-            amcl_ready = True
+            initial_pose_ready = True
             break
         await asyncio.sleep(0.5)
-    if not amcl_ready:
+    if not initial_pose_ready:
         error = await loop.run_in_executor(
             None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
         )
         return JSONResponse(
-            status_code=500, content={"ok": False, "error": error or "AMCL non actif"}
+            status_code=500,
+            content={"ok": False, "error": error or "Subscriber AMCL initialpose absent"},
         )
     initial_pose = body.get("initial_pose", {})
     published = await loop.run_in_executor(None, lambda: _publish_initial_pose(initial_pose))
