@@ -52,26 +52,48 @@ if [ "${ROS_IMAGE_CHANGED}" = "true" ]; then
   echo "  OK"
 fi
 
-# Toujours redémarre l'API Python
-echo "==> Redémarrage rasprover-control..."
-sudo systemctl restart rasprover-control.service
-echo "  OK"
-
-# Redémarre le lidar uniquement si son .service a changé
+# Redémarre d'abord le lidar quand son service ou son image a changé. L'API
+# ouvre ensuite son abonnement /scan sur le nouveau conteneur, jamais sur celui
+# que Docker vient de supprimer.
+LIDAR_RESTARTED=false
 if [ "${LIDAR_SERVICE_CHANGED}" = "true" ]; then
   echo "==> ros2-lidar.service modifié — mise à jour et redémarrage..."
   sed "s/^User=.*/User=${CURRENT_USER}/" "${RASPBERRY_DIR}/ros2-lidar.service" \
     | sudo tee /etc/systemd/system/ros2-lidar.service > /dev/null
   sudo systemctl daemon-reload
   sudo systemctl restart ros2-lidar.service
+  LIDAR_RESTARTED=true
   echo "  OK"
 elif [ "${ROS_IMAGE_CHANGED}" = "true" ]; then
   echo "==> Image ROS modifiée — redémarrage ros2-lidar..."
   sudo systemctl restart ros2-lidar.service
+  LIDAR_RESTARTED=true
   echo "  OK"
 else
   echo "==> ros2-lidar inchangé — ROS non redémarré."
 fi
+
+if [ "${LIDAR_RESTARTED}" = "true" ]; then
+  echo "==> Attente du nouveau conteneur ros2-lidar..."
+  LIDAR_READY=false
+  for _attempt in $(seq 1 40); do
+    if docker inspect -f '{{.State.Running}}' ros2-lidar 2>/dev/null | grep -qx true; then
+      LIDAR_READY=true
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "${LIDAR_READY}" != "true" ]; then
+    echo "Le nouveau conteneur ros2-lidar n'est pas démarré." >&2
+    exit 1
+  fi
+  echo "  OK"
+fi
+
+# Toujours redémarrer l'API après le lidar pour renouveler le pont /scan.
+echo "==> Redémarrage rasprover-control..."
+sudo systemctl restart rasprover-control.service
+echo "  OK"
 
 echo ""
 echo "==> Déploiement terminé."
