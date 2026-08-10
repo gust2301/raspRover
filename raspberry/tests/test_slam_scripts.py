@@ -28,6 +28,7 @@ def test_lidar_service_mounts_persistent_map_volume():
     service = (Path(__file__).parents[1] / "ros2-lidar.service").read_text()
 
     assert "--volume=rasprover-maps:/maps" in service
+    assert "FASTRTPS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml" in service
     assert "FASTDDS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml" in service
 
 
