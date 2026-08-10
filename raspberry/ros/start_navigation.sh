@@ -62,7 +62,14 @@ BRIDGE_PID=$!
 # frame au lieu d'ajouter un alias base_footprint qui perturbe AMCL.
 NAV2_DEFAULT_PARAMS=/opt/ros/jazzy/share/nav2_bringup/params/nav2_params.yaml
 NAV2_PARAMS=/tmp/rasprover_nav2_params.yaml
-sed 's/base_footprint/base_link/g' "${NAV2_DEFAULT_PARAMS}" > "${NAV2_PARAMS}"
+ROBOT_RADIUS="${RASPROVER_NAV2_ROBOT_RADIUS_M:-0.16}"
+INFLATION_RADIUS="${RASPROVER_NAV2_INFLATION_RADIUS_M:-0.30}"
+sed -E \
+  -e 's/base_footprint/base_link/g' \
+  -e "s/^([[:space:]]*robot_radius:).*/\\1 ${ROBOT_RADIUS}/" \
+  -e "s/^([[:space:]]*inflation_radius:).*/\\1 ${INFLATION_RADIUS}/" \
+  -e 's/^([[:space:]]*stop_on_failure:).*/\1 true/' \
+  "${NAV2_DEFAULT_PARAMS}" > "${NAV2_PARAMS}"
 
 ros2 launch nav2_bringup bringup_launch.py \
   map:="${MAP_YAML}" \

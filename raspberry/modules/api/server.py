@@ -1278,7 +1278,13 @@ async def slam_load(body: dict[str, Any]) -> dict:
     if not exists:
         return JSONResponse(status_code=404, content={"ok": False, "error": "Carte inconnue"})
 
-    initial_pose = body.get("initial_pose", {})
+    initial_pose = body.get("initial_pose")
+    initial_pose_source = "request"
+    if initial_pose is None:
+        initial_pose = await loop.run_in_executor(None, lambda: get_map_home(safe_name))
+        initial_pose_source = "home" if initial_pose is not None else "origin"
+    if initial_pose is None:
+        initial_pose = {}
     try:
         pose_values = {
             "x": float(initial_pose.get("x", 0.0)),
@@ -1312,6 +1318,10 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_NAV2_MOTOR_UDP_PORT={int(cfg.get('nav2_motor_udp_port', 7668))}",
         "-e",
         f"RASPROVER_NAV2_COMMAND_UDP_PORT={int(cfg.get('nav2_command_udp_port', 7669))}",
+        "-e",
+        f"RASPROVER_NAV2_ROBOT_RADIUS_M={float(cfg.get('nav2_robot_radius_m', 0.16))}",
+        "-e",
+        f"RASPROVER_NAV2_INFLATION_RADIUS_M={float(cfg.get('nav2_inflation_radius_m', 0.30))}",
         "-e",
         f"RASPROVER_INITIAL_POSE_X={pose_values['x']}",
         "-e",
@@ -1384,7 +1394,13 @@ async def slam_load(body: dict[str, Any]) -> dict:
                 "error": "AMCL actif mais transformation map → base_link absente",
             },
         )
-    return {"ok": True, "mode": "navigation", "map": safe_name}
+    return {
+        "ok": True,
+        "mode": "navigation",
+        "map": safe_name,
+        "initial_pose": pose_values,
+        "initial_pose_source": initial_pose_source,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -164,9 +164,18 @@ class Nav2Bridge(Node):
         self._set_status("running", current_waypoint=int(feedback.feedback.current_waypoint))
 
     def _result(self, future) -> None:
-        status = future.result().status
-        state = "completed" if status == GoalStatus.STATUS_SUCCEEDED else "error"
-        self._set_status(state, result_status=int(status))
+        wrapped_result = future.result()
+        status = wrapped_result.status
+        missed = getattr(wrapped_result.result, "missed_waypoints", [])
+        missed_indexes = [int(item.index) for item in missed]
+        succeeded = status == GoalStatus.STATUS_SUCCEEDED and not missed_indexes
+        state = "completed" if succeeded else "error"
+        self._set_status(
+            state,
+            result_status=int(status),
+            missed_waypoints=missed_indexes,
+            error=None if succeeded else "Un ou plusieurs points sont inaccessibles",
+        )
         self._goal_handle = None
         self._send_stop()
 

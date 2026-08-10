@@ -52,7 +52,11 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert 'initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}"' in script
     assert "nav2_bringup bringup_launch.py" in script
     assert "nav2_bridge.py" in script
-    assert "sed 's/base_footprint/base_link/g'" in script
+    assert "s/base_footprint/base_link/g" in script
+    assert "RASPROVER_NAV2_ROBOT_RADIUS_M:-0.16" in script
+    assert "RASPROVER_NAV2_INFLATION_RADIUS_M:-0.30" in script
+    assert "stop_on_failure:" in script
+    assert "\\1 true" in script
     assert 'params_file:="${NAV2_PARAMS}"' in script
     assert "static_transform_publisher" not in script
     assert "pose_writer.py" in script

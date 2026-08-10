@@ -165,7 +165,7 @@ export default function MapView() {
     try {
       const r = await fetch(`${apiBase}/api/slam/load`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, initial_pose: { x: 0, y: 0, yaw: 0 } }),
+        body: JSON.stringify({ name }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error ?? 'Chargement échoué')
