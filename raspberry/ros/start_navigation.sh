@@ -11,6 +11,7 @@ fi
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
+  rm -f /tmp/rasprover_nav2_params.yaml
 }
 trap cleanup EXIT INT TERM
 
@@ -43,12 +44,6 @@ python3 /opt/rasprover/command_odometry.py --ros-args \
   -p laser_yaw_deg:="${RASPROVER_LASER_YAW_DEG:-140.0}" &
 ODOM_PID=$!
 
-# The stock Jazzy parameters use base_footprint for AMCL.
-ros2 run tf2_ros static_transform_publisher \
-  --x 0 --y 0 --z 0 --yaw 0 --pitch 0 --roll 0 \
-  --frame-id base_link --child-frame-id base_footprint &
-FOOTPRINT_PID=$!
-
 python3 /opt/rasprover/map_writer.py &
 MAP_WRITER_PID=$!
 python3 /opt/rasprover/pose_writer.py &
@@ -63,11 +58,18 @@ python3 /opt/rasprover/nav2_bridge.py --ros-args \
   -p initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}" &
 BRIDGE_PID=$!
 
+# Le rover publie odom -> base_link. Aligne tous les composants Nav2 sur ce
+# frame au lieu d'ajouter un alias base_footprint qui perturbe AMCL.
+NAV2_DEFAULT_PARAMS=/opt/ros/jazzy/share/nav2_bringup/params/nav2_params.yaml
+NAV2_PARAMS=/tmp/rasprover_nav2_params.yaml
+sed 's/base_footprint/base_link/g' "${NAV2_DEFAULT_PARAMS}" > "${NAV2_PARAMS}"
+
 ros2 launch nav2_bringup bringup_launch.py \
   map:="${MAP_YAML}" \
+  params_file:="${NAV2_PARAMS}" \
   use_sim_time:=false \
   autostart:=true &
 NAV2_PID=$!
 
-wait -n "${ODOM_PID}" "${FOOTPRINT_PID}" "${MAP_WRITER_PID}" \
+wait -n "${ODOM_PID}" "${MAP_WRITER_PID}" \
   "${POSE_WRITER_PID}" "${BRIDGE_PID}" "${NAV2_PID}"
