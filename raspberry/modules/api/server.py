@@ -1275,6 +1275,20 @@ async def slam_load(body: dict[str, Any]) -> dict:
     if not exists:
         return JSONResponse(status_code=404, content={"ok": False, "error": "Carte inconnue"})
 
+    initial_pose = body.get("initial_pose", {})
+    try:
+        pose_values = {
+            "x": float(initial_pose.get("x", 0.0)),
+            "y": float(initial_pose.get("y", 0.0)),
+            "yaw": float(initial_pose.get("yaw", 0.0)),
+        }
+        if not all(math.isfinite(value) for value in pose_values.values()):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "Pose initiale invalide"}
+        )
+
     cfg = _load_config().get("slam", {})
     environment = [
         "-e",
@@ -1295,6 +1309,12 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_NAV2_MOTOR_UDP_PORT={int(cfg.get('nav2_motor_udp_port', 7668))}",
         "-e",
         f"RASPROVER_NAV2_COMMAND_UDP_PORT={int(cfg.get('nav2_command_udp_port', 7669))}",
+        "-e",
+        f"RASPROVER_INITIAL_POSE_X={pose_values['x']}",
+        "-e",
+        f"RASPROVER_INITIAL_POSE_Y={pose_values['y']}",
+        "-e",
+        f"RASPROVER_INITIAL_POSE_YAW={pose_values['yaw']}",
     ]
     stopped = await loop.run_in_executor(None, _stop_ros_navigation_processes)
     if not stopped:
@@ -1341,20 +1361,6 @@ async def slam_load(body: dict[str, Any]) -> dict:
             status_code=500,
             content={"ok": False, "error": error or "Pont Nav2 non démarré"},
         )
-    initial_pose = body.get("initial_pose", {})
-    try:
-        pose_values = {
-            "x": float(initial_pose.get("x", 0.0)),
-            "y": float(initial_pose.get("y", 0.0)),
-            "yaw": float(initial_pose.get("yaw", 0.0)),
-        }
-        if not all(math.isfinite(value) for value in pose_values.values()):
-            raise ValueError
-    except (AttributeError, TypeError, ValueError):
-        return JSONResponse(
-            status_code=400, content={"ok": False, "error": "Pose initiale invalide"}
-        )
-    await loop.run_in_executor(None, lambda: _nav2_motors.set_initial_pose(pose_values))
     localized = False
     for _attempt in range(30):
         pose = await loop.run_in_executor(

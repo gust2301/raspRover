@@ -24,6 +24,9 @@ class Nav2Bridge(Node):
         self.declare_parameter("command_udp_port", 7669)
         self.declare_parameter("max_linear_speed_m_s", 0.65)
         self.declare_parameter("wheel_separation_m", 0.18)
+        self.declare_parameter("initial_pose_x", 0.0)
+        self.declare_parameter("initial_pose_y", 0.0)
+        self.declare_parameter("initial_pose_yaw", 0.0)
 
         self._motor_port = int(self.get_parameter("motor_udp_port").value)
         self._max_speed = float(self.get_parameter("max_linear_speed_m_s").value)
@@ -40,11 +43,21 @@ class Nav2Bridge(Node):
             PoseWithCovarianceStamped, "/initialpose", initial_pose_qos
         )
         self._goal_handle = None
+        self._initial_pose: dict[str, float] | None = None
+        self._initial_pose_repeats = 0
         self._status = {"state": "idle", "current_waypoint": None, "updated_at": time.time()}
 
         self.create_subscription(Twist, "/cmd_vel", self._on_velocity, 10)
         self.create_timer(0.1, self._receive_commands)
         self.create_timer(0.5, self._write_status)
+        self.create_timer(0.5, self._repeat_initial_pose)
+        self._set_initial_pose(
+            {
+                "x": float(self.get_parameter("initial_pose_x").value),
+                "y": float(self.get_parameter("initial_pose_y").value),
+                "yaw": float(self.get_parameter("initial_pose_yaw").value),
+            }
+        )
 
     def _on_velocity(self, message: Twist) -> None:
         half_track = self._wheel_separation / 2.0
@@ -73,9 +86,31 @@ class Nav2Bridge(Node):
                 self.get_logger().warning(f"Commande Nav2 invalide: {exc}")
 
     def _set_initial_pose(self, value: dict) -> None:
-        x = float(value.get("x", 0.0))
-        y = float(value.get("y", 0.0))
-        yaw = float(value.get("yaw", 0.0))
+        self._initial_pose = {
+            "x": float(value.get("x", 0.0)),
+            "y": float(value.get("y", 0.0)),
+            "yaw": float(value.get("yaw", 0.0)),
+        }
+        self._initial_pose_repeats = 60
+        self._publish_initial_pose()
+        self.get_logger().info(
+            "Pose initiale publiée: "
+            f"x={self._initial_pose['x']:.2f}, y={self._initial_pose['y']:.2f}, "
+            f"yaw={self._initial_pose['yaw']:.2f}"
+        )
+
+    def _repeat_initial_pose(self) -> None:
+        if self._initial_pose_repeats <= 0:
+            return
+        self._initial_pose_repeats -= 1
+        self._publish_initial_pose()
+
+    def _publish_initial_pose(self) -> None:
+        if self._initial_pose is None:
+            return
+        x = self._initial_pose["x"]
+        y = self._initial_pose["y"]
+        yaw = self._initial_pose["yaw"]
         message = PoseWithCovarianceStamped()
         message.header.frame_id = "map"
         message.header.stamp = self.get_clock().now().to_msg()
@@ -87,7 +122,6 @@ class Nav2Bridge(Node):
         message.pose.covariance[7] = 0.25
         message.pose.covariance[35] = 0.068
         self._initial_pose_pub.publish(message)
-        self.get_logger().info(f"Pose initiale publiée: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
 
     def _follow(self, waypoints: list[dict]) -> None:
         if not waypoints:

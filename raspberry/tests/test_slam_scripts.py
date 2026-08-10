@@ -47,6 +47,9 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
 
     assert 'MAP_YAML="${RASPROVER_MAP_YAML:' in script
     assert 'map:="${MAP_YAML}"' in script
+    assert 'initial_pose_x:="${RASPROVER_INITIAL_POSE_X:-0.0}"' in script
+    assert 'initial_pose_y:="${RASPROVER_INITIAL_POSE_Y:-0.0}"' in script
+    assert 'initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}"' in script
     assert "nav2_bringup bringup_launch.py" in script
     assert "nav2_bridge.py" in script
     assert "pose_writer.py" in script

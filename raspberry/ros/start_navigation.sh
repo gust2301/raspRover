@@ -57,7 +57,10 @@ python3 /opt/rasprover/nav2_bridge.py --ros-args \
   -p motor_udp_port:="${RASPROVER_NAV2_MOTOR_UDP_PORT:-7668}" \
   -p command_udp_port:="${RASPROVER_NAV2_COMMAND_UDP_PORT:-7669}" \
   -p max_linear_speed_m_s:="${RASPROVER_MAX_SPEED_M_S:-0.65}" \
-  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.18}" &
+  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.18}" \
+  -p initial_pose_x:="${RASPROVER_INITIAL_POSE_X:-0.0}" \
+  -p initial_pose_y:="${RASPROVER_INITIAL_POSE_Y:-0.0}" \
+  -p initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}" &
 BRIDGE_PID=$!
 
 ros2 launch nav2_bringup bringup_launch.py \
