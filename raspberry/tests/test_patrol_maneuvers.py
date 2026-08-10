@@ -12,6 +12,23 @@ def _controller() -> PatrolController:
     return PatrolController(motors=None, navigation_mode="LIDAR_ONLY")
 
 
+def test_human_photo_is_captured_once_per_encounter():
+    patrol = _controller()
+
+    assert patrol._should_capture_human(True, 100.0) is True
+    assert patrol._should_capture_human(True, 200.0) is False
+    assert patrol._should_capture_human(False, 201.0) is False
+    assert patrol._should_capture_human(True, 202.0) is True
+
+
+def test_distinct_human_encounters_still_respect_cooldown():
+    patrol = _controller()
+
+    assert patrol._should_capture_human(True, 100.0) is True
+    assert patrol._should_capture_human(False, 101.0) is False
+    assert patrol._should_capture_human(True, 110.0) is False
+
+
 def test_back_up_is_committed_then_forces_a_side_turn():
     patrol = _controller()
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation } from 'lucide-react'
+import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
 
@@ -38,6 +38,7 @@ export default function MapView() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -122,6 +123,7 @@ export default function MapView() {
   async function handleSave() {
     setSaving(true)
     setError(null)
+    setNotice(null)
     try {
       const suggested = `carte-${new Date().toISOString().slice(0, 10)}`
       const name = window.prompt('Nom de la carte', suggested)?.trim()
@@ -133,7 +135,10 @@ export default function MapView() {
       })
       const d = await r.json()
       if (!d.ok) setError(d.error ?? 'Sauvegarde échouée')
-      else await fetchSavedMaps()
+      else {
+        await fetchSavedMaps()
+        setNotice(`Carte « ${d.name ?? name} » sauvegardée avec succès`)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -190,6 +195,12 @@ export default function MapView() {
   // ── effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => { void fetchStatus(); void fetchSavedMaps() }, [fetchStatus, fetchSavedMaps])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
@@ -263,6 +274,14 @@ export default function MapView() {
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
           <AlertTriangle size={15} />
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="fixed z-50 right-4 bottom-4 max-w-sm flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-sm shadow-2xl">
+          <CheckCircle size={17} className="shrink-0" />
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="ml-2 text-emerald-500 hover:text-emerald-200" aria-label="Fermer">×</button>
         </div>
       )}
 
