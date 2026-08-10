@@ -996,7 +996,7 @@ def _publish_initial_pose(value: object) -> bool:
     return result.returncode == 0
 
 
-def _stop_ros_navigation_processes() -> None:
+def _stop_ros_navigation_processes() -> bool:
     subprocess.run(
         [
             "docker",
@@ -1010,6 +1010,11 @@ def _stop_ros_navigation_processes() -> None:
         capture_output=True,
         timeout=10.0,
     )
+    for _attempt in range(30):
+        if not _slam_running() and not _nav2_running():
+            return True
+        time.sleep(0.1)
+    return not _slam_running() and not _nav2_running()
 
 
 def _slam_topics() -> set[str]:
@@ -1325,7 +1330,12 @@ async def slam_load(body: dict[str, Any]) -> dict:
         "-e",
         f"RASPROVER_NAV2_COMMAND_UDP_PORT={int(cfg.get('nav2_command_udp_port', 7669))}",
     ]
-    await loop.run_in_executor(None, _stop_ros_navigation_processes)
+    stopped = await loop.run_in_executor(None, _stop_ros_navigation_processes)
+    if not stopped:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "Impossible d'arrêter le SLAM avant Nav2"},
+        )
     subprocess.Popen(
         [
             "docker",
@@ -1340,8 +1350,17 @@ async def slam_load(body: dict[str, Any]) -> dict:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    await asyncio.sleep(3.0)
-    if not await loop.run_in_executor(None, _nav2_running):
+    navigation_ready = False
+    for _attempt in range(40):
+        navigation, mapping = await asyncio.gather(
+            loop.run_in_executor(None, _nav2_running),
+            loop.run_in_executor(None, _slam_running),
+        )
+        if navigation and not mapping:
+            navigation_ready = True
+            break
+        await asyncio.sleep(0.5)
+    if not navigation_ready:
         error = await loop.run_in_executor(
             None, lambda: _read_process_log("/tmp/rasprover_navigation.log")
         )

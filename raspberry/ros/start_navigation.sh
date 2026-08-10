@@ -18,6 +18,19 @@ pkill -f '[c]ommand_odometry.py' 2>/dev/null || true
 pkill -f '[m]ap_writer.py' 2>/dev/null || true
 pkill -f '[p]ose_writer.py' 2>/dev/null || true
 pkill -f '[n]av2_bridge.py' 2>/dev/null || true
+pkill -f '[a]sync_slam_toolbox_node' 2>/dev/null || true
+
+# Never let slam_toolbox and AMCL publish map -> odom at the same time.
+for _attempt in $(seq 1 30); do
+  if ! pgrep -f 'async_slam_toolbox_node' >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+if pgrep -f 'async_slam_toolbox_node' >/dev/null 2>&1; then
+  echo "Impossible d'arrêter slam_toolbox avant Nav2" >&2
+  exit 1
+fi
 rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json
 basename "${MAP_YAML}" .yaml > /tmp/active_map_name
 
