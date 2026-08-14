@@ -12,6 +12,7 @@ import pathlib
 import struct
 import subprocess
 import time
+import uuid
 import zlib
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,9 +21,10 @@ from typing import Any
 import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from modules.audio import AlertPlayer
+from modules.automotive import AutomotiveRepository, InspectionRunner
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
@@ -84,6 +86,9 @@ _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
 _odometry_commands: OdometryCommandPublisher | None = None
 _nav2_motors: Nav2MotorBridge | None = None
+_automotive_repository: AutomotiveRepository | None = None
+_inspection_runner: InspectionRunner | None = None
+_inspection_media_dir = pathlib.Path.home() / ".rasprover" / "inspection-media"
 
 
 def _load_config() -> dict:
@@ -173,12 +178,16 @@ async def lifespan(app: FastAPI):
         _tracker, \
         _rover_name, \
         _odometry_commands, \
-        _nav2_motors
+        _nav2_motors, \
+        _automotive_repository, \
+        _inspection_runner
 
     global _mixer
     cfg = _load_config()
     _rover_name = cfg.get("rover", {}).get("name", "rasprover")
     init_db()
+    _automotive_repository = AutomotiveRepository()
+    _automotive_repository.init()
     _mixer = DriveMixer(DriveConfig.from_dict(cfg.get("drive", {})))
     ctrl = cfg.get("control", {})
     esp32_required = bool(ctrl.get("esp32_required", False))
@@ -342,6 +351,13 @@ async def lifespan(app: FastAPI):
         if _pantilt
         else None
     )
+    _inspection_runner = InspectionRunner(
+        _automotive_repository,
+        _inspection_navigate,
+        _inspection_capture,
+        _inspection_return_home,
+        _inspection_cancel_navigation,
+    )
 
     if _motors:
         _motors.stop()
@@ -365,6 +381,9 @@ async def lifespan(app: FastAPI):
         await broadcast_task
     except asyncio.CancelledError:
         pass
+
+    if _inspection_runner and _inspection_runner.active:
+        await _inspection_runner.stop()
 
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
@@ -960,6 +979,65 @@ def _active_map_name() -> str | None:
         return None
 
 
+async def _inspection_navigate(waypoint: dict) -> None:
+    """Run one Nav2 goal and wait for its terminal status before returning."""
+    if _nav2_motors is None or not _nav2_running():
+        raise RuntimeError("Nav2 non actif")
+    loop = asyncio.get_running_loop()
+    sent_at = time.time()
+    await loop.run_in_executor(
+        None,
+        lambda: _nav2_motors.follow_waypoints(
+            [{"x": waypoint["x"], "y": waypoint["y"], "yaw": waypoint["yaw"]}]
+        ),
+    )
+    deadline = time.monotonic() + 180.0
+    while time.monotonic() < deadline:
+        status = await loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/nav2_status.json")
+        )
+        if status and float(status.get("updated_at", 0.0)) >= sent_at:
+            state = status.get("state")
+            if state == "completed":
+                return
+            if state in {"error", "cancelled"}:
+                raise RuntimeError(status.get("error") or f"Navigation {state}")
+        await asyncio.sleep(0.25)
+    await _inspection_cancel_navigation()
+    raise RuntimeError("Délai Nav2 dépassé pour le point d'inspection")
+
+
+async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, dict | None]:
+    """Orient the inspection camera and persist one JPEG locally for the V1."""
+    loop = asyncio.get_running_loop()
+    if _pantilt is not None:
+        await loop.run_in_executor(None, lambda: _pantilt.goto(waypoint["pan"], waypoint["tilt"]))
+        await asyncio.sleep(1.0)
+    jpeg = await loop.run_in_executor(None, capture_photo)
+    inspection_dir = _inspection_media_dir / inspection_id
+    await loop.run_in_executor(None, lambda: inspection_dir.mkdir(parents=True, exist_ok=True))
+    filename = f"{int(waypoint['sequence']):02d}-{waypoint['zone']}-{uuid.uuid4().hex[:8]}.jpg"
+    media_path = inspection_dir / filename
+    await loop.run_in_executor(None, media_path.write_bytes, jpeg)
+    pose = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json"))
+    return str(media_path), pose
+
+
+async def _inspection_return_home() -> None:
+    loop = asyncio.get_running_loop()
+    map_name = await loop.run_in_executor(None, _active_map_name)
+    home = await loop.run_in_executor(None, lambda: get_map_home(map_name)) if map_name else None
+    if home is None:
+        raise RuntimeError("Maison non définie pour cette carte")
+    await _inspection_navigate(home)
+
+
+async def _inspection_cancel_navigation() -> None:
+    if _nav2_motors is not None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _nav2_motors.cancel)
+
+
 def _stop_ros_navigation_processes() -> bool:
     subprocess.run(
         [
@@ -1019,13 +1097,14 @@ def _slam_log_tail() -> str | None:
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
     loop = asyncio.get_running_loop()
-    running, navigation, topics, slam_log, current_map, pose = await asyncio.gather(
+    running, navigation, topics, slam_log, current_map, pose, active_map = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _nav2_running),
         loop.run_in_executor(None, _slam_topics),
         loop.run_in_executor(None, _slam_log_tail),
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
         loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+        loop.run_in_executor(None, _active_map_name),
     )
     required = {"/scan", "/odom", "/map"}
     return {
@@ -1036,6 +1115,7 @@ async def slam_status() -> dict:
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
         "error": None if running or navigation else slam_log,
         "pose": pose,
+        "active_map": active_map,
     }
 
 
@@ -1406,6 +1486,190 @@ async def slam_load(body: dict[str, Any]) -> dict:
         "initial_pose": pose_values,
         "initial_pose_source": initial_pose_source,
     }
+
+
+# ---------------------------------------------------------------------------
+# REST — Inspection automobile automatique
+# ---------------------------------------------------------------------------
+
+
+_INSPECTION_ZONES = {
+    "front",
+    "front_left",
+    "front_right",
+    "left",
+    "rear_left",
+    "rear",
+    "rear_right",
+    "right",
+    "wheel",
+    "roof",
+    "interior",
+}
+
+
+def _public_inspection(inspection: dict) -> dict:
+    result = dict(inspection)
+    result["captures"] = [
+        {
+            **{key: value for key, value in capture.items() if key != "media_path"},
+            "image_url": f"/api/automotive/captures/{capture['id']}/image",
+        }
+        for capture in inspection.get("captures", [])
+    ]
+    return result
+
+
+@app.get("/api/automotive/routes")
+async def automotive_routes(map_name: str | None = None) -> dict:
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    routes = await loop.run_in_executor(None, lambda: _automotive_repository.list_routes(map_name))
+    return {"ok": True, "routes": routes}
+
+
+@app.get("/api/automotive/routes/{route_id}")
+async def automotive_route(route_id: str) -> dict:
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    try:
+        route = await loop.run_in_executor(None, lambda: _automotive_repository.get_route(route_id))
+    except KeyError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    return {"ok": True, "route": route}
+
+
+@app.post("/api/automotive/routes")
+async def automotive_route_create(body: dict[str, Any]) -> dict:
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    name = str(body.get("name", "")).strip()
+    try:
+        map_name = validate_map_name(str(body.get("map_name", "")).strip())
+    except ValueError:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Carte invalide"})
+    raw_waypoints = body.get("waypoints")
+    if not name or len(name) > 80:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
+    if not isinstance(raw_waypoints, list) or not 2 <= len(raw_waypoints) <= 30:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "2 à 30 points requis"})
+    waypoints: list[dict] = []
+    try:
+        for item in raw_waypoints:
+            zone = str(item["zone"])
+            if zone not in _INSPECTION_ZONES:
+                raise ValueError
+            waypoint = {
+                "zone": zone,
+                "x": float(item["x"]),
+                "y": float(item["y"]),
+                "yaw": float(item.get("yaw", 0.0)),
+                "pan": float(item.get("pan", 0.0)),
+                "tilt": float(item.get("tilt", 0.0)),
+            }
+            if not all(math.isfinite(value) for key, value in waypoint.items() if key != "zone"):
+                raise ValueError
+            waypoints.append(waypoint)
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Points invalides"})
+    loop = asyncio.get_running_loop()
+    route = await loop.run_in_executor(
+        None, lambda: _automotive_repository.create_route(name, map_name, waypoints)
+    )
+    return {"ok": True, "route": route}
+
+
+@app.get("/api/automotive/inspections")
+async def automotive_inspections() -> dict:
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    inspections = await loop.run_in_executor(None, _automotive_repository.list_inspections)
+    return {"ok": True, "inspections": inspections}
+
+
+@app.get("/api/automotive/inspections/{inspection_id}")
+async def automotive_inspection(inspection_id: str) -> dict:
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    try:
+        inspection = await loop.run_in_executor(
+            None, lambda: _automotive_repository.get_inspection(inspection_id)
+        )
+    except KeyError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    return {"ok": True, "inspection": _public_inspection(inspection)}
+
+
+@app.post("/api/automotive/inspections/start")
+async def automotive_inspection_start(body: dict[str, Any]) -> dict:
+    if _automotive_repository is None or _inspection_runner is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Service indisponible"})
+    if _motors is None or _nav2_motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    registration = str(body.get("registration", "")).strip().upper()
+    route_id = str(body.get("route_id", "")).strip()
+    label = str(body.get("label", "")).strip() or None
+    if not registration or len(registration) > 32:
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "Immatriculation requise"}
+        )
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _nav2_running):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
+    try:
+        route = await loop.run_in_executor(None, lambda: _automotive_repository.get_route(route_id))
+    except KeyError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    active_map = await loop.run_in_executor(None, _active_map_name)
+    if route["map_name"] != active_map:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": f"Chargez la carte {route['map_name']}"},
+        )
+    home = await loop.run_in_executor(None, lambda: get_map_home(active_map))
+    if home is None:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Définissez la maison avant l'inspection"},
+        )
+    vehicle = await loop.run_in_executor(
+        None, lambda: _automotive_repository.upsert_vehicle(registration, label)
+    )
+    try:
+        inspection = _inspection_runner.start(vehicle, route_id)
+    except RuntimeError as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "error": str(exc)})
+    return {"ok": True, "inspection": _public_inspection(inspection)}
+
+
+@app.post("/api/automotive/inspections/stop")
+async def automotive_inspection_stop() -> dict:
+    if _inspection_runner is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Service indisponible"})
+    await _inspection_runner.stop()
+    return {"ok": True, "status": "cancelled"}
+
+
+@app.get("/api/automotive/captures/{capture_id}/image")
+async def automotive_capture_image(capture_id: str):
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    try:
+        capture = await loop.run_in_executor(
+            None, lambda: _automotive_repository.get_capture(capture_id)
+        )
+    except KeyError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    path = pathlib.Path(capture["media_path"]).resolve()
+    media_root = _inspection_media_dir.resolve()
+    if media_root not in path.parents or not path.is_file():
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Image absente"})
+    return FileResponse(path, media_type="image/jpeg")
 
 
 # ---------------------------------------------------------------------------
