@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from modules.audio import AlertPlayer
 from modules.automotive import AutomotiveRepository, InspectionRunner
+from modules.automotive.navigation import compensated_capture_pan
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
@@ -1069,7 +1070,7 @@ def _active_map_name() -> str | None:
 
 async def _inspection_navigate(waypoint: dict) -> None:
     """Run one Nav2 goal and wait for its terminal status before returning."""
-    if _nav2_motors is None or not _nav2_running():
+    if _nav2_motors is None or not _nav2_ready():
         raise RuntimeError("Nav2 non actif")
     loop = asyncio.get_running_loop()
     sent_at = time.time()
@@ -1079,28 +1080,65 @@ async def _inspection_navigate(waypoint: dict) -> None:
             [{"x": waypoint["x"], "y": waypoint["y"], "yaw": waypoint["yaw"]}]
         ),
     )
-    deadline = time.monotonic() + 180.0
+    started_at = time.monotonic()
+    deadline = started_at + 45.0
     while time.monotonic() < deadline:
-        status = await loop.run_in_executor(
-            None, lambda: _read_container_json("/tmp/nav2_status.json")
+        status, pose = await asyncio.gather(
+            loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
+            loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
         )
+        state = None
         if status and float(status.get("updated_at", 0.0)) >= sent_at:
             state = status.get("state")
             if state == "completed":
                 return
-            if state in {"error", "cancelled"}:
-                raise RuntimeError(status.get("error") or f"Navigation {state}")
+        elapsed = time.monotonic() - started_at
+        if elapsed >= 6.0 and pose is not None:
+            distance = math.hypot(
+                float(waypoint["x"]) - float(pose["x"]),
+                float(waypoint["y"]) - float(pose["y"]),
+            )
+            learned_pan = float(waypoint.get("pan", 0.0))
+            compensated_pan: float | None = None
+            yaw_error = 0.0
+            if _pantilt is not None:
+                compensated_pan, yaw_error = compensated_capture_pan(
+                    target_yaw=float(waypoint["yaw"]),
+                    current_yaw=float(pose["yaw"]),
+                    learned_pan=learned_pan,
+                    pan_range=_pantilt.pan_range,
+                )
+            if distance <= 0.25 and compensated_pan is not None:
+                waypoint["_capture_pan"] = compensated_pan
+                waypoint["_navigation_fallback"] = {
+                    "distance_m": distance,
+                    "yaw_error_deg": math.degrees(yaw_error),
+                }
+                await _inspection_cancel_navigation()
+                await asyncio.sleep(0.25)
+                log.info(
+                    "Point %s atteint à %.2f m ; orientation compensée par la caméra (pan %.1f°)",
+                    waypoint.get("sequence", "?"),
+                    distance,
+                    compensated_pan,
+                )
+                return
+        if state in {"error", "cancelled"}:
+            raise RuntimeError(status.get("error") or f"Navigation {state}")
         await asyncio.sleep(0.25)
     await _inspection_cancel_navigation()
-    raise RuntimeError("Délai Nav2 dépassé pour le point d'inspection")
+    raise RuntimeError("Point non atteint après 45 secondes")
 
 
 async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, dict | None]:
     """Orient the inspection camera and persist one JPEG locally for the V1."""
     loop = asyncio.get_running_loop()
     if _pantilt is not None:
-        await loop.run_in_executor(None, lambda: _pantilt.goto(waypoint["pan"], waypoint["tilt"]))
-        await asyncio.sleep(1.0)
+        current_pan, _ = _pantilt.position
+        capture_pan = float(waypoint.get("_capture_pan", waypoint["pan"]))
+        await loop.run_in_executor(None, lambda: _pantilt.goto(capture_pan, waypoint["tilt"]))
+        settle_time = min(0.9, 0.15 + abs(capture_pan - current_pan) / 90.0 * 0.75)
+        await asyncio.sleep(settle_time)
     jpeg = await loop.run_in_executor(None, capture_photo)
     inspection_dir = _inspection_media_dir / inspection_id
     await loop.run_in_executor(None, lambda: inspection_dir.mkdir(parents=True, exist_ok=True))

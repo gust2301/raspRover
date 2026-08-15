@@ -65,11 +65,15 @@ NAV2_PARAMS=/tmp/rasprover_nav2_params.yaml
 ROBOT_RADIUS="${RASPROVER_NAV2_ROBOT_RADIUS_M:-0.16}"
 INFLATION_RADIUS="${RASPROVER_NAV2_INFLATION_RADIUS_M:-0.30}"
 SERVER_TIMEOUT_MS="${RASPROVER_NAV2_SERVER_TIMEOUT_MS:-1000}"
+CONTROLLER_FREQUENCY_HZ="${RASPROVER_NAV2_CONTROLLER_FREQUENCY_HZ:-10.0}"
+MODEL_DT_S="${RASPROVER_NAV2_MODEL_DT_S:-0.1}"
 sed -E \
   -e 's/base_footprint/base_link/g' \
   -e "s/^([[:space:]]*robot_radius:).*/\\1 ${ROBOT_RADIUS}/" \
   -e "s/^([[:space:]]*inflation_radius:).*/\\1 ${INFLATION_RADIUS}/" \
   -e "s/^([[:space:]]*default_server_timeout:).*/\\1 ${SERVER_TIMEOUT_MS}/" \
+  -e "0,/^([[:space:]]*controller_frequency:).*/s//\\1 ${CONTROLLER_FREQUENCY_HZ}/" \
+  -e "s/^([[:space:]]*model_dt:).*/\\1 ${MODEL_DT_S}/" \
   -e 's/^([[:space:]]*stop_on_failure:).*/\1 true/' \
   "${NAV2_DEFAULT_PARAMS}" > "${NAV2_PARAMS}"
 
