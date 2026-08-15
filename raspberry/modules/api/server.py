@@ -899,6 +899,20 @@ def _nav2_running() -> bool:
     return result.returncode == 0
 
 
+def _nav2_ready() -> bool:
+    """True only when the bridge sees Nav2's FollowWaypoints action server."""
+    if not _nav2_running():
+        return False
+    status = _read_container_json("/tmp/nav2_status.json")
+    if status is None:
+        return False
+    try:
+        heartbeat = float(status.get("heartbeat_at", status.get("updated_at", 0.0)))
+    except (TypeError, ValueError):
+        return False
+    return time.time() - heartbeat <= 2.0 and bool(status.get("action_server_ready"))
+
+
 def _navigation_launcher_running() -> bool:
     """True while start_navigation.sh is still bringing Nav2 up."""
     result = subprocess.run(
@@ -1018,7 +1032,7 @@ def _validate_nav2_route(poses: list[dict], labels: list[str]) -> dict:
                 _slam_container,
                 "bash",
                 "-c",
-                'source /opt/ros/jazzy/setup.bash && python3 '
+                "source /opt/ros/jazzy/setup.bash && python3 "
                 '/opt/rasprover/nav2_route_validator.py "$1"',
                 "rasprover-route-validator",
                 payload,
@@ -1171,9 +1185,19 @@ def _slam_log_tail() -> str | None:
 @app.get("/api/slam/status")
 async def slam_status() -> dict:
     loop = asyncio.get_running_loop()
-    running, navigation, topics, slam_log, current_map, pose, active_map = await asyncio.gather(
+    (
+        running,
+        navigation,
+        navigation_ready,
+        topics,
+        slam_log,
+        current_map,
+        pose,
+        active_map,
+    ) = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _nav2_running),
+        loop.run_in_executor(None, _nav2_ready),
         loop.run_in_executor(None, _slam_topics),
         loop.run_in_executor(None, _slam_log_tail),
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
@@ -1184,10 +1208,12 @@ async def slam_status() -> dict:
     return {
         "running": running or navigation,
         "mode": "mapping" if running else "navigation" if navigation else "stopped",
-        "ready": (running or navigation) and required.issubset(topics) and current_map is not None,
+        "ready": (running or navigation_ready)
+        and required.issubset(topics)
+        and current_map is not None,
         "container": _slam_container,
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
-        "error": None if running or navigation else slam_log,
+        "error": None if running or navigation_ready else slam_log,
         "pose": pose,
         "active_map": active_map,
     }
@@ -1618,11 +1644,9 @@ def _parse_inspection_waypoints(raw_waypoints: Any) -> list[dict]:
     return waypoints
 
 
-async def _validate_automotive_poses(
-    map_name: str, poses: list[dict], labels: list[str]
-) -> dict:
+async def _validate_automotive_poses(map_name: str, poses: list[dict], labels: list[str]) -> dict:
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, _nav2_running):
+    if not await loop.run_in_executor(None, _nav2_ready):
         return {"ok": False, "error": "Nav2 non actif"}
     active_map = await loop.run_in_executor(None, _active_map_name)
     if active_map != map_name:
@@ -1755,7 +1779,7 @@ async def automotive_inspection_start(body: dict[str, Any]) -> dict:
             status_code=400, content={"ok": False, "error": "Immatriculation requise"}
         )
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, _nav2_running):
+    if not await loop.run_in_executor(None, _nav2_ready):
         return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
     try:
         route = await loop.run_in_executor(None, lambda: _automotive_repository.get_route(route_id))
@@ -1787,9 +1811,7 @@ async def automotive_inspection_start(body: dict[str, Any]) -> dict:
         *[f"point {index + 1}" for index in range(len(route["waypoints"]))],
         "maison",
     ]
-    validation = await _validate_automotive_poses(
-        active_map, mission_poses, mission_labels
-    )
+    validation = await _validate_automotive_poses(active_map, mission_poses, mission_labels)
     if not validation.get("ok"):
         return JSONResponse(status_code=409, content=validation)
     vehicle = await loop.run_in_executor(
@@ -1867,7 +1889,7 @@ async def nav2_patrol_start(body: dict[str, Any]) -> dict:
     if _nav2_motors is None or _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, _nav2_running):
+    if not await loop.run_in_executor(None, _nav2_ready):
         return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
     raw_waypoints = body.get("waypoints")
     if not isinstance(raw_waypoints, list) or not 1 <= len(raw_waypoints) <= 50:

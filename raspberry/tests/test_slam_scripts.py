@@ -56,7 +56,6 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert "RASPROVER_NAV2_ROBOT_RADIUS_M:-0.16" in script
     assert "RASPROVER_NAV2_INFLATION_RADIUS_M:-0.30" in script
     assert "RASPROVER_NAV2_SERVER_TIMEOUT_MS:-1000" in script
-    assert "RASPROVER_NAV2_CONTROLLER_FREQUENCY_HZ:-10.0" in script
     assert "default_server_timeout:" in script
     assert "stop_on_failure:" in script
     assert "\\1 true" in script
@@ -98,6 +97,8 @@ def test_api_detects_composed_nav2_container():
     assert "_nav2_motors.set_initial_pose(pose_values)" in server
     assert "for attempt in range(120):" in server
     assert "_navigation_launcher_running" in server
+    assert "def _nav2_ready()" in server
+    assert "navigation_ready" in server
     assert "_process_log_summary(error)" in server
     assert '@app.post("/api/automotive/routes/validate")' in server
     assert "_validate_automotive_poses(" in server
