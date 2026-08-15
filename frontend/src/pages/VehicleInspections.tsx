@@ -9,6 +9,7 @@ import { getRobotApiUrl, getRobotStreamUrl } from '../lib/robotTransport'
 
 type Phase = 'welcome' | 'mapping' | 'learning' | 'inspection'
 type Direction = 'forward' | 'backward' | 'left' | 'right'
+type FinishStage = null | 'saving' | 'stopping' | 'loading' | 'home'
 
 interface SlamMap {
   image: string
@@ -158,6 +159,8 @@ export default function VehicleInspections() {
   const [vehicleLabel, setVehicleLabel] = useState('')
   const [inspection, setInspection] = useState<Inspection | null>(null)
   const [busy, setBusy] = useState(false)
+  const [finishStage, setFinishStage] = useState<FinishStage>(null)
+  const [finishMessage, setFinishMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -211,17 +214,35 @@ export default function VehicleInspections() {
   }
 
   async function finishPlateau() {
-    if (!plateauName.trim() || !pose) return
-    setBusy(true); setError(null)
+    if (!plateauName.trim()) {
+      setFinishMessage('Donnez un nom au plateau avant de continuer.')
+      return
+    }
+    if (!pose) {
+      setFinishMessage('La position du rover n’est pas encore disponible. Attendez quelques secondes sans déplacer le rover, puis réessayez.')
+      return
+    }
+    const finalPose = { ...pose }
+    let savedName: string | null = null
+    setBusy(true); setError(null); setNotice(null); setFinishMessage(null)
     try {
+      setFinishStage('saving'); setFinishMessage('1/4 — Sauvegarde de la carte du plateau…')
       const saved = await request('/api/slam/save', { name: plateauName })
+      savedName = saved.name
+      setFinishStage('stopping'); setFinishMessage(`2/4 — Carte « ${saved.name} » sauvegardée. Arrêt de la cartographie…`)
       await request('/api/slam/stop')
-      await request('/api/slam/load', { name: saved.name, initial_pose: pose })
+      setFinishStage('loading'); setFinishMessage('3/4 — Démarrage de Nav2 sur la nouvelle carte… Cela peut prendre 20 à 30 secondes.')
+      await request('/api/slam/load', { name: saved.name, initial_pose: finalPose })
+      setFinishStage('home'); setFinishMessage('4/4 — Enregistrement de cette position comme maison du rover…')
       await request('/api/slam/home')
       setActiveMap(saved.name); setPoints([]); setPhase('learning')
       setNotice('Plateau enregistré. Pilotez maintenant autour du véhicule de référence.')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Erreur') }
-    finally { setBusy(false) }
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : 'Erreur inconnue'
+      setFinishMessage(savedName
+        ? `La carte « ${savedName} » est bien sauvegardée, mais la préparation de Nav2 a échoué : ${detail}`
+        : `La sauvegarde du plateau a échoué : ${detail}`)
+    } finally { setBusy(false); setFinishStage(null) }
   }
 
   async function loadPlateau(name: string) {
@@ -302,7 +323,7 @@ export default function VehicleInspections() {
 
     {phase === 'mapping' && <div className="space-y-5">
       <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4"><h2 className="text-white font-semibold">Étape 1 — Faites le tour complet du plateau</h2><p className="text-sm text-slate-400 mt-1">Passez dans toutes les allées. Quand la carte est complète, revenez à l’endroit où le rover devra rentrer après chaque inspection.</p></section>
-      <div className="grid lg:grid-cols-[1fr_320px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} /></div><aside className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 space-y-5"><DrivePad connected={connected} onMove={move} onStop={stop} /><div className="border-t border-slate-800 pt-4"><label className="text-xs text-slate-400">Nom du plateau</label><input value={plateauName} onChange={event => setPlateauName(event.target.value)} className="w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-white" /><div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex gap-2"><House size={15} className="shrink-0" />Ramenez d’abord le rover à sa future maison.</div><button onClick={finishPlateau} disabled={busy || !pose || !plateauName.trim()} className="w-full mt-3 py-3 rounded-lg bg-emerald-600 text-white disabled:opacity-40"><Save size={15} className="inline mr-2" />Terminer et enregistrer</button></div></aside></div>
+      <div className="grid lg:grid-cols-[1fr_320px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} /></div><aside className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 space-y-5"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /><div className="border-t border-slate-800 pt-4"><label className="text-xs text-slate-400">Nom du plateau</label><input value={plateauName} onChange={event => { setPlateauName(event.target.value); setFinishMessage(null) }} disabled={busy} className="w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-white disabled:opacity-50" /><div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex gap-2"><House size={15} className="shrink-0" />Ramenez d’abord le rover à sa future maison.</div><div className={`mt-3 flex items-center gap-2 text-xs ${pose ? 'text-emerald-400' : 'text-amber-400'}`}><CircleDot size={13} />{pose ? `Position disponible : ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : 'Attente de la position du rover…'}</div>{finishMessage && <div className={`mt-3 p-3 rounded-lg border text-xs ${finishStage ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>{finishStage && <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse mr-2" />}{finishMessage}</div>}<button onClick={() => { void finishPlateau() }} disabled={busy} className="w-full mt-3 py-3 rounded-lg bg-emerald-600 text-white disabled:opacity-60"><Save size={15} className="inline mr-2" />{finishStage ? 'Préparation en cours…' : 'Terminer et enregistrer'}</button></div></aside></div>
     </div>}
 
     {phase === 'learning' && <div className="space-y-5">
