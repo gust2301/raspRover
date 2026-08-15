@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import pathlib
+import re
 import struct
 import subprocess
 import time
@@ -898,6 +899,15 @@ def _nav2_running() -> bool:
     return result.returncode == 0
 
 
+def _navigation_launcher_running() -> bool:
+    """True while start_navigation.sh is still bringing Nav2 up."""
+    result = subprocess.run(
+        ["docker", "exec", _slam_container, "pgrep", "-f", "[s]tart_navigation.sh"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def _saved_maps() -> list[dict[str, Any]]:
     result = subprocess.run(
         [
@@ -964,6 +974,24 @@ def _read_process_log(path: str) -> str | None:
         return output[-5000:] if result.returncode == 0 and output else None
     except (OSError, subprocess.TimeoutExpired):
         return None
+
+
+def _process_log_summary(value: str | None) -> str | None:
+    """Extract a short, displayable cause from a ROS launch log."""
+    if not value:
+        return None
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", value)
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    significant = [
+        line
+        for line in lines
+        if any(
+            marker in line.lower()
+            for marker in ("error", "failed", "exception", "invalid", "absent", "manquant")
+        )
+    ]
+    selected = significant[-3:] or lines[-3:]
+    return " | ".join(selected)[-1200:] if selected else None
 
 
 def _active_map_name() -> str | None:
@@ -1430,10 +1458,14 @@ async def slam_load(body: dict[str, Any]) -> dict:
         stderr=subprocess.DEVNULL,
     )
     navigation_started = False
-    for _attempt in range(40):
-        navigation, mapping, bridge_status = await asyncio.gather(
+    # Nav2 peut prendre sensiblement plus de 20 secondes à activer tous ses
+    # lifecycle nodes sur la Pi. Le lanceur reste surveillé pour rendre la main
+    # immédiatement lorsqu'il plante, sans attendre tout le délai.
+    for attempt in range(120):
+        navigation, mapping, launcher, bridge_status = await asyncio.gather(
             loop.run_in_executor(None, _nav2_running),
             loop.run_in_executor(None, _slam_running),
+            loop.run_in_executor(None, _navigation_launcher_running),
             loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
         )
         bridge_ready = (
@@ -1444,6 +1476,8 @@ async def slam_load(body: dict[str, Any]) -> dict:
         if navigation and not mapping and bridge_ready:
             navigation_started = True
             break
+        if attempt >= 4 and not navigation and not launcher:
+            break
         await asyncio.sleep(0.5)
     if not navigation_started:
         error = await loop.run_in_executor(
@@ -1451,11 +1485,17 @@ async def slam_load(body: dict[str, Any]) -> dict:
         )
         if error:
             log.error("Échec du démarrage Nav2:\n%s", error)
+        detail = _process_log_summary(error)
+        message = "Nav2 ne s'est pas lancé"
+        if detail:
+            message = f"{message} : {detail}"
+        else:
+            message = f"{message} après 60 secondes"
         return JSONResponse(
             status_code=500,
             content={
                 "ok": False,
-                "error": "Nav2 non démarré. Consultez le journal ROS sur la Pi.",
+                "error": message,
             },
         )
     # La première pose peut être publiée pendant la configuration d'AMCL et

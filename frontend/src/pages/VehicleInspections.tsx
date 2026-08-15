@@ -231,7 +231,7 @@ export default function VehicleInspections() {
       savedName = saved.name
       setFinishStage('stopping'); setFinishMessage(`2/4 — Carte « ${saved.name} » sauvegardée. Arrêt de la cartographie…`)
       await request('/api/slam/stop')
-      setFinishStage('loading'); setFinishMessage('3/4 — Démarrage de Nav2 sur la nouvelle carte… Cela peut prendre 20 à 30 secondes.')
+      setFinishStage('loading'); setFinishMessage('3/4 — Démarrage de Nav2 sur la nouvelle carte… Cela peut prendre jusqu’à 60 secondes sur la Pi.')
       await request('/api/slam/load', { name: saved.name, initial_pose: finalPose })
       setFinishStage('home'); setFinishMessage('4/4 — Enregistrement de cette position comme maison du rover…')
       await request('/api/slam/home')
