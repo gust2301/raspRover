@@ -215,6 +215,10 @@ class Nav2Bridge(Node):
 
     def _write_status(self) -> None:
         self._status["action_server_ready"] = self._client.server_is_ready()
+        # ``updated_at`` dates the last mission state transition. Keep a
+        # separate heartbeat for API health checks so an idle, healthy bridge
+        # does not look stale after two seconds.
+        self._status["heartbeat_at"] = time.time()
         temporary_path = "/tmp/nav2_status.json.tmp"
         with open(temporary_path, "w", encoding="utf-8") as stream:
             json.dump(self._status, stream)

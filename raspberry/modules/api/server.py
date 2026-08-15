@@ -1470,7 +1470,9 @@ async def slam_load(body: dict[str, Any]) -> dict:
         )
         bridge_ready = (
             bridge_status is not None
-            and time.time() - float(bridge_status.get("updated_at", 0.0)) <= 2.0
+            and time.time()
+            - float(bridge_status.get("heartbeat_at", bridge_status.get("updated_at", 0.0)))
+            <= 2.0
             and bool(bridge_status.get("action_server_ready"))
         )
         if navigation and not mapping and bridge_ready:

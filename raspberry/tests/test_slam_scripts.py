@@ -72,6 +72,7 @@ def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
     assert 'create_client(GetState, "/amcl/get_state")' in bridge
     assert "State.PRIMARY_STATE_ACTIVE" in bridge
     assert "message.header.stamp = self.get_clock().now().to_msg()" not in bridge
+    assert 'self._status["heartbeat_at"] = time.time()' in bridge
 
 
 def test_api_detects_composed_nav2_container():
@@ -80,6 +81,7 @@ def test_api_detects_composed_nav2_container():
     assert '"pgrep", "-f", "[n]av2_container"' in server
     assert '"pgrep", "-f", "bt_navigator"' not in server
     assert 'bridge_status.get("action_server_ready")' in server
+    assert 'bridge_status.get("heartbeat_at", bridge_status.get("updated_at", 0.0))' in server
     assert "_nav2_motors.set_initial_pose(pose_values)" in server
     assert "for attempt in range(120):" in server
     assert "_navigation_launcher_running" in server
