@@ -994,6 +994,52 @@ def _process_log_summary(value: str | None) -> str | None:
     return " | ".join(selected)[-1200:] if selected else None
 
 
+def _validate_nav2_route(poses: list[dict], labels: list[str]) -> dict:
+    """Ask Nav2 to compute every route segment without moving the rover."""
+    payload = json.dumps(
+        {
+            "poses": [
+                {
+                    "x": float(pose["x"]),
+                    "y": float(pose["y"]),
+                    "yaw": float(pose.get("yaw", 0.0)),
+                }
+                for pose in poses
+            ],
+            "labels": labels,
+        },
+        separators=(",", ":"),
+    )
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                _slam_container,
+                "bash",
+                "-c",
+                'source /opt/ros/jazzy/setup.bash && python3 '
+                '/opt/rasprover/nav2_route_validator.py "$1"',
+                "rasprover-route-validator",
+                payload,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=max(20.0, 15.0 * max(1, len(poses) - 1)),
+        )
+        for line in reversed(result.stdout.splitlines()):
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(response, dict):
+                return response
+        detail = result.stderr.strip() or result.stdout.strip()
+        return {"ok": False, "error": detail[-1200:] or "Validation Nav2 sans réponse"}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": f"Validation Nav2 impossible : {exc}"}
+
+
 def _active_map_name() -> str | None:
     try:
         result = subprocess.run(
@@ -1550,6 +1596,42 @@ _INSPECTION_ZONES = {
 }
 
 
+def _parse_inspection_waypoints(raw_waypoints: Any) -> list[dict]:
+    if not isinstance(raw_waypoints, list) or not 1 <= len(raw_waypoints) <= 30:
+        raise ValueError("1 à 30 points requis")
+    waypoints: list[dict] = []
+    for item in raw_waypoints:
+        zone = str(item["zone"])
+        if zone not in _INSPECTION_ZONES:
+            raise ValueError("Zone invalide")
+        waypoint = {
+            "zone": zone,
+            "x": float(item["x"]),
+            "y": float(item["y"]),
+            "yaw": float(item.get("yaw", 0.0)),
+            "pan": float(item.get("pan", 0.0)),
+            "tilt": float(item.get("tilt", 0.0)),
+        }
+        if not all(math.isfinite(value) for key, value in waypoint.items() if key != "zone"):
+            raise ValueError("Coordonnées invalides")
+        waypoints.append(waypoint)
+    return waypoints
+
+
+async def _validate_automotive_poses(
+    map_name: str, poses: list[dict], labels: list[str]
+) -> dict:
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _nav2_running):
+        return {"ok": False, "error": "Nav2 non actif"}
+    active_map = await loop.run_in_executor(None, _active_map_name)
+    if active_map != map_name:
+        return {"ok": False, "error": f"Chargez la carte {map_name}"}
+    if len(poses) < 2:
+        return {"ok": True, "validated_segments": 0}
+    return await loop.run_in_executor(None, lambda: _validate_nav2_route(poses, labels))
+
+
 def _public_inspection(inspection: dict) -> dict:
     result = dict(inspection)
     result["captures"] = [
@@ -1583,6 +1665,24 @@ async def automotive_route(route_id: str) -> dict:
     return {"ok": True, "route": route}
 
 
+@app.post("/api/automotive/routes/validate")
+async def automotive_route_validate(body: dict[str, Any]) -> dict:
+    map_name = validate_map_name(str(body.get("map_name", "")).strip())
+    if map_name is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Carte invalide"})
+    try:
+        waypoints = _parse_inspection_waypoints(body.get("waypoints"))
+    except (KeyError, TypeError, ValueError) as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+    first_index = max(0, len(waypoints) - 2)
+    poses = waypoints[first_index:]
+    labels = [f"point {index + 1}" for index in range(first_index, len(waypoints))]
+    validation = await _validate_automotive_poses(map_name, poses, labels)
+    if not validation.get("ok"):
+        return JSONResponse(status_code=409, content=validation)
+    return validation
+
+
 @app.post("/api/automotive/routes")
 async def automotive_route_create(body: dict[str, Any]) -> dict:
     if _automotive_repository is None:
@@ -1597,26 +1697,21 @@ async def automotive_route_create(body: dict[str, Any]) -> dict:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
     if not isinstance(raw_waypoints, list) or not 2 <= len(raw_waypoints) <= 30:
         return JSONResponse(status_code=400, content={"ok": False, "error": "2 à 30 points requis"})
-    waypoints: list[dict] = []
     try:
-        for item in raw_waypoints:
-            zone = str(item["zone"])
-            if zone not in _INSPECTION_ZONES:
-                raise ValueError
-            waypoint = {
-                "zone": zone,
-                "x": float(item["x"]),
-                "y": float(item["y"]),
-                "yaw": float(item.get("yaw", 0.0)),
-                "pan": float(item.get("pan", 0.0)),
-                "tilt": float(item.get("tilt", 0.0)),
-            }
-            if not all(math.isfinite(value) for key, value in waypoint.items() if key != "zone"):
-                raise ValueError
-            waypoints.append(waypoint)
-    except (KeyError, TypeError, ValueError):
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Points invalides"})
+        waypoints = _parse_inspection_waypoints(raw_waypoints)
+    except (KeyError, TypeError, ValueError) as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
     loop = asyncio.get_running_loop()
+    home = await loop.run_in_executor(None, lambda: get_map_home(map_name))
+    poses = [home, *waypoints, home] if home is not None else waypoints
+    labels = (
+        ["maison", *[f"point {index + 1}" for index in range(len(waypoints))], "maison"]
+        if home is not None
+        else [f"point {index + 1}" for index in range(len(waypoints))]
+    )
+    validation = await _validate_automotive_poses(map_name, poses, labels)
+    if not validation.get("ok"):
+        return JSONResponse(status_code=409, content=validation)
     route = await loop.run_in_executor(
         None, lambda: _automotive_repository.create_route(name, map_name, waypoints)
     )
@@ -1678,6 +1773,25 @@ async def automotive_inspection_start(body: dict[str, Any]) -> dict:
             status_code=409,
             content={"ok": False, "error": "Définissez la maison avant l'inspection"},
         )
+    current_pose = await loop.run_in_executor(
+        None, lambda: _read_container_json("/tmp/current_pose.json")
+    )
+    if current_pose is None or time.time() - float(current_pose.get("updated_at", 0.0)) > 5.0:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Position actuelle indisponible pour valider le trajet"},
+        )
+    mission_poses = [current_pose, *route["waypoints"], home]
+    mission_labels = [
+        "position actuelle",
+        *[f"point {index + 1}" for index in range(len(route["waypoints"]))],
+        "maison",
+    ]
+    validation = await _validate_automotive_poses(
+        active_map, mission_poses, mission_labels
+    )
+    if not validation.get("ok"):
+        return JSONResponse(status_code=409, content=validation)
     vehicle = await loop.run_in_executor(
         None, lambda: _automotive_repository.upsert_vehicle(registration, label)
     )

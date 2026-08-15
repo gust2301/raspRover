@@ -55,6 +55,9 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert "s/base_footprint/base_link/g" in script
     assert "RASPROVER_NAV2_ROBOT_RADIUS_M:-0.16" in script
     assert "RASPROVER_NAV2_INFLATION_RADIUS_M:-0.30" in script
+    assert "RASPROVER_NAV2_SERVER_TIMEOUT_MS:-1000" in script
+    assert "RASPROVER_NAV2_CONTROLLER_FREQUENCY_HZ:-10.0" in script
+    assert "default_server_timeout:" in script
     assert "stop_on_failure:" in script
     assert "\\1 true" in script
     assert 'params_file:="${NAV2_PARAMS}"' in script
@@ -73,6 +76,16 @@ def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
     assert "State.PRIMARY_STATE_ACTIVE" in bridge
     assert "message.header.stamp = self.get_clock().now().to_msg()" not in bridge
     assert 'self._status["heartbeat_at"] = time.time()' in bridge
+    assert 'getattr(wrapped_result.result, "error_msg", "")' in bridge
+
+
+def test_route_validator_uses_planner_without_sending_navigation_goals():
+    validator = (Path(__file__).parents[1] / "ros" / "nav2_route_validator.py").read_text()
+
+    assert "ComputePathToPose" in validator
+    assert 'ActionClient(self, ComputePathToPose, "/compute_path_to_pose")' in validator
+    assert "FollowWaypoints" not in validator
+    assert "Twist" not in validator
 
 
 def test_api_detects_composed_nav2_container():
@@ -86,3 +99,6 @@ def test_api_detects_composed_nav2_container():
     assert "for attempt in range(120):" in server
     assert "_navigation_launcher_running" in server
     assert "_process_log_summary(error)" in server
+    assert '@app.post("/api/automotive/routes/validate")' in server
+    assert "_validate_automotive_poses(" in server
+    assert '"position actuelle"' in server

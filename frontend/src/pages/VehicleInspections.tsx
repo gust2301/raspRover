@@ -24,6 +24,7 @@ interface Pose { x: number; y: number; yaw: number }
 interface LearnedPoint extends Pose { pan: number; tilt: number; zone: string }
 interface SavedMap { name: string }
 interface RouteSummary { id: string; name: string; map_name: string; waypoint_count: number }
+interface RouteDetail extends RouteSummary { waypoints: LearnedPoint[] }
 interface CaptureRecord { id: string; zone: string; image_url: string }
 interface Inspection {
   id: string
@@ -267,13 +268,42 @@ export default function VehicleInspections() {
     finally { setBusy(false) }
   }
 
-  function recordPoint() {
-    if (!pose) return
+  async function correctRoute(route: RouteSummary) {
+    setBusy(true); setError(null)
+    try {
+      if (activeMap !== route.map_name || slamMode !== 'navigation') {
+        await request('/api/slam/load', { name: route.map_name })
+        setActiveMap(route.map_name); setMapData(null)
+      }
+      const response = await fetch(`${apiBase}/api/automotive/routes/${route.id}`)
+      const data = await response.json()
+      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Parcours introuvable')
+      const detail = data.route as RouteDetail
+      setPoints(detail.waypoints.map(point => ({
+        zone: point.zone, x: point.x, y: point.y, yaw: point.yaw,
+        pan: point.pan, tilt: point.tilt,
+      })))
+      setRouteName(`${detail.name} corrigé`); setPhase('learning')
+      setNotice('Parcours chargé en correction. Supprimez le point signalé et les suivants, puis réenregistrez uniquement cette fin de parcours.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Erreur') }
+    finally { setBusy(false) }
+  }
+
+  async function recordPoint() {
+    if (!pose || !activeMap || busy) return
     const pan = Number(connection.lastStatus?.pan ?? 0)
     const tilt = Number(connection.lastStatus?.tilt ?? 0)
-    setPoints(current => [...current, { ...pose, pan, tilt, zone: selectedZone }])
-    const next = ZONES[(ZONES.findIndex(([value]) => value === selectedZone) + 1) % ZONES.length][0]
-    setSelectedZone(next); setNotice(`Point « ${ZONES.find(([value]) => value === selectedZone)?.[1]} » enregistré.`)
+    const candidate = { ...pose, pan, tilt, zone: selectedZone }
+    setBusy(true); setError(null); setNotice('Validation du trajet par Nav2, sans déplacement…')
+    try {
+      await request('/api/automotive/routes/validate', { map_name: activeMap, waypoints: [...points, candidate] })
+      setPoints(current => [...current, candidate])
+      const next = ZONES[(ZONES.findIndex(([value]) => value === selectedZone) + 1) % ZONES.length][0]
+      setSelectedZone(next); setNotice(`Point « ${ZONES.find(([value]) => value === selectedZone)?.[1]} » validé par Nav2 et enregistré.`)
+    } catch (reason) {
+      setNotice(null)
+      setError(`Point non enregistré : ${reason instanceof Error ? reason.message : 'trajet Nav2 invalide'}`)
+    } finally { setBusy(false) }
   }
 
   async function saveRoute() {
@@ -328,7 +358,7 @@ export default function VehicleInspections() {
 
     {phase === 'learning' && <div className="space-y-5">
       <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4"><h2 className="text-white font-semibold">Étape 2 — Apprenez le tour du véhicule de référence</h2><p className="text-sm text-slate-400 mt-1">Pilotez autour du véhicule. À chaque vue importante, orientez la caméra, choisissez la zone puis enregistrez le point. Les coordonnées sont capturées automatiquement.</p></section>
-      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button onClick={recordPoint} disabled={!pose} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />Enregistrer ce point</button></section></aside></div>
+      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button onClick={() => { void recordPoint() }} disabled={!pose || busy} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />{busy ? 'Validation Nav2…' : 'Enregistrer ce point'}</button></section></aside></div>
       <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h3 className="text-white font-medium">Points enregistrés ({points.length})</h3><p className="text-xs text-slate-500">Ils seront rejoués dans cet ordre.</p></div><div className="flex gap-2"><input value={routeName} onChange={event => setRouteName(event.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm text-white" /><button onClick={saveRoute} disabled={busy || points.length < 2} className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-40"><Save size={15} className="inline mr-1" />Enregistrer le parcours</button></div></div><div className="flex flex-wrap gap-2">{points.map((point, index) => <div key={index} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300 flex items-center gap-2"><MapPin size={13} className="text-emerald-400" /><span>{index + 1}. {ZONES.find(([value]) => value === point.zone)?.[1]}</span><button onClick={() => setPoints(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-red-400 ml-1"><Trash2 size={13} /></button></div>)}</div></section>
     </div>}
 
@@ -336,6 +366,7 @@ export default function VehicleInspections() {
       <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 space-y-4"><div><h2 className="text-white font-semibold">Étape 3 — Inspecter un véhicule</h2><p className="text-sm text-slate-500">Placez le véhicule sur le plateau puis lancez le parcours.</p></div><select value={selectedRoute} onChange={event => { const route = routes.find(item => item.id === event.target.value); if (route) void prepareInspection(route); else setSelectedRoute('') }} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white"><option value="">Choisir un parcours</option>{routes.map(route => <option key={route.id} value={route.id}>{route.name} · {route.waypoint_count} vues</option>)}</select><input value={registration} onChange={event => setRegistration(event.target.value.toUpperCase())} placeholder="Immatriculation" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white" /><input value={vehicleLabel} onChange={event => setVehicleLabel(event.target.value)} placeholder="Modèle / référence (facultatif)" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white" />
         {inspection && <div className="rounded-lg bg-slate-950 p-3 text-sm"><p className="text-white font-medium">{inspection.registration}</p><p className={inspection.status === 'error' ? 'text-red-400' : 'text-blue-400'}>{STATUS_LABEL[inspection.status] ?? inspection.status}{inspection.current_waypoint != null ? ` · vue ${inspection.current_waypoint + 1}` : ''}</p>{inspection.error && <p className="text-xs text-red-400 mt-1">{inspection.error}</p>}</div>}
         {inspection && ['starting', 'navigating', 'capturing', 'returning_home'].includes(inspection.status) ? <button onClick={() => { void stopInspection() }} className="w-full py-3 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30"><Square size={16} className="inline mr-2" />Arrêter</button> : <button onClick={() => { void startInspection() }} disabled={busy || !selectedRoute || !registration.trim() || slamMode !== 'navigation'} className="w-full py-3 rounded-lg bg-blue-600 text-white font-medium disabled:opacity-40"><Play size={16} className="inline mr-2" />Démarrer l’inspection automatique</button>}
+        {selectedRoute && <button onClick={() => { const route = routes.find(item => item.id === selectedRoute); if (route) void correctRoute(route) }} disabled={busy} className="w-full py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 disabled:opacity-40">Corriger ce parcours sans tout recommencer</button>}
         <button onClick={() => setPhase('welcome')} className="w-full text-xs text-slate-500 hover:text-slate-300">Configurer un autre plateau ou parcours</button>
       </section><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} />{!!inspection?.captures?.length && <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><h3 className="text-sm text-white font-medium mb-3">Photos ({inspection.captures.length})</h3><div className="grid grid-cols-2 md:grid-cols-3 gap-3">{inspection.captures.map(capture => <div key={capture.id}><img src={`${apiBase}${capture.image_url}`} className="rounded-lg aspect-video object-cover" /><p className="text-xs text-slate-500 mt-1">{ZONES.find(([value]) => value === capture.zone)?.[1] ?? capture.zone}</p></div>)}</div></section>}</div>
     </div>}
