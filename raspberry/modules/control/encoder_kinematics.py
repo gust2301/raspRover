@@ -24,10 +24,20 @@ class EncoderIntegrator:
         wheel_separation_m: float,
         left_sign: float = 1.0,
         right_sign: float = 1.0,
+        counterclockwise_wheel_separation_m: float | None = None,
+        clockwise_wheel_separation_m: float | None = None,
     ) -> None:
         if wheel_separation_m <= 0:
             raise ValueError("wheel_separation_m doit être positif")
         self.wheel_separation_m = wheel_separation_m
+        self.counterclockwise_wheel_separation_m = (
+            counterclockwise_wheel_separation_m or wheel_separation_m
+        )
+        self.clockwise_wheel_separation_m = clockwise_wheel_separation_m or wheel_separation_m
+        if self.counterclockwise_wheel_separation_m <= 0:
+            raise ValueError("counterclockwise_wheel_separation_m doit être positif")
+        if self.clockwise_wheel_separation_m <= 0:
+            raise ValueError("clockwise_wheel_separation_m doit être positif")
         self.left_sign = 1.0 if left_sign >= 0 else -1.0
         self.right_sign = 1.0 if right_sign >= 0 else -1.0
         self.x = self.y = self.yaw = 0.0
@@ -74,7 +84,13 @@ class EncoderIntegrator:
         self._integrated_left += dl
         self._integrated_right += dr
         distance = 0.5 * (dl + dr)
-        heading_delta = (dr - dl) / self.wheel_separation_m
+        wheel_delta = dr - dl
+        effective_separation = (
+            self.counterclockwise_wheel_separation_m
+            if wheel_delta >= 0.0
+            else self.clockwise_wheel_separation_m
+        )
+        heading_delta = wheel_delta / effective_separation
         middle_yaw = self.yaw + 0.5 * heading_delta
         self.x += distance * math.cos(middle_yaw)
         self.y += distance * math.sin(middle_yaw)

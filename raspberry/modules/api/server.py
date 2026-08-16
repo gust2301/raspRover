@@ -106,6 +106,16 @@ _HOME_POSITION_STDDEV_MAX_M = 0.30
 _HOME_YAW_STDDEV_MAX_RAD = math.radians(25.0)
 _HOME_ODOMETRY_POSITION_TOLERANCE_M = 0.20
 _HOME_ODOMETRY_YAW_TOLERANCE_RAD = math.radians(20.0)
+# AMCL ne republie /amcl_pose (et sa covariance) que lorsque le rover a bougé
+# de plus de update_min_d/update_min_a depuis sa dernière mise à jour. Un
+# rover qui s'arrête juste après un virage reste donc bloqué avec une
+# covariance figée, parfois élevée, tant qu'il ne rebouge pas. Ces réglages
+# forcent une reconvergence AMCL sur place avant de conclure à une position
+# instable.
+_HOME_AMCL_REFRESH_TIMEOUT_S = 2.5
+_HOME_AMCL_REFRESH_POLL_S = 0.25
+_HOME_AMCL_REFRESH_SEED_POSITION_STDDEV_M = 0.35
+_HOME_AMCL_REFRESH_SEED_YAW_STDDEV_RAD = math.radians(20.0)
 
 
 def _load_config() -> dict:
@@ -116,7 +126,14 @@ def _load_config() -> dict:
 
 
 _CHASSIS = {
-    "rasprover": {"main_type": 1, "wheel_separation_m": 0.125},
+    # Largeur cinématique effective mesurée par comparaison encodeurs/LiDAR.
+    # Le patinage du châssis 4WD la rend supérieure aux 0.125 m géométriques.
+    "rasprover": {
+        "main_type": 1,
+        "wheel_separation_m": 0.33,
+        "counterclockwise_wheel_separation_m": 0.26,
+        "clockwise_wheel_separation_m": 0.44,
+    },
     "ugv_rover": {"main_type": 2, "wheel_separation_m": 0.172},
     "ugv_beast": {"main_type": 3, "wheel_separation_m": 0.141},
 }
@@ -135,6 +152,18 @@ def _chassis_settings(config: dict | None = None) -> dict[str, float | int | str
         "main_type": int(chassis["main_type"]),
         "module_type": int(control.get("module_type", 2)),
         "wheel_separation_m": float(slam.get("wheel_separation_m", chassis["wheel_separation_m"])),
+        "counterclockwise_wheel_separation_m": float(
+            slam.get(
+                "counterclockwise_wheel_separation_m",
+                chassis.get("counterclockwise_wheel_separation_m", chassis["wheel_separation_m"]),
+            )
+        ),
+        "clockwise_wheel_separation_m": float(
+            slam.get(
+                "clockwise_wheel_separation_m",
+                chassis.get("clockwise_wheel_separation_m", chassis["wheel_separation_m"]),
+            )
+        ),
         "left_encoder_sign": float(slam.get("left_encoder_sign", 1.0)),
         "right_encoder_sign": float(slam.get("right_encoder_sign", 1.0)),
     }
@@ -965,6 +994,48 @@ def _encoder_odometry_ready(status: dict | None = None) -> bool:
         return False
 
 
+async def _refresh_amcl_pose(loop: asyncio.AbstractEventLoop, pose: dict) -> dict:
+    """Force AMCL to re-evaluate its confidence at the rover's current pose.
+
+    AMCL only republishes /amcl_pose (and its covariance) once the rover has
+    moved past update_min_d/update_min_a since its last update, so a rover
+    stopped right after a turn can stay stuck with a stale, inflated
+    covariance indefinitely. Re-seeding /initialpose at the rover's own last
+    known pose (deliberately widened, not trusted) forces AMCL to reconverge
+    from the next laser scan regardless of motion. Returns the freshest pose
+    read within the retry window, or the original pose if none arrived.
+    """
+    if _nav2_motors is None:
+        return pose
+    seed_seq = pose.get("amcl_quality_seq")
+    try:
+        seed_pose = {
+            "x": float(pose["x"]),
+            "y": float(pose["y"]),
+            "yaw": float(pose["yaw"]),
+            "position_stddev_m": _HOME_AMCL_REFRESH_SEED_POSITION_STDDEV_M,
+            "yaw_stddev_rad": _HOME_AMCL_REFRESH_SEED_YAW_STDDEV_RAD,
+        }
+    except (KeyError, TypeError, ValueError):
+        return pose
+    await loop.run_in_executor(None, lambda: _nav2_motors.set_initial_pose(seed_pose))
+
+    deadline = time.monotonic() + _HOME_AMCL_REFRESH_TIMEOUT_S
+    refreshed = pose
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_HOME_AMCL_REFRESH_POLL_S)
+        candidate = await loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/current_pose.json")
+        )
+        if candidate is None:
+            continue
+        candidate_seq = candidate.get("amcl_quality_seq")
+        if candidate_seq is not None and candidate_seq != seed_seq:
+            refreshed = candidate
+            break
+    return refreshed
+
+
 def _nav2_ready() -> bool:
     """True only when the bridge sees Nav2's FollowWaypoints action server."""
     if not _nav2_running():
@@ -1626,6 +1697,10 @@ async def slam_start() -> dict:
         "-e",
         f"RASPROVER_WHEEL_SEPARATION_M={chassis['wheel_separation_m']}",
         "-e",
+        f"RASPROVER_CCW_WHEEL_SEPARATION_M={chassis['counterclockwise_wheel_separation_m']}",
+        "-e",
+        f"RASPROVER_CW_WHEEL_SEPARATION_M={chassis['clockwise_wheel_separation_m']}",
+        "-e",
         f"RASPROVER_LEFT_ENCODER_SIGN={chassis['left_encoder_sign']}",
         "-e",
         f"RASPROVER_RIGHT_ENCODER_SIGN={chassis['right_encoder_sign']}",
@@ -1834,6 +1909,10 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_MAX_SPEED_M_S={float(cfg.get('max_linear_speed_m_s', 0.65))}",
         "-e",
         f"RASPROVER_WHEEL_SEPARATION_M={chassis['wheel_separation_m']}",
+        "-e",
+        f"RASPROVER_CCW_WHEEL_SEPARATION_M={chassis['counterclockwise_wheel_separation_m']}",
+        "-e",
+        f"RASPROVER_CW_WHEEL_SEPARATION_M={chassis['clockwise_wheel_separation_m']}",
         "-e",
         f"RASPROVER_LEFT_ENCODER_SIGN={chassis['left_encoder_sign']}",
         "-e",
@@ -2368,16 +2447,26 @@ async def nav2_home_start() -> dict:
         position_stddev > _HOME_POSITION_STDDEV_MAX_M
         or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD
     ):
+        # La covariance peut être figée depuis le dernier mouvement (AMCL ne
+        # republie pas à l'arrêt). Force une reconvergence sur place avant de
+        # conclure à une instabilité réelle.
         await loop.run_in_executor(None, _motors.stop)
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "error": "Position du rover instable sur la carte : retour maison désactivé",
-                "position_stddev_m": position_stddev,
-                "yaw_stddev_rad": yaw_stddev,
-            },
-        )
+        pose = await _refresh_amcl_pose(loop, pose)
+        position_stddev = float(pose.get("position_stddev_m", math.inf))
+        yaw_stddev = float(pose.get("yaw_stddev_rad", math.inf))
+        if (
+            position_stddev > _HOME_POSITION_STDDEV_MAX_M
+            or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD
+        ):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error": "Position du rover instable sur la carte : retour maison désactivé",
+                    "position_stddev_m": position_stddev,
+                    "yaw_stddev_rad": yaw_stddev,
+                },
+            )
 
     distance, yaw_error = target_pose_error(home, pose)
     if distance <= 0.10 and abs(yaw_error) <= math.radians(10.0):

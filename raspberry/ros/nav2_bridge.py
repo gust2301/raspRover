@@ -25,7 +25,9 @@ class Nav2Bridge(Node):
         self.declare_parameter("motor_udp_port", 7668)
         self.declare_parameter("command_udp_port", 7669)
         self.declare_parameter("max_linear_speed_m_s", 0.65)
-        self.declare_parameter("wheel_separation_m", 0.125)
+        self.declare_parameter("wheel_separation_m", 0.33)
+        self.declare_parameter("counterclockwise_wheel_separation_m", 0.26)
+        self.declare_parameter("clockwise_wheel_separation_m", 0.44)
         self.declare_parameter("initial_pose_x", 0.0)
         self.declare_parameter("initial_pose_y", 0.0)
         self.declare_parameter("initial_pose_yaw", 0.0)
@@ -35,6 +37,12 @@ class Nav2Bridge(Node):
         self._motor_port = int(self.get_parameter("motor_udp_port").value)
         self._max_speed = float(self.get_parameter("max_linear_speed_m_s").value)
         self._wheel_separation = float(self.get_parameter("wheel_separation_m").value)
+        self._counterclockwise_wheel_separation = float(
+            self.get_parameter("counterclockwise_wheel_separation_m").value
+        )
+        self._clockwise_wheel_separation = float(
+            self.get_parameter("clockwise_wheel_separation_m").value
+        )
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._command_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._command_socket.bind(("127.0.0.1", int(self.get_parameter("command_udp_port").value)))
@@ -71,7 +79,13 @@ class Nav2Bridge(Node):
         )
 
     def _on_velocity(self, message: Twist) -> None:
-        half_track = self._wheel_separation / 2.0
+        if message.angular.z > 0.0:
+            wheel_separation = self._counterclockwise_wheel_separation
+        elif message.angular.z < 0.0:
+            wheel_separation = self._clockwise_wheel_separation
+        else:
+            wheel_separation = self._wheel_separation
+        half_track = wheel_separation / 2.0
         left_m_s = message.linear.x - message.angular.z * half_track
         right_m_s = message.linear.x + message.angular.z * half_track
         scale = max(self._max_speed, abs(left_m_s), abs(right_m_s))

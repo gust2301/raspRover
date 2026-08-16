@@ -97,8 +97,12 @@ slam:
   # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65
   # Odometrie physique issue des encodeurs odl/odr du firmware Waveshare.
-  # Valeur RaspRover PT 4WD nominale: 0.125 m. Calibrer par une rotation mesuree.
-  wheel_separation_m: 0.125
+  # Ecartement cinematique effectif du RaspRover PT 4WD sur sol interieur.
+  # Il dépasse les 0.125 m géométriques à cause du glissement en virage.
+  # Valeur mesurée en comparant les rotations encodeurs aux scans LiDAR.
+  wheel_separation_m: 0.33
+  counterclockwise_wheel_separation_m: 0.26
+  clockwise_wheel_separation_m: 0.44
   left_encoder_sign: 1.0
   right_encoder_sign: 1.0
   encoder_feedback_hz: 5.0

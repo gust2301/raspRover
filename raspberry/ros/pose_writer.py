@@ -21,6 +21,7 @@ class PoseWriter(Node):
         self._buffer = Buffer()
         self._listener = TransformListener(self._buffer, self)
         self._amcl_quality: tuple[float, float] | None = None
+        self._amcl_quality_seq = 0
         self.create_subscription(PoseWithCovarianceStamped, "/amcl_pose", self._on_amcl_pose, 10)
         self.create_timer(0.2, self._write_pose)
 
@@ -32,6 +33,11 @@ class PoseWriter(Node):
             math.sqrt(position_variance),
             math.sqrt(yaw_variance),
         )
+        # AMCL ne republie que lorsque le rover a bougé de update_min_d/a. Ce
+        # compteur permet à l'API de détecter une confirmation réellement
+        # fraîche (après une repose d'initialpose) plutôt que de réutiliser
+        # une covariance figée depuis le dernier mouvement.
+        self._amcl_quality_seq += 1
 
     def _write_pose(self) -> None:
         try:
@@ -59,6 +65,7 @@ class PoseWriter(Node):
         if self._amcl_quality is not None:
             payload["position_stddev_m"] = self._amcl_quality[0]
             payload["yaw_stddev_rad"] = self._amcl_quality[1]
+            payload["amcl_quality_seq"] = self._amcl_quality_seq
         temporary_path = "/tmp/current_pose.json.tmp"
         with open(temporary_path, "w", encoding="utf-8") as stream:
             json.dump(payload, stream)

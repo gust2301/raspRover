@@ -21,7 +21,9 @@ rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json \
 
 python3 /opt/rasprover/encoder_odometry.py --ros-args \
   -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
-  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.125}" \
+  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.33}" \
+  -p counterclockwise_wheel_separation_m:="${RASPROVER_CCW_WHEEL_SEPARATION_M:-0.26}" \
+  -p clockwise_wheel_separation_m:="${RASPROVER_CW_WHEEL_SEPARATION_M:-0.44}" \
   -p left_encoder_sign:="${RASPROVER_LEFT_ENCODER_SIGN:-1.0}" \
   -p right_encoder_sign:="${RASPROVER_RIGHT_ENCODER_SIGN:-1.0}" \
   -p laser_x_m:="${RASPROVER_LASER_X_M:-0.0}" \
