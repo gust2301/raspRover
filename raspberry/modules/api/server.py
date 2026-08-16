@@ -1401,7 +1401,6 @@ async def slam_status() -> dict:
         current_map,
         pose,
         active_map,
-        encoder_odometry,
     ) = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _nav2_running),
@@ -1411,9 +1410,11 @@ async def slam_status() -> dict:
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
         loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
         loop.run_in_executor(None, _active_map_name),
-        loop.run_in_executor(
-            None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
-        ),
+    )
+    # Lire l'odométrie après les appels ROS plus lents. Sinon son horodatage a
+    # déjà plus d'une seconde au moment du calcul de ``ready``.
+    encoder_odometry = await loop.run_in_executor(
+        None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
     )
     required = {"/scan", "/odom", "/map"}
     encoder_ready = _encoder_odometry_ready(encoder_odometry)
