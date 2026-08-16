@@ -13,7 +13,7 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
-from nav2_msgs.action import FollowWaypoints
+from nav2_msgs.action import FollowWaypoints, NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -40,6 +40,7 @@ class Nav2Bridge(Node):
         self._command_socket.bind(("127.0.0.1", int(self.get_parameter("command_udp_port").value)))
         self._command_socket.setblocking(False)
         self._client = ActionClient(self, FollowWaypoints, "/follow_waypoints")
+        self._navigate_client = ActionClient(self, NavigateToPose, "/navigate_to_pose")
         initial_pose_qos = QoSProfile(depth=1)
         initial_pose_qos.reliability = ReliabilityPolicy.RELIABLE
         initial_pose_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -88,6 +89,11 @@ class Nav2Bridge(Node):
                 action = command.get("action")
                 if action == "follow_waypoints":
                     self._follow(command.get("waypoints", []))
+                elif action == "navigate_to_pose":
+                    self._navigate_to_pose(
+                        command.get("pose", {}),
+                        no_recovery=bool(command.get("no_recovery", False)),
+                    )
                 elif action == "set_initial_pose":
                     self._set_initial_pose(command.get("pose", {}))
                 elif action == "cancel":
@@ -177,6 +183,27 @@ class Nav2Bridge(Node):
         future = self._client.send_goal_async(goal, feedback_callback=self._feedback)
         future.add_done_callback(self._goal_response)
 
+    def _navigate_to_pose(self, pose_value: dict, *, no_recovery: bool) -> None:
+        if not self._navigate_client.wait_for_server(timeout_sec=2.0):
+            self._set_status("error", error="Action NavigateToPose indisponible")
+            self._send_stop(mission_finished=True)
+            return
+
+        goal = NavigateToPose.Goal()
+        goal.pose.header.frame_id = "map"
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = float(pose_value["x"])
+        goal.pose.pose.position.y = float(pose_value["y"])
+        yaw = float(pose_value.get("yaw", 0.0))
+        goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        if no_recovery:
+            goal.behavior_tree = "/opt/rasprover/navigate_to_pose_no_recovery.xml"
+
+        self._set_status("starting", waypoint_count=1, current_waypoint=0)
+        future = self._navigate_client.send_goal_async(goal)
+        future.add_done_callback(self._goal_response)
+
     def _goal_response(self, future) -> None:
         self._goal_handle = future.result()
         if not self._goal_handle.accepted:
@@ -198,6 +225,7 @@ class Nav2Bridge(Node):
         missed_indexes = [int(item.index) for item in missed]
         missed_codes = [int(item.error_code) for item in missed]
         nav2_error = str(getattr(wrapped_result.result, "error_msg", "")).strip()
+        result_error_code = int(getattr(wrapped_result.result, "error_code", 0))
         succeeded = status == GoalStatus.STATUS_SUCCEEDED and not missed_indexes
         state = "completed" if succeeded else "error"
         self._set_status(
@@ -205,6 +233,7 @@ class Nav2Bridge(Node):
             result_status=int(status),
             missed_waypoints=missed_indexes,
             missed_error_codes=missed_codes,
+            error_code=result_error_code,
             error=None if succeeded else nav2_error or "Nav2 n'a pas pu terminer le point demandé",
         )
         self._goal_handle = None

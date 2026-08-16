@@ -2366,9 +2366,32 @@ async def nav2_home_start() -> dict:
             "home": home,
         }
 
+    validation = await loop.run_in_executor(
+        None,
+        lambda: _validate_nav2_route(
+            [pose, home],
+            ["position actuelle", "maison"],
+        ),
+    )
+    if not validation.get("ok"):
+        await loop.run_in_executor(None, _motors.stop)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": "Aucun chemin libre vers la maison sur la carte active",
+                "detail": validation.get("error"),
+                "distance_m": distance,
+                "home": home,
+            },
+        )
+
     if _patrol and _patrol.active:
         await _patrol.stop(loop)
-    await loop.run_in_executor(None, lambda: _nav2_motors.follow_waypoints([home]))
+    await loop.run_in_executor(
+        None,
+        lambda: _nav2_motors.go_to_pose(home, no_recovery=True),
+    )
     return {
         "ok": True,
         "state": "starting",

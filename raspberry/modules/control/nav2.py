@@ -75,6 +75,17 @@ class Nav2MotorBridge:
         self.enable()
         self._send_command({"action": "follow_waypoints", "waypoints": waypoints})
 
+    def go_to_pose(self, pose: dict[str, float], *, no_recovery: bool = False) -> None:
+        """Navigate to one pose, optionally without autonomous recovery motions."""
+        self.enable()
+        self._send_command(
+            {
+                "action": "navigate_to_pose",
+                "pose": pose,
+                "no_recovery": no_recovery,
+            }
+        )
+
     def set_initial_pose(self, pose: dict[str, float]) -> None:
         """Send the localization seed repeatedly while the ROS bridge starts."""
         payload = {"action": "set_initial_pose", "pose": pose}
