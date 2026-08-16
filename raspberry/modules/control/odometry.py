@@ -100,7 +100,11 @@ class EncoderFeedbackPublisher:
                 line = self._link.read_line(timeout_s=min(0.1, self._period))
                 if not line:
                     continue
-                feedback = json.loads(line)
+                try:
+                    feedback = json.loads(line)
+                except json.JSONDecodeError:
+                    log.debug("Ligne UART non JSON ignorée: %r", line)
+                    continue
                 if isinstance(feedback, dict) and self._valid_feedback(feedback):
                     self._publish(feedback)
                     if self._on_feedback is not None:

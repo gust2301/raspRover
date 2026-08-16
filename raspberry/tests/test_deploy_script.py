@@ -6,10 +6,12 @@ def test_deploy_restarts_lidar_before_control_api():
 
     lidar_restart = script.index("sudo systemctl restart ros2-lidar.service")
     lidar_wait = script.index("Attente du nouveau conteneur ros2-lidar")
-    api_restart = script.index("sudo systemctl restart rasprover-control.service")
+    api_restart = script.index("sudo systemctl stop --no-block rasprover-control.service")
 
     assert lidar_restart < lidar_wait < api_restart
     assert "docker inspect -f '{{.State.Running}}' ros2-lidar" in script
     assert "Publisher count: [1-9][0-9]*" in script
     assert "seconde initialisation du pilote LIDAR" in script
+    assert "systemctl stop --no-block rasprover-control.service" in script
+    assert "--kill-who=all --signal=SIGKILL rasprover-control.service" in script
     assert "modules/control/encoder_kinematics" in script

@@ -79,6 +79,8 @@ class ESP32Link:
         self.timeout_s = timeout_s
         self._ser: serial.Serial | None = None
         self._lock = threading.Lock()
+        self._read_lock = threading.Lock()
+        self._read_buffer = bytearray()
         self.stats = LinkStats()
 
     # -- Gestion de cycle de vie ---------------------------------------------
@@ -93,6 +95,7 @@ class ESP32Link:
         try:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
+            self._read_buffer.clear()
         except (serial.SerialException, AttributeError, NotImplementedError):
             pass
 
@@ -241,20 +244,34 @@ class ESP32Link:
         self.send({"T": CMD_SERIAL_ECHO, "cmd": 1 if enabled else 0})
 
     def read_line(self, timeout_s: float | None = None) -> str | None:
-        """Lit une ligne brute du port serie pour le diagnostic."""
+        """Lit une ligne complète sans perdre les fragments reçus sur timeout."""
         if not self.is_open:
             raise LinkNotOpenError("Port non ouvert")
         assert self._ser is not None
-        previous_timeout = self._ser.timeout
-        try:
-            if timeout_s is not None:
-                self._ser.timeout = timeout_s
-            raw = self._ser.read_until(b"\n", size=4096)
-        finally:
-            self._ser.timeout = previous_timeout
-        if not raw:
-            return None
-        return raw.decode("ascii", errors="replace").rstrip("\r\n")
+        deadline = time.monotonic() + (self.timeout_s if timeout_s is None else timeout_s)
+        with self._read_lock:
+            previous_timeout = self._ser.timeout
+            try:
+                while True:
+                    newline = self._read_buffer.find(b"\n")
+                    if newline >= 0:
+                        raw = bytes(self._read_buffer[:newline])
+                        del self._read_buffer[: newline + 1]
+                        return raw.decode("ascii", errors="replace").rstrip("\r")
+
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return None
+                    self._ser.timeout = min(0.05, remaining)
+                    waiting = int(getattr(self._ser, "in_waiting", 0) or 0)
+                    chunk = self._ser.read(max(1, min(waiting, 4096)))
+                    if chunk:
+                        self._read_buffer.extend(chunk)
+                        if len(self._read_buffer) > 65536:
+                            self._read_buffer.clear()
+                            log.warning("Buffer UART vidé: aucune fin de ligne détectée")
+            finally:
+                self._ser.timeout = previous_timeout
 
     @staticmethod
     def _looks_like_feedback(candidate: dict[str, Any]) -> bool:

@@ -27,6 +27,26 @@ from modules.control import (
 
 
 class TestESP32Link:
+    def test_read_line_keeps_uart_fragments_until_newline(self):
+        class FragmentedSerial:
+            is_open = True
+            timeout = 1.0
+
+            def __init__(self):
+                self.fragments = [b'{"T":', b'1001,"L":0', b',"R":0}\n']
+
+            @property
+            def in_waiting(self):
+                return len(self.fragments[0]) if self.fragments else 0
+
+            def read(self, _size):
+                return self.fragments.pop(0) if self.fragments else b""
+
+        link = ESP32Link()
+        link._ser = FragmentedSerial()  # type: ignore[assignment]
+
+        assert link.read_line(timeout_s=0.2) == '{"T":1001,"L":0,"R":0}'
+
     def test_open_close(self, emulator):
         link = ESP32Link(port=emulator["url"])
         assert not link.is_open

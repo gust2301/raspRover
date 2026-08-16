@@ -125,7 +125,19 @@ fi
 
 # Toujours redémarrer l'API après le lidar pour renouveler le pont /scan.
 echo "==> Redémarrage rasprover-control..."
-sudo systemctl restart rasprover-control.service
+sudo systemctl stop --no-block rasprover-control.service
+for _attempt in $(seq 1 20); do
+  CONTROL_STATE=$(systemctl is-active rasprover-control.service 2>/dev/null || true)
+  if [ "${CONTROL_STATE}" != "deactivating" ]; then
+    break
+  fi
+  sleep 0.5
+done
+if [ "${CONTROL_STATE:-unknown}" = "deactivating" ]; then
+  echo "    Arrêt gracieux trop long — terminaison du groupe de processus..."
+  sudo systemctl kill --kill-who=all --signal=SIGKILL rasprover-control.service
+fi
+sudo systemctl start rasprover-control.service
 echo "  OK"
 
 echo ""
