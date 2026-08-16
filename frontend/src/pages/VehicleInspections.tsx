@@ -20,7 +20,13 @@ interface SlamMap {
   origin_y: number
 }
 
-interface Pose { x: number; y: number; yaw: number }
+interface Pose {
+  x: number
+  y: number
+  yaw: number
+  position_stddev_m?: number
+  yaw_stddev_rad?: number
+}
 interface LearnedPoint extends Pose { pan: number; tilt: number; zone: string }
 interface SavedMap { name: string }
 interface RouteSummary { id: string; name: string; map_name: string; waypoint_count: number }
@@ -132,10 +138,13 @@ function MapPanel({ map, pose, points = [] }: { map: SlamMap | null; pose: Pose 
     left: `${(point.x - map.origin_x) / map.resolution_m / map.width * 100}%`,
     top: `${100 - (point.y - map.origin_y) / map.resolution_m / map.height * 100}%`,
   })
-  return <div className="relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
-    <img src={`data:image/png;base64,${map.image}`} className="block w-full max-h-[520px] object-contain" style={{ imageRendering: 'pixelated' }} alt="Carte du plateau" />
-    {points.map((point, index) => <span key={index} style={position(point)} className="absolute -ml-3 -mt-3 w-6 h-6 rounded-full bg-emerald-500 border border-white text-white text-xs font-bold flex items-center justify-center">{index + 1}</span>)}
-    {pose && <span style={position(pose)} className="absolute -ml-2 -mt-2 w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" title="Rover" />}
+  const maxWidth = 520 * map.width / map.height
+  return <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-auto p-3 flex justify-center">
+    <div className="relative w-full" style={{ aspectRatio: `${map.width} / ${map.height}`, maxWidth: `min(100%, ${maxWidth}px)` }}>
+      <img src={`data:image/png;base64,${map.image}`} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} alt="Carte du plateau" />
+      {points.map((point, index) => <span key={index} style={position(point)} className="absolute -ml-3 -mt-3 w-6 h-6 rounded-full bg-emerald-500 border border-white text-white text-xs font-bold flex items-center justify-center">{index + 1}</span>)}
+      {pose && <span style={position(pose)} className="absolute -ml-2 -mt-2 w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" title="Rover" />}
+    </div>
   </div>
 }
 
@@ -155,7 +164,8 @@ export default function VehicleInspections() {
   const [points, setPoints] = useState<LearnedPoint[]>([])
   const [selectedZone, setSelectedZone] = useState<string>('front')
   const [plateauName, setPlateauName] = useState('plateau-principal')
-  const [routeName, setRouteName] = useState('Tour véhicule standard')
+  const [routeName, setRouteName] = useState('Test localisation — 4 points')
+  const [quickTest, setQuickTest] = useState(true)
   const [selectedRoute, setSelectedRoute] = useState('')
   const [registration, setRegistration] = useState('')
   const [vehicleLabel, setVehicleLabel] = useState('')
@@ -256,6 +266,29 @@ export default function VehicleInspections() {
     finally { setBusy(false) }
   }
 
+  async function deletePlateau(name: string) {
+    if (!window.confirm(`Supprimer la carte « ${name} » ?`)) return
+    setBusy(true); setError(null)
+    try {
+      let response = await fetch(`${apiBase}/api/slam/maps/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      let data = await response.json()
+      if (response.status === 409 && data.requires_force) {
+        const dependencies = data.dependencies ?? {}
+        const confirmed = window.confirm(
+          `Cette carte contient ${dependencies.routes ?? 0} parcours, ${dependencies.inspections ?? 0} inspections et ${dependencies.captures ?? 0} photos. Tout supprimer définitivement ?`,
+        )
+        if (!confirmed) return
+        response = await fetch(`${apiBase}/api/slam/maps/${encodeURIComponent(name)}?force=true`, { method: 'DELETE' })
+        data = await response.json()
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Suppression impossible')
+      setSavedMaps(current => current.filter(map => map.name !== name))
+      setRoutes(current => current.filter(route => route.map_name !== name))
+      setNotice(`Carte « ${name} » supprimée.`)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Erreur') }
+    finally { setBusy(false) }
+  }
+
   async function prepareInspection(route: RouteSummary) {
     setBusy(true); setError(null)
     try {
@@ -284,6 +317,7 @@ export default function VehicleInspections() {
         zone: point.zone, x: point.x, y: point.y, yaw: point.yaw,
         pan: point.pan, tilt: point.tilt,
       })))
+      setQuickTest(detail.waypoints.length === 4)
       setRouteName(`${detail.name} corrigé`); setPhase('learning')
       setNotice('Parcours chargé en correction. Supprimez le point signalé et les suivants, puis réenregistrez uniquement cette fin de parcours.')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Erreur') }
@@ -292,11 +326,14 @@ export default function VehicleInspections() {
 
   async function recordPoint() {
     if (!pose || !activeMap || busy) return
-    const pan = Number(connection.lastStatus?.pan ?? 0)
-    const tilt = Number(connection.lastStatus?.tilt ?? 0)
-    const candidate = { ...pose, pan, tilt, zone: selectedZone }
+    if (quickTest && points.length >= 4) {
+      setNotice('Les quatre points du test sont déjà enregistrés.')
+      return
+    }
     setBusy(true); setError(null); setNotice('Validation du trajet par Nav2, sans déplacement…')
     try {
+      const captured = await request('/api/automotive/points/capture', { map_name: activeMap, zone: selectedZone })
+      const candidate = captured.point as LearnedPoint
       await request('/api/automotive/routes/validate', { map_name: activeMap, waypoints: [...points, candidate] })
       setPoints(current => [...current, candidate])
       const next = ZONES[(ZONES.findIndex(([value]) => value === selectedZone) + 1) % ZONES.length][0]
@@ -309,6 +346,10 @@ export default function VehicleInspections() {
 
   async function saveRoute() {
     if (!activeMap || points.length < 2) return
+    if (quickTest && points.length !== 4) {
+      setError(`Le test rapide demande exactement 4 points (${points.length}/4).`)
+      return
+    }
     setBusy(true); setError(null)
     try {
       const data = await request('/api/automotive/routes', { name: routeName, map_name: activeMap, waypoints: points })
@@ -348,7 +389,7 @@ export default function VehicleInspections() {
         <p className="text-slate-400 max-w-2xl mb-5">Vous allez piloter le rover autour du parking pour créer sa carte. À la fin, ramenez-le à son emplacement de départ : cette position deviendra sa maison.</p>
         <button onClick={startPlateauMapping} disabled={!connected || busy} className="px-5 py-3 rounded-xl bg-blue-600 text-white font-medium disabled:opacity-40"><Play size={17} className="inline mr-2" />Créer un nouveau plateau</button>
       </section>
-      {!!savedMaps.length && <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><h3 className="text-white font-medium mb-1">Plateaux déjà enregistrés</h3><p className="text-sm text-slate-500 mb-4">Vous pouvez apprendre un nouveau parcours sur une carte existante.</p><div className="flex flex-wrap gap-2">{savedMaps.map(map => <button key={map.name} onClick={() => { void loadPlateau(map.name) }} disabled={busy} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-slate-200"><Map size={14} className="inline mr-2" />{map.name}</button>)}</div></section>}
+      {!!savedMaps.length && <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><h3 className="text-white font-medium mb-1">Plateaux déjà enregistrés</h3><p className="text-sm text-slate-500 mb-4">Vous pouvez apprendre un nouveau parcours sur une carte existante.</p><div className="flex flex-wrap gap-2">{savedMaps.map(map => <div key={map.name} className="flex rounded-lg overflow-hidden"><button onClick={() => { void loadPlateau(map.name) }} disabled={busy} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-sm text-slate-200"><Map size={14} className="inline mr-2" />{map.name}</button><button onClick={() => { void deletePlateau(map.name) }} disabled={busy} className="px-3 bg-red-500/15 text-red-400 hover:bg-red-500/25" title={`Supprimer ${map.name}`}><Trash2 size={14} /></button></div>)}</div></section>}
       {!!routes.length && <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><h3 className="text-white font-medium mb-3">Parcours prêts</h3><div className="flex flex-wrap gap-2">{routes.map(route => <button key={route.id} onClick={() => { void prepareInspection(route) }} disabled={busy} className="px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300 disabled:opacity-40">{route.name} · {route.waypoint_count} vues</button>)}</div></section>}
     </div>}
 
@@ -359,8 +400,8 @@ export default function VehicleInspections() {
 
     {phase === 'learning' && <div className="space-y-5">
       <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4"><h2 className="text-white font-semibold">Étape 2 — Apprenez le tour du véhicule de référence</h2><p className="text-sm text-slate-400 mt-1">Pilotez autour du véhicule. À chaque vue importante, orientez la caméra, choisissez la zone puis enregistrez le point. Les coordonnées sont capturées automatiquement.</p></section>
-      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button onClick={() => { void recordPoint() }} disabled={!pose || busy} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />{busy ? 'Validation Nav2…' : 'Enregistrer ce point'}</button></section></aside></div>
-      <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h3 className="text-white font-medium">Points enregistrés ({points.length})</h3><p className="text-xs text-slate-500">Ils seront rejoués dans cet ordre.</p></div><div className="flex gap-2"><input value={routeName} onChange={event => setRouteName(event.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm text-white" /><button onClick={saveRoute} disabled={busy || points.length < 2} className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-40"><Save size={15} className="inline mr-1" />Enregistrer le parcours</button></div></div><div className="flex flex-wrap gap-2">{points.map((point, index) => <div key={index} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300 flex items-center gap-2"><MapPin size={13} className="text-emerald-400" /><span>{index + 1}. {ZONES.find(([value]) => value === point.zone)?.[1]}</span><button onClick={() => setPoints(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-red-400 ml-1"><Trash2 size={13} /></button></div>)}</div></section>
+      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><div className={`text-xs rounded-lg px-3 py-2 ${pose?.position_stddev_m != null && pose.position_stddev_m <= 0.20 && (pose.yaw_stddev_rad ?? Infinity) <= Math.PI / 12 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{pose?.position_stddev_m != null ? `Précision AMCL : ±${Math.round(pose.position_stddev_m * 100)} cm · ±${Math.round((pose.yaw_stddev_rad ?? 0) * 180 / Math.PI)}°` : 'Mesure de la précision AMCL en cours…'}</div><button onClick={() => { void recordPoint() }} disabled={!pose || busy || (quickTest && points.length >= 4)} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />{busy ? 'Arrêt et mesure stable…' : quickTest ? `Enregistrer (${points.length}/4)` : 'Enregistrer ce point'}</button></section></aside></div>
+      <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h3 className="text-white font-medium">Points enregistrés ({points.length})</h3><p className="text-xs text-slate-500">Ils seront rejoués dans cet ordre.</p><label className="mt-2 flex items-center gap-2 text-xs text-blue-300"><input type="checkbox" checked={quickTest} onChange={event => { setQuickTest(event.target.checked); if (event.target.checked) setRouteName('Test localisation — 4 points') }} className="accent-blue-500" />Test rapide limité à 4 points</label></div><div className="flex gap-2"><input value={routeName} onChange={event => setRouteName(event.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm text-white" /><button onClick={saveRoute} disabled={busy || points.length < 2 || (quickTest && points.length !== 4)} className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-40"><Save size={15} className="inline mr-1" />{quickTest ? `Enregistrer le test (${points.length}/4)` : 'Enregistrer le parcours'}</button></div></div><div className="flex flex-wrap gap-2">{points.map((point, index) => <div key={index} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300 flex items-center gap-2"><MapPin size={13} className="text-emerald-400" /><span>{index + 1}. {ZONES.find(([value]) => value === point.zone)?.[1]}</span><button onClick={() => setPoints(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-red-400 ml-1"><Trash2 size={13} /></button></div>)}</div></section>
     </div>}
 
     {phase === 'inspection' && <div className="grid lg:grid-cols-[420px_1fr] gap-5">

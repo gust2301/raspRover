@@ -82,6 +82,14 @@ def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
     assert 'getattr(wrapped_result.result, "error_msg", "")' in bridge
 
 
+def test_pose_writer_exposes_amcl_localization_quality():
+    writer = (Path(__file__).parents[1] / "ros" / "pose_writer.py").read_text()
+
+    assert '"/amcl_pose"' in writer
+    assert 'payload["position_stddev_m"]' in writer
+    assert 'payload["yaw_stddev_rad"]' in writer
+
+
 def test_route_validator_uses_planner_without_sending_navigation_goals():
     validator = (Path(__file__).parents[1] / "ros" / "nav2_route_validator.py").read_text()
 
@@ -110,3 +118,5 @@ def test_api_detects_composed_nav2_container():
     assert "started_at + 45.0" in server
     assert "distance <= 0.25" in server
     assert 'waypoint["_capture_pan"] = compensated_pan' in server
+    assert '@app.delete("/api/slam/maps/{map_name}")' in server
+    assert '@app.post("/api/automotive/points/capture")' in server

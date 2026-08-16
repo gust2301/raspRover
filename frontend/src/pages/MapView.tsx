@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle, House } from 'lucide-react'
+import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle, House, Trash2 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
 
@@ -178,6 +178,28 @@ export default function MapView() {
     finally { setLoading(false) }
   }
 
+  async function handleDeleteMap(name: string) {
+    if (!window.confirm(`Supprimer la carte « ${name} » ?`)) return
+    setLoading(true); setError(null); setNotice(null)
+    try {
+      let response = await fetch(`${apiBase}/api/slam/maps/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      let data = await response.json()
+      if (response.status === 409 && data.requires_force) {
+        const dependencies = data.dependencies ?? {}
+        const confirmed = window.confirm(
+          `Cette carte contient ${dependencies.routes ?? 0} parcours, ${dependencies.inspections ?? 0} inspections et ${dependencies.captures ?? 0} photos. Tout supprimer définitivement ?`,
+        )
+        if (!confirmed) return
+        response = await fetch(`${apiBase}/api/slam/maps/${encodeURIComponent(name)}?force=true`, { method: 'DELETE' })
+        data = await response.json()
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Suppression impossible')
+      await fetchSavedMaps()
+      setNotice(`Carte « ${name} » supprimée.`)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
+    finally { setLoading(false) }
+  }
+
   function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
     if (mode !== 'navigation' || !mapData) return
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -321,10 +343,17 @@ export default function MapView() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {savedMaps.map(saved => (
-              <button key={saved.name} onClick={() => { void handleLoadMap(saved.name) }} disabled={loading}
-                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 disabled:opacity-40">
-                Charger {saved.name}
-              </button>
+              <div key={saved.name} className="flex rounded-lg overflow-hidden">
+                <button onClick={() => { void handleLoadMap(saved.name) }} disabled={loading}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 disabled:opacity-40">
+                  Charger {saved.name}
+                </button>
+                <button onClick={() => { void handleDeleteMap(saved.name) }} disabled={loading}
+                  className="px-3 bg-red-500/15 text-red-400 hover:bg-red-500/25 disabled:opacity-40"
+                  title={`Supprimer ${saved.name}`}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
             ))}
           </div>
         )}

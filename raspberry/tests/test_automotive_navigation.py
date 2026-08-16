@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from modules.automotive.navigation import compensated_capture_pan
+from modules.automotive.navigation import compensated_capture_pan, pose_delta, pose_quality_error
 
 
 def test_capture_pan_compensates_robot_heading_with_opposite_pan_direction():
@@ -39,3 +39,20 @@ def test_capture_pan_rejects_unreachable_camera_angle():
 
     assert math.degrees(yaw_error) == pytest.approx(120.0)
     assert pan is None
+
+
+def test_pose_quality_rejects_uncertain_amcl_localization():
+    error = pose_quality_error({"position_stddev_m": 0.57, "yaw_stddev_rad": math.radians(39)})
+
+    assert error == "Localisation trop imprécise (±57 cm, ±39°)"
+    assert pose_quality_error({"position_stddev_m": 0.08, "yaw_stddev_rad": 0.1}) is None
+
+
+def test_pose_delta_normalizes_yaw():
+    distance, yaw_delta = pose_delta(
+        {"x": 0.0, "y": 0.0, "yaw": math.radians(179)},
+        {"x": 0.03, "y": 0.04, "yaw": math.radians(-179)},
+    )
+
+    assert distance == pytest.approx(0.05)
+    assert math.degrees(yaw_delta) == pytest.approx(2.0)

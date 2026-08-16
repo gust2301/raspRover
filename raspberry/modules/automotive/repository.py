@@ -126,6 +126,78 @@ class AutomotiveRepository:
                 ).fetchone()[0]
         return routes
 
+    def map_dependencies(self, map_name: str) -> dict[str, int]:
+        """Count learned and historical records attached to a map."""
+        with self._connect() as connection:
+            route_ids = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT id FROM inspection_routes WHERE map_name = ?", (map_name,)
+                ).fetchall()
+            ]
+            if not route_ids:
+                return {"routes": 0, "inspections": 0, "captures": 0}
+            placeholders = ",".join("?" for _ in route_ids)
+            inspection_ids = [
+                row[0]
+                for row in connection.execute(
+                    f"SELECT id FROM vehicle_inspections WHERE route_id IN ({placeholders})",
+                    route_ids,
+                ).fetchall()
+            ]
+            captures = 0
+            if inspection_ids:
+                inspection_placeholders = ",".join("?" for _ in inspection_ids)
+                captures = connection.execute(
+                    f"SELECT COUNT(*) FROM inspection_captures "
+                    f"WHERE inspection_id IN ({inspection_placeholders})",
+                    inspection_ids,
+                ).fetchone()[0]
+        return {
+            "routes": len(route_ids),
+            "inspections": len(inspection_ids),
+            "captures": int(captures),
+        }
+
+    def delete_map_records(self, map_name: str) -> list[str]:
+        """Delete routes and inspection history for a map and return media paths."""
+        with self._connect() as connection:
+            route_ids = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT id FROM inspection_routes WHERE map_name = ?", (map_name,)
+                ).fetchall()
+            ]
+            if not route_ids:
+                return []
+            placeholders = ",".join("?" for _ in route_ids)
+            inspection_ids = [
+                row[0]
+                for row in connection.execute(
+                    f"SELECT id FROM vehicle_inspections WHERE route_id IN ({placeholders})",
+                    route_ids,
+                ).fetchall()
+            ]
+            media_paths: list[str] = []
+            if inspection_ids:
+                inspection_placeholders = ",".join("?" for _ in inspection_ids)
+                media_paths = [
+                    row[0]
+                    for row in connection.execute(
+                        f"SELECT media_path FROM inspection_captures "
+                        f"WHERE inspection_id IN ({inspection_placeholders})",
+                        inspection_ids,
+                    ).fetchall()
+                ]
+                connection.execute(
+                    f"DELETE FROM vehicle_inspections WHERE id IN ({inspection_placeholders})",
+                    inspection_ids,
+                )
+            connection.execute(
+                f"DELETE FROM inspection_routes WHERE id IN ({placeholders})", route_ids
+            )
+        return media_paths
+
     def get_route(self, route_id: str) -> dict:
         with self._connect() as connection:
             row = connection.execute(

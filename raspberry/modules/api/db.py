@@ -143,3 +143,12 @@ def get_map_home(map_name: str) -> dict | None:
             (map_name,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def delete_map_home(map_name: str) -> None:
+    """Delete the home pose associated with a removed map."""
+    if _conn is None:
+        return
+    with _lock:
+        _conn.execute("DELETE FROM map_homes WHERE map_name = ?", (map_name,))
+        _conn.commit()

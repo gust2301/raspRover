@@ -53,3 +53,25 @@ def test_vehicle_is_reused_by_registration(tmp_path: pathlib.Path):
 
     assert second["id"] == first["id"]
     assert second["label"] == "SUV"
+
+
+def test_map_records_report_dependencies_and_are_deleted_together(tmp_path: pathlib.Path):
+    repository = AutomotiveRepository(tmp_path / "robot.db")
+    repository.init()
+    route = repository.create_route("Place A", "parking", _waypoints())
+    vehicle = repository.upsert_vehicle("AA-123-AA")
+    inspection = repository.create_inspection(vehicle["id"], route["id"])
+    repository.add_capture(inspection["id"], route["waypoints"][0], "/tmp/capture.jpg", {"x": 1.0})
+
+    assert repository.map_dependencies("parking") == {
+        "routes": 1,
+        "inspections": 1,
+        "captures": 1,
+    }
+    assert repository.delete_map_records("parking") == ["/tmp/capture.jpg"]
+    assert repository.map_dependencies("parking") == {
+        "routes": 0,
+        "inspections": 0,
+        "captures": 0,
+    }
+    assert repository.list_routes("parking") == []

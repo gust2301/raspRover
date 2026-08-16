@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from modules.audio import AlertPlayer
 from modules.automotive import AutomotiveRepository, InspectionRunner
-from modules.automotive.navigation import compensated_capture_pan
+from modules.automotive.navigation import compensated_capture_pan, pose_delta, pose_quality_error
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
@@ -35,6 +35,7 @@ from modules.control.nav2 import Nav2MotorBridge
 from modules.control.odometry import OdometryCommandPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
+from modules.map_image import occupancy_grid_pixels
 from modules.map_names import normalize_map_name, validate_map_name
 from modules.navigation_plan import add_return_home
 from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
@@ -54,6 +55,7 @@ from .camera import (
     unregister_frame_callback,
 )
 from .db import (
+    delete_map_home,
     get_map_home,
     init_db,
     list_incidents,
@@ -1266,6 +1268,93 @@ async def slam_maps() -> dict:
     return {"ok": True, "maps": maps}
 
 
+@app.delete("/api/slam/maps/{map_name}")
+async def slam_delete_map(map_name: str, force: bool = False) -> dict:
+    """Delete a persistent map and, after confirmation, its linked test data."""
+    safe_name = validate_map_name(map_name)
+    if safe_name is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
+    if _automotive_repository is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "BDD indisponible"})
+    loop = asyncio.get_running_loop()
+    active_map, running, dependencies = await asyncio.gather(
+        loop.run_in_executor(None, _active_map_name),
+        loop.run_in_executor(None, lambda: _slam_running() or _nav2_running()),
+        loop.run_in_executor(None, lambda: _automotive_repository.map_dependencies(safe_name)),
+    )
+    yaml_path = f"/maps/{safe_name}.yaml"
+    pgm_path = f"/maps/{safe_name}.pgm"
+    exists = await loop.run_in_executor(
+        None,
+        lambda: (
+            subprocess.run(
+                ["docker", "exec", _slam_container, "test", "-s", yaml_path],
+                capture_output=True,
+                timeout=3.0,
+            ).returncode
+            == 0
+        ),
+    )
+    if not exists:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Carte inconnue"})
+    if active_map == safe_name and running:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": "Arrêtez SLAM/Nav2 avant de supprimer la carte active",
+                "active": True,
+            },
+        )
+    if any(dependencies.values()) and not force:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": "Cette carte possède des parcours ou inspections",
+                "requires_force": True,
+                "dependencies": dependencies,
+            },
+        )
+    deletion = await loop.run_in_executor(
+        None,
+        lambda: subprocess.run(
+            ["docker", "exec", _slam_container, "rm", "-f", "--", yaml_path, pgm_path],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        ),
+    )
+    if deletion.returncode != 0:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": deletion.stderr.strip() or "Suppression impossible"},
+        )
+    media_paths = await loop.run_in_executor(
+        None, lambda: _automotive_repository.delete_map_records(safe_name)
+    )
+    await loop.run_in_executor(None, lambda: delete_map_home(safe_name))
+    media_root = _inspection_media_dir.resolve()
+    for media_path in media_paths:
+        path = pathlib.Path(media_path).resolve()
+        if media_root in path.parents:
+            await loop.run_in_executor(None, lambda path=path: path.unlink(missing_ok=True))
+    if active_map == safe_name:
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["docker", "exec", _slam_container, "rm", "-f", "/tmp/active_map_name"],
+                capture_output=True,
+                timeout=3.0,
+            ),
+        )
+    return {
+        "ok": True,
+        "name": safe_name,
+        "deleted": {**dependencies, "media_files": len(media_paths)},
+    }
+
+
 @app.get("/api/slam/pose")
 async def slam_pose() -> dict:
     loop = asyncio.get_running_loop()
@@ -1727,6 +1816,63 @@ async def automotive_route(route_id: str) -> dict:
     return {"ok": True, "route": route}
 
 
+@app.post("/api/automotive/points/capture")
+async def automotive_point_capture(body: dict[str, Any]) -> dict:
+    """Stop the rover and atomically capture a fresh, stable, localized point."""
+    if _motors is None or not _nav2_ready():
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
+    if _nav2_motors is not None and _nav2_motors.enabled:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Une navigation est encore active"},
+        )
+    map_name = validate_map_name(str(body.get("map_name", "")).strip())
+    zone = str(body.get("zone", ""))
+    if map_name is None or map_name != _active_map_name():
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Carte inactive"})
+    if zone not in _INSPECTION_ZONES:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Zone invalide"})
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _motors.stop)
+    await asyncio.sleep(0.35)
+    first = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json"))
+    await asyncio.sleep(0.45)
+    second = await loop.run_in_executor(
+        None, lambda: _read_container_json("/tmp/current_pose.json")
+    )
+    if first is None or second is None:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Pose indisponible"})
+    if time.time() - float(second.get("updated_at", 0.0)) > 1.0:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Pose trop ancienne"})
+    distance, yaw_delta = pose_delta(first, second)
+    if distance > 0.04 or yaw_delta > math.radians(5.0):
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Le rover ou sa localisation n'est pas stable"},
+        )
+    quality_error = pose_quality_error(second)
+    if quality_error is not None:
+        return JSONResponse(status_code=409, content={"ok": False, "error": quality_error})
+    pan, tilt = _pantilt.position if _pantilt is not None else (0.0, 0.0)
+    point = {
+        "zone": zone,
+        "x": float(second["x"]),
+        "y": float(second["y"]),
+        "yaw": float(second["yaw"]),
+        "pan": float(pan),
+        "tilt": float(tilt),
+    }
+    return {
+        "ok": True,
+        "point": point,
+        "quality": {
+            "position_stddev_m": float(second["position_stddev_m"]),
+            "yaw_stddev_rad": float(second["yaw_stddev_rad"]),
+        },
+    }
+
+
 @app.post("/api/automotive/routes/validate")
 async def automotive_route_validate(body: dict[str, Any]) -> dict:
     map_name = validate_map_name(str(body.get("map_name", "")).strip())
@@ -2170,17 +2316,7 @@ def _occupancy_grid_to_png_b64(msg: dict) -> str:
     height: int = int(info.get("height", 0))
     raw: list[int] = msg.get("data", [])
 
-    if width <= 0 or height <= 0 or len(raw) != width * height:
-        raise ValueError(f"OccupancyGrid invalide: {width}×{height}, {len(raw)} points")
-
-    pixels = bytearray(width * height)
-    for i, v in enumerate(raw):
-        if v == -1:
-            pixels[i] = 128  # unknown → grey
-        elif v == 0:
-            pixels[i] = 255  # free → white
-        else:
-            pixels[i] = max(0, 255 - v * 2)  # occupied (100) → black
+    pixels = occupancy_grid_pixels(raw, width, height)
 
     # Minimal grayscale PNG encoder (stdlib only)
     def chunk(tag: bytes, data: bytes) -> bytes:

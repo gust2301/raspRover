@@ -1,4 +1,4 @@
-from modules.api.db import get_map_home, init_db, set_map_home
+from modules.api.db import delete_map_home, get_map_home, init_db, set_map_home
 
 
 def test_map_home_is_persisted_and_can_be_redefined(tmp_path):
@@ -10,3 +10,6 @@ def test_map_home_is_persisted_and_can_be_redefined(tmp_path):
     replacement = set_map_home("entrepot", -1.0, 3.0, -0.25)
     assert get_map_home("entrepot") == replacement
     assert get_map_home("autre-carte") is None
+
+    delete_map_home("entrepot")
+    assert get_map_home("entrepot") is None
