@@ -1551,6 +1551,43 @@ async def slam_pose() -> dict:
     return {"ok": True, **pose}
 
 
+@app.post("/api/slam/relocalize")
+async def slam_relocalize() -> dict:
+    """Réinitialise les particules AMCL sans déplacer automatiquement le rover."""
+    if not _nav2_running():
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: subprocess.run(
+            [
+                "docker",
+                "exec",
+                _slam_container,
+                "bash",
+                "-c",
+                "source /opt/ros/jazzy/setup.bash && "
+                "ros2 service call /reinitialize_global_localization std_srvs/srv/Empty '{}'",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8.0,
+        ),
+    )
+    if result.returncode != 0:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": result.stderr.strip() or "Relocalisation AMCL indisponible",
+            },
+        )
+    return {
+        "ok": True,
+        "message": "AMCL réinitialisé. Tournez lentement le rover sur 360° puis immobilisez-le.",
+    }
+
+
 @app.get("/api/slam/home")
 async def slam_home() -> dict:
     loop = asyncio.get_running_loop()

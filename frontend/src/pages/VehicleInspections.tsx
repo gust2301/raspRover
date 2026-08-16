@@ -97,12 +97,20 @@ function DrivePad({ connected, onMove, onStop }: {
       if (!keyDirection[event.key]) return
       event.preventDefault(); stop()
     }
+    const release = () => {
+      if (timer.current) stop()
+    }
     window.addEventListener('keydown', down); window.addEventListener('keyup', up)
+    window.addEventListener('pointerup', release); window.addEventListener('blur', release)
     return () => {
       window.removeEventListener('keydown', down); window.removeEventListener('keyup', up)
-      if (timer.current) window.clearInterval(timer.current)
+      window.removeEventListener('pointerup', release); window.removeEventListener('blur', release)
+      if (timer.current) {
+        window.clearInterval(timer.current)
+        onStop()
+      }
     }
-  }, [start, stop])
+  }, [onStop, start, stop])
 
   const button = (direction: Direction, icon: React.ReactNode, area: string) => <button
     style={{ gridArea: area }} onPointerDown={() => start(direction)} onPointerUp={stop}
@@ -175,15 +183,21 @@ export default function VehicleInspections() {
   const [finishMessage, setFinishMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const refreshInFlight = useRef(false)
+  const posePollInFlight = useRef(false)
+  const mapDataRef = useRef<SlamMap | null>(null)
+
+  useEffect(() => { mapDataRef.current = mapData }, [mapData])
 
   const refresh = useCallback(async () => {
-    if (!connected) return
+    if (!connected || refreshInFlight.current) return
+    refreshInFlight.current = true
     try {
       const statusResponse = await fetch(`${apiBase}/api/slam/status`)
       if (statusResponse.ok) {
         const status = await statusResponse.json()
         setSlamMode(status.mode ?? 'stopped'); setNavReady(Boolean(status.ready)); setActiveMap(status.active_map ?? null); setPose(status.pose ?? null)
-        if (status.running) {
+        if (status.running && (status.mode === 'mapping' || mapDataRef.current === null)) {
           const mapResponse = await fetch(`${apiBase}/api/slam/map`)
           if (mapResponse.ok) setMapData(await mapResponse.json())
         }
@@ -198,12 +212,30 @@ export default function VehicleInspections() {
         if (response.ok) setInspection((await response.json()).inspection)
       }
     } catch { /* le poll suivant réessaiera */ }
+    finally { refreshInFlight.current = false }
   }, [apiBase, connected, inspection?.id])
 
   useEffect(() => {
-    void refresh(); const timer = window.setInterval(() => { void refresh() }, 2000)
+    void refresh(); const timer = window.setInterval(() => { void refresh() }, 10000)
     return () => window.clearInterval(timer)
   }, [refresh])
+
+  useEffect(() => {
+    if (!connected || (phase !== 'learning' && phase !== 'inspection')) return
+    let disposed = false
+    const updatePose = async () => {
+      if (posePollInFlight.current) return
+      posePollInFlight.current = true
+      try {
+        const response = await fetch(`${apiBase}/api/slam/pose`)
+        if (response.ok && !disposed) setPose(await response.json())
+      } catch { /* la prochaine mesure réessaiera */ }
+      finally { posePollInFlight.current = false }
+    }
+    void updatePose()
+    const timer = window.setInterval(() => { void updatePose() }, 500)
+    return () => { disposed = true; window.clearInterval(timer) }
+  }, [apiBase, connected, phase])
 
   const move = useCallback((direction: Direction) => connection.sendMove(direction, 0.28), [connection.sendMove])
   const stop = useCallback(() => connection.sendStop(), [connection.sendStop])
@@ -345,6 +377,16 @@ export default function VehicleInspections() {
     } finally { setBusy(false) }
   }
 
+  async function relocalize() {
+    setBusy(true); setError(null)
+    try {
+      const data = await request('/api/slam/relocalize')
+      setNotice(data.message ?? 'AMCL réinitialisé. Tournez lentement le rover sur 360°, puis attendez son immobilisation.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Relocalisation AMCL impossible')
+    } finally { setBusy(false) }
+  }
+
   async function saveRoute() {
     if (!activeMap || points.length < 2) return
     if (quickTest && points.length !== 4) {
@@ -401,7 +443,7 @@ export default function VehicleInspections() {
 
     {phase === 'learning' && <div className="space-y-5">
       <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4"><h2 className="text-white font-semibold">Étape 2 — Apprenez le tour du véhicule de référence</h2><p className="text-sm text-slate-400 mt-1">Pilotez autour du véhicule. À chaque vue importante, orientez la caméra, choisissez la zone puis enregistrez le point. Les coordonnées sont capturées automatiquement.</p></section>
-      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><div className={`text-xs rounded-lg px-3 py-2 ${pose?.position_stddev_m != null && pose.position_stddev_m <= 0.20 && (pose.yaw_stddev_rad ?? Infinity) <= Math.PI / 12 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{pose?.position_stddev_m != null ? `Précision AMCL : ±${Math.round(pose.position_stddev_m * 100)} cm · ±${Math.round((pose.yaw_stddev_rad ?? 0) * 180 / Math.PI)}°` : 'Mesure de la précision AMCL en cours…'}</div><button onClick={() => { void recordPoint() }} disabled={!pose || busy || (quickTest && points.length >= 4)} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />{busy ? 'Arrêt et mesure stable…' : quickTest ? `Enregistrer (${points.length}/4)` : 'Enregistrer ce point'}</button></section></aside></div>
+      <div className="grid xl:grid-cols-[1fr_360px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} points={points} /></div><aside className="space-y-5"><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /></section><section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3"><p className="text-sm font-medium text-white">Orienter la caméra</p><div className="grid grid-cols-3 gap-2 w-40 mx-auto"><button onClick={() => adjustCamera(cameraPan, cameraTilt + 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowUp className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan - 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowLeft className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(0, 0)} className="p-2 bg-slate-800 rounded"><RotateCcw className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan + 10, cameraTilt)} className="p-2 bg-slate-800 rounded"><ArrowRight className="mx-auto" size={17} /></button><button onClick={() => adjustCamera(cameraPan, cameraTilt - 8)} className="col-start-2 p-2 bg-slate-800 rounded"><ArrowDown className="mx-auto" size={17} /></button></div><p className="text-center text-[11px] text-slate-500">Pan {cameraPan.toFixed(0)}° · Tilt {cameraTilt.toFixed(0)}°</p></section><section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3"><label className="text-xs text-slate-400">Zone visible actuellement</label><select value={selectedZone} onChange={event => setSelectedZone(event.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-white">{ZONES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><div className={`text-xs rounded-lg px-3 py-2 ${pose?.position_stddev_m != null && pose.position_stddev_m <= 0.20 && (pose.yaw_stddev_rad ?? Infinity) <= Math.PI / 12 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{pose?.position_stddev_m != null ? `Précision AMCL : ±${Math.round(pose.position_stddev_m * 100)} cm · ±${Math.round((pose.yaw_stddev_rad ?? 0) * 180 / Math.PI)}°` : 'Mesure de la précision AMCL en cours…'}</div>{pose?.position_stddev_m != null && (pose.position_stddev_m > 0.20 || (pose.yaw_stddev_rad ?? Infinity) > Math.PI / 12) && <div className="space-y-2"><button onClick={() => { void relocalize() }} disabled={busy} className="w-full py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm disabled:opacity-40"><RotateCcw size={15} className="inline mr-2" />Relocaliser AMCL</button><p className="text-[11px] text-amber-200/70">Cliquez, faites lentement un tour complet avec le rover, puis immobilisez-le quelques secondes.</p></div>}<button onClick={() => { void recordPoint() }} disabled={!pose || busy || (quickTest && points.length >= 4)} className="w-full py-3 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"><CircleDot size={17} className="inline mr-2" />{busy ? 'Arrêt et mesure stable…' : quickTest ? `Enregistrer (${points.length}/4)` : 'Enregistrer ce point'}</button></section></aside></div>
       <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h3 className="text-white font-medium">Points enregistrés ({points.length})</h3><p className="text-xs text-slate-500">Ils seront rejoués dans cet ordre.</p><label className="mt-2 flex items-center gap-2 text-xs text-blue-300"><input type="checkbox" checked={quickTest} onChange={event => { setQuickTest(event.target.checked); if (event.target.checked) setRouteName('Test localisation — 4 points') }} className="accent-blue-500" />Test rapide limité à 4 points</label></div><div className="flex gap-2"><input value={routeName} onChange={event => setRouteName(event.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm text-white" /><button onClick={saveRoute} disabled={busy || points.length < 2 || (quickTest && points.length !== 4)} className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-40"><Save size={15} className="inline mr-1" />{quickTest ? `Enregistrer le test (${points.length}/4)` : 'Enregistrer le parcours'}</button></div></div><div className="flex flex-wrap gap-2">{points.map((point, index) => <div key={index} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300 flex items-center gap-2"><MapPin size={13} className="text-emerald-400" /><span>{index + 1}. {ZONES.find(([value]) => value === point.zone)?.[1]}</span><button onClick={() => setPoints(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-red-400 ml-1"><Trash2 size={13} /></button></div>)}</div></section>
     </div>}
 
