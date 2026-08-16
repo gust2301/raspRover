@@ -1,9 +1,12 @@
 <!--
   Single-goal navigation used for returning home.
 
-  Deliberately contains no RecoveryNode, Spin, BackUp or Wait action. If the
-  planner or controller cannot continue, the action fails and the motor bridge
-  stops the rover instead of trying autonomous recovery manoeuvres.
+  Deliberately contains no Spin, BackUp or Wait action: the rover must never
+  perform a blind autonomous maneuver near an obstacle. It does retry a
+  bounded number of times on a costmap clear when planning or control fails
+  transiently (stale/phantom obstacle data, a momentary optimizer hiccup),
+  so a single hiccup near a wall does not abort a mission that could
+  otherwise navigate around it. Only exhausting the retries stops the rover.
 -->
 <root BTCPP_format="4" main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -17,16 +20,26 @@
         default_planner="GridBased"
         topic_name="planner_selector"/>
       <RateController hz="1.0">
-        <ComputePathToPose
-          goal="{goal}"
-          path="{path}"
-          planner_id="{selected_planner}"
-          error_code_id="{compute_path_error_code}"/>
+        <RecoveryNode number_of_retries="3" name="ComputePathToPoseWithRetry">
+          <ComputePathToPose
+            goal="{goal}"
+            path="{path}"
+            planner_id="{selected_planner}"
+            error_code_id="{compute_path_error_code}"/>
+          <ClearEntireCostmap
+            name="ClearGlobalCostmap-Context"
+            service_name="global_costmap/clear_entirely_global_costmap"/>
+        </RecoveryNode>
       </RateController>
-      <FollowPath
-        path="{path}"
-        controller_id="{selected_controller}"
-        error_code_id="{follow_path_error_code}"/>
+      <RecoveryNode number_of_retries="3" name="FollowPathWithRetry">
+        <FollowPath
+          path="{path}"
+          controller_id="{selected_controller}"
+          error_code_id="{follow_path_error_code}"/>
+        <ClearEntireCostmap
+          name="ClearLocalCostmap-Context"
+          service_name="local_costmap/clear_entirely_local_costmap"/>
+      </RecoveryNode>
     </PipelineSequence>
   </BehaviorTree>
 </root>
