@@ -43,8 +43,9 @@ def pose_quality_error(pose: dict) -> str | None:
         return "Qualité de localisation AMCL invalide"
     if position_stddev > MAX_POSITION_STDDEV_M or yaw_stddev > MAX_YAW_STDDEV_RAD:
         return (
-            "Localisation trop imprécise "
-            f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°)"
+            "Localisation AMCL insuffisante "
+            f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°). "
+            "Replacez le rover à sa maison puis rechargez la carte"
         )
     return None
 

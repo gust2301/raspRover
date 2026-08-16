@@ -29,6 +29,8 @@ class Nav2Bridge(Node):
         self.declare_parameter("initial_pose_x", 0.0)
         self.declare_parameter("initial_pose_y", 0.0)
         self.declare_parameter("initial_pose_yaw", 0.0)
+        self.declare_parameter("initial_pose_position_stddev_m", 0.5)
+        self.declare_parameter("initial_pose_yaw_stddev_rad", math.radians(15.0))
 
         self._motor_port = int(self.get_parameter("motor_udp_port").value)
         self._max_speed = float(self.get_parameter("max_linear_speed_m_s").value)
@@ -60,6 +62,10 @@ class Nav2Bridge(Node):
                 "x": float(self.get_parameter("initial_pose_x").value),
                 "y": float(self.get_parameter("initial_pose_y").value),
                 "yaw": float(self.get_parameter("initial_pose_yaw").value),
+                "position_stddev_m": float(
+                    self.get_parameter("initial_pose_position_stddev_m").value
+                ),
+                "yaw_stddev_rad": float(self.get_parameter("initial_pose_yaw_stddev_rad").value),
             }
         )
 
@@ -94,6 +100,10 @@ class Nav2Bridge(Node):
             "x": float(value.get("x", 0.0)),
             "y": float(value.get("y", 0.0)),
             "yaw": float(value.get("yaw", 0.0)),
+            "position_stddev_m": max(0.01, float(value.get("position_stddev_m", 0.5))),
+            "yaw_stddev_rad": max(
+                math.radians(1.0), float(value.get("yaw_stddev_rad", math.radians(15.0)))
+            ),
         }
         self._initial_pose_repeats = 300
 
@@ -136,9 +146,11 @@ class Nav2Bridge(Node):
         message.pose.pose.position.y = y
         message.pose.pose.orientation.z = math.sin(yaw / 2.0)
         message.pose.pose.orientation.w = math.cos(yaw / 2.0)
-        message.pose.covariance[0] = 0.25
-        message.pose.covariance[7] = 0.25
-        message.pose.covariance[35] = 0.068
+        position_variance = self._initial_pose["position_stddev_m"] ** 2
+        yaw_variance = self._initial_pose["yaw_stddev_rad"] ** 2
+        message.pose.covariance[0] = position_variance
+        message.pose.covariance[7] = position_variance
+        message.pose.covariance[35] = yaw_variance
         self._initial_pose_pub.publish(message)
 
     def _follow(self, waypoints: list[dict]) -> None:
@@ -193,9 +205,7 @@ class Nav2Bridge(Node):
             result_status=int(status),
             missed_waypoints=missed_indexes,
             missed_error_codes=missed_codes,
-            error=None
-            if succeeded
-            else nav2_error or "Nav2 n'a pas pu terminer le point demandé",
+            error=None if succeeded else nav2_error or "Nav2 n'a pas pu terminer le point demandé",
         )
         self._goal_handle = None
         self._send_stop(mission_finished=True)

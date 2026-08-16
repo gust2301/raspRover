@@ -1593,10 +1593,13 @@ async def slam_load(body: dict[str, Any]) -> dict:
     if initial_pose is None:
         initial_pose = {}
     try:
+        trusted_initial_pose = initial_pose_source in {"request", "home"}
         pose_values = {
             "x": float(initial_pose.get("x", 0.0)),
             "y": float(initial_pose.get("y", 0.0)),
             "yaw": float(initial_pose.get("yaw", 0.0)),
+            "position_stddev_m": 0.15 if trusted_initial_pose else 0.5,
+            "yaw_stddev_rad": math.radians(5.0 if trusted_initial_pose else 15.0),
         }
         if not all(math.isfinite(value) for value in pose_values.values()):
             raise ValueError
@@ -1635,6 +1638,10 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_INITIAL_POSE_Y={pose_values['y']}",
         "-e",
         f"RASPROVER_INITIAL_POSE_YAW={pose_values['yaw']}",
+        "-e",
+        f"RASPROVER_INITIAL_POSE_POSITION_STDDEV_M={pose_values['position_stddev_m']}",
+        "-e",
+        f"RASPROVER_INITIAL_POSE_YAW_STDDEV_RAD={pose_values['yaw_stddev_rad']}",
     ]
     stopped = await loop.run_in_executor(None, _stop_ros_navigation_processes)
     if not stopped:

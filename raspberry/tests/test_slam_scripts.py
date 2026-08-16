@@ -82,6 +82,18 @@ def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
     assert 'getattr(wrapped_result.result, "error_msg", "")' in bridge
 
 
+def test_nav2_initial_pose_uses_configurable_standard_deviation():
+    bridge = (Path(__file__).parents[1] / "ros" / "nav2_bridge.py").read_text()
+    launcher = (Path(__file__).parents[1] / "ros" / "start_navigation.sh").read_text()
+    server = (Path(__file__).parents[1] / "modules" / "api" / "server.py").read_text()
+
+    assert 'self._initial_pose["position_stddev_m"] ** 2' in bridge
+    assert 'self._initial_pose["yaw_stddev_rad"] ** 2' in bridge
+    assert "RASPROVER_INITIAL_POSE_POSITION_STDDEV_M" in launcher
+    assert 'trusted_initial_pose = initial_pose_source in {"request", "home"}' in server
+    assert '"position_stddev_m": 0.15 if trusted_initial_pose else 0.5' in server
+
+
 def test_pose_writer_exposes_amcl_localization_quality():
     writer = (Path(__file__).parents[1] / "ros" / "pose_writer.py").read_text()
 

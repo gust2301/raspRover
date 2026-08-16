@@ -55,7 +55,9 @@ python3 /opt/rasprover/nav2_bridge.py --ros-args \
   -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.18}" \
   -p initial_pose_x:="${RASPROVER_INITIAL_POSE_X:-0.0}" \
   -p initial_pose_y:="${RASPROVER_INITIAL_POSE_Y:-0.0}" \
-  -p initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}" &
+  -p initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}" \
+  -p initial_pose_position_stddev_m:="${RASPROVER_INITIAL_POSE_POSITION_STDDEV_M:-0.5}" \
+  -p initial_pose_yaw_stddev_rad:="${RASPROVER_INITIAL_POSE_YAW_STDDEV_RAD:-0.261799}" &
 BRIDGE_PID=$!
 
 # Le rover publie odom -> base_link. Aligne tous les composants Nav2 sur ce

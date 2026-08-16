@@ -44,7 +44,10 @@ def test_capture_pan_rejects_unreachable_camera_angle():
 def test_pose_quality_rejects_uncertain_amcl_localization():
     error = pose_quality_error({"position_stddev_m": 0.57, "yaw_stddev_rad": math.radians(39)})
 
-    assert error == "Localisation trop imprécise (±57 cm, ±39°)"
+    assert error == (
+        "Localisation AMCL insuffisante (±57 cm, ±39°). "
+        "Replacez le rover à sa maison puis rechargez la carte"
+    )
     assert pose_quality_error({"position_stddev_m": 0.08, "yaw_stddev_rad": 0.1}) is None
 
 
