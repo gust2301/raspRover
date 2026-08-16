@@ -13,7 +13,7 @@ control:
   timeout_s: 1.0
   esp32_required: false       # false = l'API demarre meme si l'ESP32 est absent
   # Modele physique Waveshare. Configure les constantes encodeurs du firmware.
-  chassis_type: "ugv_rover"  # rasprover | ugv_rover | ugv_beast
+  chassis_type: "rasprover"  # rasprover | ugv_rover | ugv_beast
   module_type: 2              # 2 = pan-tilt avec retour de position des servos
 
   # Limites de sécurité
@@ -97,11 +97,11 @@ slam:
   # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65
   # Odometrie physique issue des encodeurs odl/odr du firmware Waveshare.
-  # Valeur UGV Rover nominale: 0.172 m. Calibrer par une rotation mesuree.
-  wheel_separation_m: 0.172
+  # Valeur RaspRover PT 4WD nominale: 0.125 m. Calibrer par une rotation mesuree.
+  wheel_separation_m: 0.125
   left_encoder_sign: 1.0
   right_encoder_sign: 1.0
-  encoder_feedback_hz: 10.0
+  encoder_feedback_hz: 5.0
   odometry_udp_port: 7667
   nav2_motor_udp_port: 7668
   nav2_command_udp_port: 7669

@@ -145,6 +145,8 @@ def test_api_detects_composed_nav2_container():
     assert 'waypoint["_capture_pan"] = float(waypoint.get("pan", 0.0))' in server
     assert '@app.delete("/api/slam/maps/{map_name}")' in server
     assert '@app.post("/api/automotive/points/capture")' in server
+    assert "def _slam_topic_publishers()" in server
+    assert 'publishers["/scan"] == 0' in server
 
 
 def test_navigation_uses_precise_inspection_goal_and_progress_tolerances():

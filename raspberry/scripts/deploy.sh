@@ -88,6 +88,39 @@ if [ "${LIDAR_RESTARTED}" = "true" ]; then
     exit 1
   fi
   echo "  OK"
+
+  # Un conteneur peut être "running" alors que le pilote RPLIDAR reste bloqué
+  # avant l'ouverture du port série. Valide le flux réel et tente une seule
+  # reprise propre, cas observé après une reconstruction d'image.
+  echo "==> Vérification du flux /scan..."
+  SCAN_READY=false
+  for _attempt in $(seq 1 30); do
+    if docker exec ros2-lidar bash -c \
+      "source /opt/ros/jazzy/setup.bash && ros2 topic info /scan 2>/dev/null" \
+      | grep -Eq 'Publisher count: [1-9][0-9]*'; then
+      SCAN_READY=true
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "${SCAN_READY}" != "true" ]; then
+    echo "    Aucun scan publié — seconde initialisation du pilote LIDAR..."
+    sudo systemctl restart ros2-lidar.service
+    for _attempt in $(seq 1 30); do
+      if docker exec ros2-lidar bash -c \
+        "source /opt/ros/jazzy/setup.bash && ros2 topic info /scan 2>/dev/null" \
+        | grep -Eq 'Publisher count: [1-9][0-9]*'; then
+        SCAN_READY=true
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if [ "${SCAN_READY}" != "true" ]; then
+    echo "Le pilote RPLIDAR ne publie aucun scan après deux tentatives." >&2
+    exit 1
+  fi
+  echo "  OK"
 fi
 
 # Toujours redémarrer l'API après le lidar pour renouveler le pont /scan.

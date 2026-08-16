@@ -122,7 +122,7 @@ def _chassis_settings(config: dict | None = None) -> dict[str, float | int | str
     config = config or _load_config()
     control = config.get("control", {})
     slam = config.get("slam", {})
-    chassis_type = str(control.get("chassis_type", "ugv_rover")).strip().lower()
+    chassis_type = str(control.get("chassis_type", "rasprover")).strip().lower()
     chassis = _CHASSIS.get(chassis_type)
     if chassis is None:
         raise RuntimeError(f"Type de chassis inconnu: {chassis_type}")
@@ -267,7 +267,7 @@ async def lifespan(app: FastAPI):
         _encoder_feedback = EncoderFeedbackPublisher(
             _link,
             port=int(slam_cfg.get("odometry_udp_port", 7667)),
-            frequency_hz=float(slam_cfg.get("encoder_feedback_hz", 10.0)),
+            frequency_hz=float(slam_cfg.get("encoder_feedback_hz", 5.0)),
             on_feedback=_on_chassis_feedback,
         )
         _lights = LightController(_link)
@@ -1345,25 +1345,34 @@ def _stop_ros_navigation_processes() -> bool:
     return not _slam_running() and not _nav2_running()
 
 
-def _slam_topics() -> set[str]:
-    """Retourne les topics ROS visibles, sans faire échouer le statut API."""
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                _slam_container,
-                "bash",
-                "-c",
-                "source /opt/ros/jazzy/setup.bash && ros2 topic list",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5.0,
-        )
-        return set(result.stdout.splitlines()) if result.returncode == 0 else set()
-    except (OSError, subprocess.TimeoutExpired):
-        return set()
+def _slam_topic_publishers() -> dict[str, int]:
+    """Compte les éditeurs réels des topics nécessaires au SLAM.
+
+    ``ros2 topic list`` conserve un topic tant qu'un abonné existe. Il faisait
+    donc apparaître `/scan` disponible alors que le pilote LIDAR était bloqué.
+    """
+    counts = {"/scan": 0, "/odom": 0, "/map": 0}
+    for topic in counts:
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    _slam_container,
+                    "bash",
+                    "-c",
+                    f"source /opt/ros/jazzy/setup.bash && ros2 topic info {topic}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=4.0,
+            )
+            match = re.search(r"Publisher count:\s*(\d+)", result.stdout)
+            if result.returncode == 0 and match:
+                counts[topic] = int(match.group(1))
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return counts
 
 
 def _slam_log_tail() -> str | None:
@@ -1387,7 +1396,7 @@ async def slam_status() -> dict:
         running,
         navigation,
         navigation_ready,
-        topics,
+        publishers,
         slam_log,
         current_map,
         pose,
@@ -1397,7 +1406,7 @@ async def slam_status() -> dict:
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _nav2_running),
         loop.run_in_executor(None, _nav2_ready),
-        loop.run_in_executor(None, _slam_topics),
+        loop.run_in_executor(None, _slam_topic_publishers),
         loop.run_in_executor(None, _slam_log_tail),
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
         loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
@@ -1408,16 +1417,28 @@ async def slam_status() -> dict:
     )
     required = {"/scan", "/odom", "/map"}
     encoder_ready = _encoder_odometry_ready(encoder_odometry)
+    topics_ready = all(publishers[name] > 0 for name in required)
+    if publishers["/scan"] == 0:
+        status_error = "LIDAR non actif : aucun scan ROS publié"
+    elif running and current_map is None:
+        status_error = "Attente de la première carte SLAM"
+    else:
+        status_error = None if running or navigation_ready else slam_log
     return {
         "running": running or navigation,
         "mode": "mapping" if running else "navigation" if navigation else "stopped",
         "ready": (running or navigation_ready)
-        and required.issubset(topics)
+        and topics_ready
         and current_map is not None
         and encoder_ready,
         "container": _slam_container,
-        "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
-        "error": None if running or navigation_ready else slam_log,
+        "topics": {
+            name.removeprefix("/"): publishers[name] > 0 for name in sorted(required)
+        },
+        "publishers": {
+            name.removeprefix("/"): publishers[name] for name in sorted(required)
+        },
+        "error": status_error,
         "pose": pose,
         "active_map": active_map,
         "odometry": encoder_odometry,
@@ -1578,6 +1599,19 @@ async def slam_start() -> dict:
             status_code=503, content={"ok": False, "error": "container ros2-lidar absent"}
         )
 
+    publishers = await loop.run_in_executor(None, _slam_topic_publishers)
+    if publishers["/scan"] == 0:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": (
+                    "LIDAR non actif : aucun scan ROS publié. "
+                    "Redémarrez le service ros2-lidar avant la cartographie."
+                ),
+            },
+        )
+
     config = _load_config()
     cfg = config.get("slam", {})
     chassis = _chassis_settings(config)
@@ -1658,6 +1692,12 @@ async def slam_map() -> dict:
 
     msg = await loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container))
     if msg is None:
+        publishers = await loop.run_in_executor(None, _slam_topic_publishers)
+        if publishers["/scan"] == 0:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "LIDAR non actif : aucun scan ROS publié"},
+            )
         return JSONResponse(status_code=503, content={"error": "Aucune carte disponible"})
 
     try:
@@ -2407,7 +2447,6 @@ async def audio_test() -> dict:
 
 @app.get("/api/status")
 async def get_status() -> dict:
-    loop = asyncio.get_running_loop()
     base_status = _system_status()
     if _link is None or not _link.is_open:
         return {
@@ -2415,11 +2454,9 @@ async def get_status() -> dict:
             "status_warning": "ESP32 indisponible - controle moteur/pantilt desactive",
         }
     try:
-        # T=130 (chassis feedback) → tension réelle + vitesses L/R
-        feedback = await loop.run_in_executor(
-            None,
-            lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
-        )
+        feedback = _encoder_feedback.latest_feedback if _encoder_feedback else None
+        if feedback is None:
+            raise RuntimeError("Retour ESP32 pas encore disponible")
         return {**base_status, **_enrich_feedback(feedback)}
     except Exception as exc:  # noqa: BLE001
         return {**base_status, "esp32_connected": False, "status_warning": str(exc)}
@@ -2768,11 +2805,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     )
                     continue
                 try:
-                    # T=130 (chassis feedback) → tension réelle + vitesses L/R
-                    feedback = await loop.run_in_executor(
-                        None,
-                        lambda: _link.request_feedback(timeout_s=1.0, command_type=130),  # type: ignore[union-attr]
-                    )
+                    feedback = _encoder_feedback.latest_feedback if _encoder_feedback else None
+                    if feedback is None:
+                        raise RuntimeError("Retour ESP32 pas encore disponible")
                     await ws.send_json(
                         {
                             "type": "status",

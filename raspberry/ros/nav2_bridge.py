@@ -25,7 +25,7 @@ class Nav2Bridge(Node):
         self.declare_parameter("motor_udp_port", 7668)
         self.declare_parameter("command_udp_port", 7669)
         self.declare_parameter("max_linear_speed_m_s", 0.65)
-        self.declare_parameter("wheel_separation_m", 0.172)
+        self.declare_parameter("wheel_separation_m", 0.125)
         self.declare_parameter("initial_pose_x", 0.0)
         self.declare_parameter("initial_pose_y", 0.0)
         self.declare_parameter("initial_pose_yaw", 0.0)

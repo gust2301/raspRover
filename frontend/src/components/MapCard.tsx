@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Map, Maximize2, Play, RefreshCw } from 'lucide-react'
+import { Map, Maximize2, RefreshCw } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
 import { useNavigate } from 'react-router-dom'
@@ -15,7 +15,6 @@ export default function MapCard() {
 
   const [slamRunning, setSlamRunning] = useState(false)
   const [mapData, setMapData] = useState<SlamMap | null>(null)
-  const [starting, setStarting] = useState(false)
 
   const fetchStatus = useCallback(async () => {
     if (!isOnline) return
@@ -36,15 +35,6 @@ export default function MapCard() {
       if (d.ok) setMapData(d)
     } catch { /* ignore */ }
   }, [apiBase, isOnline, slamRunning])
-
-  const handleStart = async () => {
-    setStarting(true)
-    try {
-      await fetch(`${apiBase}/api/slam/start`, { method: 'POST' })
-      setSlamRunning(true)
-    } catch { /* ignore */ }
-    finally { setStarting(false) }
-  }
 
   useEffect(() => {
     void fetchStatus()
@@ -101,12 +91,11 @@ export default function MapCard() {
             <Map size={28} className="mx-auto text-slate-600 opacity-50" />
             <p className="text-xs text-slate-500">SLAM inactif</p>
             <button
-              onClick={handleStart}
-              disabled={starting}
+              onClick={() => navigate('/map')}
               className="flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-lg text-xs font-medium text-purple-300 bg-purple-600/20 hover:bg-purple-600/30 disabled:opacity-40 transition-colors"
             >
-              <Play size={12} />
-              {starting ? 'Démarrage…' : 'Démarrer la cartographie'}
+              <Map size={12} />
+              Ouvrir Carte SLAM
             </button>
           </div>
         )}

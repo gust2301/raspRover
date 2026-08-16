@@ -39,7 +39,7 @@ basename "${MAP_YAML}" .yaml > /tmp/active_map_name
 
 python3 /opt/rasprover/encoder_odometry.py --ros-args \
   -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
-  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.172}" \
+  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.125}" \
   -p left_encoder_sign:="${RASPROVER_LEFT_ENCODER_SIGN:-1.0}" \
   -p right_encoder_sign:="${RASPROVER_RIGHT_ENCODER_SIGN:-1.0}" \
   -p laser_x_m:="${RASPROVER_LASER_X_M:-0.0}" \
@@ -55,7 +55,7 @@ python3 /opt/rasprover/nav2_bridge.py --ros-args \
   -p motor_udp_port:="${RASPROVER_NAV2_MOTOR_UDP_PORT:-7668}" \
   -p command_udp_port:="${RASPROVER_NAV2_COMMAND_UDP_PORT:-7669}" \
   -p max_linear_speed_m_s:="${RASPROVER_MAX_SPEED_M_S:-0.65}" \
-  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.172}" \
+  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.125}" \
   -p initial_pose_x:="${RASPROVER_INITIAL_POSE_X:-0.0}" \
   -p initial_pose_y:="${RASPROVER_INITIAL_POSE_Y:-0.0}" \
   -p initial_pose_yaw:="${RASPROVER_INITIAL_POSE_YAW:-0.0}" \

@@ -38,6 +38,9 @@ class EncoderFeedbackPublisher:
         self._on_feedback = on_feedback
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._closed = threading.Event()
+        self._feedback_lock = threading.Lock()
+        self._latest_feedback: dict | None = None
+        self._latest_feedback_at = 0.0
         self._sequence = 0
         self._thread = threading.Thread(
             target=self._run, name="EncoderFeedbackPublisher", daemon=True
@@ -54,6 +57,9 @@ class EncoderFeedbackPublisher:
         return True
 
     def _publish(self, feedback: dict) -> None:
+        with self._feedback_lock:
+            self._latest_feedback = dict(feedback)
+            self._latest_feedback_at = time.monotonic()
         self._sequence += 1
         payload = {
             "left_speed_m_s": float(feedback["L"]),
@@ -67,34 +73,44 @@ class EncoderFeedbackPublisher:
             json.dumps(payload, separators=(",", ":")).encode("ascii"), self._address
         )
 
+    @property
+    def latest_feedback(self) -> dict | None:
+        """Dernière télémétrie reçue, sans nouvelle transaction UART."""
+        with self._feedback_lock:
+            if time.monotonic() - self._latest_feedback_at > max(1.0, self._period * 5):
+                return None
+            return dict(self._latest_feedback) if self._latest_feedback is not None else None
+
     def _run(self) -> None:
+        """Lit l'UART en continu sans bloquer les commandes moteur.
+
+        L'ancien code gardait le verrou série jusqu'à 250 ms pour chaque requête
+        T=130. Les commandes de pilotage attendaient derrière ce verrou. Ici la
+        requête est une simple écriture et ce thread est l'unique lecteur UART.
+        """
+        next_request = 0.0
         consecutive_errors = 0
         while not self._closed.is_set():
-            started = time.monotonic()
-            succeeded = False
+            now = time.monotonic()
             try:
-                feedback = self._link.request_feedback(
-                    timeout_s=min(0.25, max(0.08, self._period * 0.8)),
-                    command_type=CMD_REQUEST_BASE_FEEDBACK,
-                )
-                if not self._valid_feedback(feedback):
-                    raise ValueError("retour encodeur incomplet")
-                self._publish(feedback)
-                if self._on_feedback is not None:
-                    self._on_feedback(feedback)
-                consecutive_errors = 0
-                succeeded = True
+                if now >= next_request:
+                    self._link.send({"T": CMD_REQUEST_BASE_FEEDBACK})
+                    next_request = now + self._period
+
+                line = self._link.read_line(timeout_s=min(0.1, self._period))
+                if not line:
+                    continue
+                feedback = json.loads(line)
+                if isinstance(feedback, dict) and self._valid_feedback(feedback):
+                    self._publish(feedback)
+                    if self._on_feedback is not None:
+                        self._on_feedback(feedback)
+                    consecutive_errors = 0
             except Exception as exc:  # noqa: BLE001
                 consecutive_errors += 1
                 if consecutive_errors == 1 or consecutive_errors % 50 == 0:
                     log.warning("Retour encodeur ESP32 indisponible: %s", exc)
-            retry_period = (
-                self._period
-                if succeeded
-                else min(1.0, self._period * (2 ** min(consecutive_errors, 3)))
-            )
-            remaining = retry_period - (time.monotonic() - started)
-            self._closed.wait(max(0.0, remaining))
+                self._closed.wait(min(0.2, self._period))
 
     def close(self) -> None:
         self._closed.set()

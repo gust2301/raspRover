@@ -24,7 +24,7 @@ class EncoderOdometry(Node):
     def __init__(self) -> None:
         super().__init__("rasprover_encoder_odometry")
         self.declare_parameter("udp_port", 7667)
-        self.declare_parameter("wheel_separation_m", 0.172)
+        self.declare_parameter("wheel_separation_m", 0.125)
         self.declare_parameter("left_encoder_sign", 1.0)
         self.declare_parameter("right_encoder_sign", 1.0)
         self.declare_parameter("feedback_timeout_s", 0.6)

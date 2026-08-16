@@ -11,8 +11,17 @@ from modules.control.odometry import EncoderFeedbackPublisher
 
 
 class FeedbackLink:
-    def request_feedback(self, **_kwargs) -> dict:
-        return {"T": 1001, "L": 0.25, "R": -0.5, "odl": 12, "odr": -7}
+    def __init__(self) -> None:
+        self.pending: list[str] = []
+
+    def send(self, payload: dict) -> None:
+        if payload == {"T": 130}:
+            self.pending.append(
+                json.dumps({"T": 1001, "L": 0.25, "R": -0.5, "odl": 12, "odr": -7})
+            )
+
+    def read_line(self, **_kwargs) -> str | None:
+        return self.pending.pop(0) if self.pending else None
 
 
 def sample(
@@ -38,7 +47,7 @@ def test_encoder_feedback_publisher_sends_measured_udp_payload():
     receiver.bind(("127.0.0.1", 0))
     receiver.settimeout(1.0)
     publisher = EncoderFeedbackPublisher(
-        FeedbackLink(),
+        FeedbackLink(),  # type: ignore[arg-type]
         port=receiver.getsockname()[1],
         frequency_hz=20.0,  # type: ignore[arg-type]
     )
@@ -54,6 +63,13 @@ def test_encoder_feedback_publisher_sends_measured_udp_payload():
     assert payload["left_distance_cm"] == pytest.approx(12)
     assert payload["right_distance_cm"] == pytest.approx(-7)
     assert payload["sequence"] >= 1
+    assert publisher.latest_feedback == {
+        "T": 1001,
+        "L": 0.25,
+        "R": -0.5,
+        "odl": 12,
+        "odr": -7,
+    }
 
 
 def test_encoder_integrator_tracks_straight_physical_motion():

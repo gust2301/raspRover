@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Map, Play, Square, Save, RefreshCw, AlertTriangle, FolderOpen, Navigation, CheckCircle, House, Trash2 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
+import SlamMappingControls from '../components/SlamMappingControls'
 
 interface RoverPose { x: number; y: number; yaw: number; updated_at?: number }
 interface SlamStatus {
@@ -9,6 +10,8 @@ interface SlamStatus {
   container: string
   mode: 'mapping' | 'navigation' | 'stopped'
   pose?: RoverPose | null
+  error?: string | null
+  topics?: { map: boolean; odom: boolean; scan: boolean }
 }
 interface SavedMap { name: string; modified_at: number; size_bytes: number }
 interface Waypoint { x: number; y: number; yaw: number }
@@ -43,6 +46,7 @@ export default function MapView() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -57,6 +61,7 @@ export default function MapView() {
       setSlamRunning(d.running)
       setMode(d.mode ?? (d.running ? 'mapping' : 'stopped'))
       setPose(d.pose ?? null)
+      setStatusMessage(d.error ?? null)
     } catch { /* ignore */ }
   }, [apiBase, isOnline])
 
@@ -75,7 +80,8 @@ export default function MapView() {
       const r = await fetch(`${apiBase}/api/slam/map`)
       if (!r.ok) {
         const body = await r.json().catch(() => ({}))
-        setError((body as { error?: string }).error ?? `HTTP ${r.status}`)
+        const message = (body as { error?: string }).error ?? `HTTP ${r.status}`
+        if (message !== 'Aucune carte disponible') setError(message)
         return
       }
       const d: SlamMap = await r.json()
@@ -326,6 +332,13 @@ export default function MapView() {
         </div>
       )}
 
+      {statusMessage && !error && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+          <AlertTriangle size={15} />
+          {statusMessage}
+        </div>
+      )}
+
       {notice && (
         <div className="fixed z-50 right-4 bottom-4 max-w-sm flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-sm shadow-2xl">
           <CheckCircle size={17} className="shrink-0" />
@@ -359,6 +372,7 @@ export default function MapView() {
         )}
       </div>
 
+      <div className={slamRunning && mode === 'mapping' ? 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]' : ''}>
       {/* Map display */}
       <div
         className="rounded-xl overflow-hidden flex items-center justify-center"
@@ -419,6 +433,8 @@ export default function MapView() {
             </div>
           </div>
         )}
+      </div>
+      {slamRunning && mode === 'mapping' && <SlamMappingControls />}
       </div>
 
       {mode === 'navigation' && (
