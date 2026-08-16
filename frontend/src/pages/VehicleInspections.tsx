@@ -337,7 +337,8 @@ export default function VehicleInspections() {
       await request('/api/automotive/routes/validate', { map_name: activeMap, waypoints: [...points, candidate] })
       setPoints(current => [...current, candidate])
       const next = ZONES[(ZONES.findIndex(([value]) => value === selectedZone) + 1) % ZONES.length][0]
-      setSelectedZone(next); setNotice(`Point « ${ZONES.find(([value]) => value === selectedZone)?.[1]} » validé par Nav2 et enregistré.`)
+      const warning = captured.quality?.warning ? ` ${captured.quality.warning}.` : ''
+      setSelectedZone(next); setNotice(`Point « ${ZONES.find(([value]) => value === selectedZone)?.[1]} » validé par Nav2 et enregistré.${warning}`)
     } catch (reason) {
       setNotice(null)
       setError(`Point non enregistré : ${reason instanceof Error ? reason.message : 'trajet Nav2 invalide'}`)

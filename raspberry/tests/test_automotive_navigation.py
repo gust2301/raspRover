@@ -2,7 +2,12 @@ import math
 
 import pytest
 
-from modules.automotive.navigation import compensated_capture_pan, pose_delta, pose_quality_error
+from modules.automotive.navigation import (
+    compensated_capture_pan,
+    pose_delta,
+    pose_quality_error,
+    pose_quality_warning,
+)
 
 
 def test_capture_pan_compensates_robot_heading_with_opposite_pan_direction():
@@ -41,14 +46,21 @@ def test_capture_pan_rejects_unreachable_camera_angle():
     assert pan is None
 
 
-def test_pose_quality_rejects_uncertain_amcl_localization():
-    error = pose_quality_error({"position_stddev_m": 0.57, "yaw_stddev_rad": math.radians(39)})
+def test_pose_quality_warns_without_rejecting_limited_amcl_localization():
+    pose = {"position_stddev_m": 0.57, "yaw_stddev_rad": math.radians(39)}
+
+    assert pose_quality_error(pose) is None
+    assert pose_quality_warning(pose) == "Précision AMCL limitée (±57 cm, ±39°)"
+    assert pose_quality_error({"position_stddev_m": 0.08, "yaw_stddev_rad": 0.1}) is None
+
+
+def test_pose_quality_rejects_only_a_lost_localization():
+    error = pose_quality_error({"position_stddev_m": 1.2, "yaw_stddev_rad": math.radians(70)})
 
     assert error == (
-        "Localisation AMCL insuffisante (±57 cm, ±39°). "
+        "Localisation AMCL perdue (±120 cm, ±70°). "
         "Replacez le rover à sa maison puis rechargez la carte"
     )
-    assert pose_quality_error({"position_stddev_m": 0.08, "yaw_stddev_rad": 0.1}) is None
 
 
 def test_pose_delta_normalizes_yaw():

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import math
 
-MAX_POSITION_STDDEV_M = 0.20
-MAX_YAW_STDDEV_RAD = math.radians(15.0)
+WARNING_POSITION_STDDEV_M = 0.20
+WARNING_YAW_STDDEV_RAD = math.radians(15.0)
+LOST_POSITION_STDDEV_M = 1.0
+LOST_YAW_STDDEV_RAD = math.radians(60.0)
 
 
 def compensated_capture_pan(
@@ -33,7 +35,7 @@ def compensated_capture_pan(
 
 
 def pose_quality_error(pose: dict) -> str | None:
-    """Return a user-facing error when AMCL is too uncertain for learning."""
+    """Return an error only when AMCL is missing, invalid, or clearly lost."""
     try:
         position_stddev = float(pose["position_stddev_m"])
         yaw_stddev = float(pose["yaw_stddev_rad"])
@@ -41,11 +43,28 @@ def pose_quality_error(pose: dict) -> str | None:
         return "Qualité de localisation AMCL indisponible"
     if not math.isfinite(position_stddev) or not math.isfinite(yaw_stddev):
         return "Qualité de localisation AMCL invalide"
-    if position_stddev > MAX_POSITION_STDDEV_M or yaw_stddev > MAX_YAW_STDDEV_RAD:
+    if position_stddev > LOST_POSITION_STDDEV_M or yaw_stddev > LOST_YAW_STDDEV_RAD:
         return (
-            "Localisation AMCL insuffisante "
+            "Localisation AMCL perdue "
             f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°). "
             "Replacez le rover à sa maison puis rechargez la carte"
+        )
+    return None
+
+
+def pose_quality_warning(pose: dict) -> str | None:
+    """Describe limited AMCL precision without blocking a stable capture."""
+    try:
+        position_stddev = float(pose["position_stddev_m"])
+        yaw_stddev = float(pose["yaw_stddev_rad"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not math.isfinite(position_stddev) or not math.isfinite(yaw_stddev):
+        return None
+    if position_stddev > WARNING_POSITION_STDDEV_M or yaw_stddev > WARNING_YAW_STDDEV_RAD:
+        return (
+            "Précision AMCL limitée "
+            f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°)"
         )
     return None
 

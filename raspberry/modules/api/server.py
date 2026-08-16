@@ -26,7 +26,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from modules.audio import AlertPlayer
 from modules.automotive import AutomotiveRepository, InspectionRunner
-from modules.automotive.navigation import compensated_capture_pan, pose_delta, pose_quality_error
+from modules.automotive.navigation import (
+    compensated_capture_pan,
+    pose_delta,
+    pose_quality_error,
+    pose_quality_warning,
+)
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
@@ -1861,6 +1866,7 @@ async def automotive_point_capture(body: dict[str, Any]) -> dict:
     quality_error = pose_quality_error(second)
     if quality_error is not None:
         return JSONResponse(status_code=409, content={"ok": False, "error": quality_error})
+    quality_warning = pose_quality_warning(second)
     pan, tilt = _pantilt.position if _pantilt is not None else (0.0, 0.0)
     point = {
         "zone": zone,
@@ -1876,6 +1882,7 @@ async def automotive_point_capture(body: dict[str, Any]) -> dict:
         "quality": {
             "position_stddev_m": float(second["position_stddev_m"]),
             "yaw_stddev_rad": float(second["yaw_stddev_rad"]),
+            "warning": quality_warning,
         },
     }
 
