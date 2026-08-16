@@ -14,7 +14,6 @@ interface SlamStatus {
   topics?: { map: boolean; odom: boolean; scan: boolean }
 }
 interface SavedMap { name: string; modified_at: number; size_bytes: number }
-interface Waypoint { x: number; y: number; yaw: number }
 interface MapHome extends RoverPose { map_name: string; updated_at?: number }
 interface SlamMap {
   ok: boolean
@@ -36,11 +35,10 @@ export default function MapView() {
   const [mode, setMode] = useState<SlamStatus['mode']>('stopped')
   const [pose, setPose] = useState<RoverPose | null>(null)
   const [savedMaps, setSavedMaps] = useState<SavedMap[]>([])
-  const [waypoints, setWaypoints] = useState<Waypoint[]>([])
   const [navState, setNavState] = useState('idle')
-  const [returnHome, setReturnHome] = useState(true)
   const [home, setHome] = useState<MapHome | null>(null)
   const [savingHome, setSavingHome] = useState(false)
+  const [homeBusy, setHomeBusy] = useState(false)
   const [mapData, setMapData] = useState<SlamMap | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -49,6 +47,7 @@ export default function MapView() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const posePollInFlight = useRef(false)
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -96,7 +95,7 @@ export default function MapView() {
   const fetchNavStatus = useCallback(async () => {
     if (!isOnline || mode !== 'navigation') return
     try {
-      const r = await fetch(`${apiBase}/api/nav2/patrol/status`)
+      const r = await fetch(`${apiBase}/api/nav2/home/status`)
       const d = await r.json()
       setNavState(d.state ?? 'unavailable')
     } catch { /* ignore */ }
@@ -109,6 +108,16 @@ export default function MapView() {
       const d = await r.json()
       if (r.ok) setHome(d.home ?? null)
     } catch { /* ignore */ }
+  }, [apiBase, isOnline, mode])
+
+  const fetchPose = useCallback(async () => {
+    if (!isOnline || mode !== 'navigation' || posePollInFlight.current) return
+    posePollInFlight.current = true
+    try {
+      const r = await fetch(`${apiBase}/api/slam/pose`)
+      if (r.ok) setPose(await r.json())
+    } catch { /* le prochain passage réessaiera */ }
+    finally { posePollInFlight.current = false }
   }, [apiBase, isOnline, mode])
 
   // ── actions ───────────────────────────────────────────────────────────────
@@ -177,7 +186,6 @@ export default function MapView() {
       if (!r.ok) throw new Error(d.error ?? 'Chargement échoué')
       setSlamRunning(true)
       setMode('navigation')
-      setWaypoints([])
       setHome(null)
       window.setTimeout(() => { void fetchMap(); void fetchStatus(); void fetchHome() }, 1500)
     } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
@@ -206,34 +214,6 @@ export default function MapView() {
     finally { setLoading(false) }
   }
 
-  function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (mode !== 'navigation' || !mapData) return
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const px = (event.clientX - bounds.left) / bounds.width * mapData.width
-    const py = (1 - (event.clientY - bounds.top) / bounds.height) * mapData.height
-    setWaypoints(current => [...current, {
-      x: mapData.origin_x + px * mapData.resolution_m,
-      y: mapData.origin_y + py * mapData.resolution_m,
-      yaw: 0,
-    }])
-  }
-
-  async function handleStartNavPatrol() {
-    if (!waypoints.length) return
-    const r = await fetch(`${apiBase}/api/nav2/patrol/start`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waypoints, return_home: returnHome }),
-    })
-    const d = await r.json()
-    if (!r.ok) setError(d.error ?? 'Patrouille Nav2 impossible')
-    else setNavState('starting')
-  }
-
-  async function handleStopNavPatrol() {
-    await fetch(`${apiBase}/api/nav2/patrol/stop`, { method: 'POST' })
-    setNavState('cancelled')
-  }
-
   async function handleSetHome() {
     setSavingHome(true)
     setError(null)
@@ -245,6 +225,30 @@ export default function MapView() {
       setNotice('La position actuelle est maintenant la maison du rover')
     } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
     finally { setSavingHome(false) }
+  }
+
+  async function handleGoHome() {
+    setHomeBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const r = await fetch(`${apiBase}/api/nav2/home/start`, { method: 'POST' })
+      const d = await r.json()
+      if (!r.ok || d.ok === false) throw new Error(d.error ?? 'Retour maison impossible')
+      setNavState(d.state ?? 'starting')
+      setNotice(d.message ?? 'Retour à la maison démarré')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Retour maison impossible')
+    } finally { setHomeBusy(false) }
+  }
+
+  async function handleStopHome() {
+    setHomeBusy(true)
+    try {
+      await fetch(`${apiBase}/api/nav2/home/stop`, { method: 'POST' })
+      setNavState('cancelled')
+      setNotice('Retour à la maison arrêté')
+    } finally { setHomeBusy(false) }
   }
 
   // ── effects ───────────────────────────────────────────────────────────────
@@ -260,13 +264,20 @@ export default function MapView() {
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
     if (slamRunning && isOnline) {
-      void fetchMap()
-      pollRef.current = setInterval(() => {
-        void fetchMap(); void fetchStatus(); void fetchNavStatus(); void fetchHome()
-      }, 2000)
+      void fetchMap(); void fetchHome()
+      if (mode === 'navigation') {
+        void fetchPose(); void fetchNavStatus()
+        pollRef.current = setInterval(() => {
+          void fetchPose(); void fetchNavStatus()
+        }, 500)
+      } else {
+        pollRef.current = setInterval(() => {
+          void fetchMap()
+        }, 2500)
+      }
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [slamRunning, isOnline, fetchMap, fetchStatus, fetchNavStatus, fetchHome])
+  }, [slamRunning, isOnline, mode, fetchMap, fetchNavStatus, fetchHome, fetchPose])
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -398,8 +409,7 @@ export default function MapView() {
           </div>
         ) : (
           <div className="p-4 space-y-2 w-full">
-            <div onClick={handleMapClick}
-              className={`relative w-full max-w-2xl mx-auto ${mode === 'navigation' ? 'cursor-crosshair' : ''}`}>
+            <div className="relative w-full max-w-2xl mx-auto">
               <img src={`data:image/png;base64,${mapData.image}`} alt="Carte SLAM"
                 className="block w-full rounded border border-slate-700" style={{ imageRendering: 'pixelated' }} />
               {pose && (() => {
@@ -418,13 +428,6 @@ export default function MapView() {
                   <House size={13} />
                 </div>
               })()}
-              {waypoints.map((point, index) => {
-                const left = (point.x - mapData.origin_x) / mapData.resolution_m / mapData.width * 100
-                const top = 100 - (point.y - mapData.origin_y) / mapData.resolution_m / mapData.height * 100
-                return <div key={`${point.x}-${point.y}-${index}`}
-                  className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-emerald-500 text-[10px] font-bold text-white flex items-center justify-center border border-white"
-                  style={{ left: `${left}%`, top: `${top}%` }}>{index + 1}</div>
-              })}
             </div>
             <div className="flex items-center justify-center gap-6 text-xs text-slate-500 mt-2">
               <span>{mapData.width} × {mapData.height} px</span>
@@ -441,27 +444,23 @@ export default function MapView() {
         <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex flex-wrap items-center gap-3">
           <Navigation size={17} className="text-blue-400" />
           <div className="flex-1 min-w-48">
-            <p className="text-sm text-slate-200">Patrouille Nav2 · {navState}</p>
-            <p className="text-xs text-slate-500">Clique sur la carte pour ajouter les points dans l’ordre.</p>
+            <p className="text-sm text-slate-200">Navigation Nav2 · {navState}</p>
+            <p className="text-xs text-slate-500">Un seul objectif : rejoindre la maison enregistrée.</p>
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-            <input type="checkbox" checked={returnHome}
-              onChange={event => setReturnHome(event.target.checked)}
-              className="accent-blue-500" />
-            Retourner à la maison
-          </label>
           <button onClick={() => { void handleSetHome() }} disabled={savingHome || !pose}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 text-xs text-amber-300 disabled:opacity-40">
             <House size={14} />
             {savingHome ? 'Enregistrement…' : home ? 'Redéfinir la maison' : 'Définir comme maison'}
           </button>
-          <button onClick={() => setWaypoints([])} className="px-3 py-2 rounded-lg bg-slate-800 text-xs text-slate-300">Effacer</button>
           {navState === 'running' || navState === 'starting' ? (
-            <button onClick={() => { void handleStopNavPatrol() }} className="px-3 py-2 rounded-lg bg-red-600/30 text-xs text-red-300">Arrêter</button>
+            <button onClick={() => { void handleStopHome() }} disabled={homeBusy}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600/30 text-xs text-red-300 disabled:opacity-40">
+              <Square size={14} /> Arrêter le retour
+            </button>
           ) : (
-            <button onClick={() => { void handleStartNavPatrol() }} disabled={!waypoints.length}
-              className="px-3 py-2 rounded-lg bg-blue-600 text-xs text-white disabled:opacity-40">
-              Démarrer ({waypoints.length})
+            <button onClick={() => { void handleGoHome() }} disabled={homeBusy || !home}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-xs text-white disabled:opacity-40">
+              <House size={14} /> {homeBusy ? 'Démarrage…' : 'Rentrer à la maison'}
             </button>
           )}
         </div>

@@ -2324,6 +2324,94 @@ async def patrol_status() -> dict:
     return _patrol.to_dict()
 
 
+@app.post("/api/nav2/home/start")
+async def nav2_home_start() -> dict:
+    """Send one and only one Nav2 goal: the saved home of the active map."""
+    if _nav2_motors is None or _motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _nav2_ready):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
+    if _nav2_motors.enabled:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Une navigation est déjà en cours"},
+        )
+
+    map_name, pose = await asyncio.gather(
+        loop.run_in_executor(None, _active_map_name),
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+    )
+    home = await loop.run_in_executor(None, lambda: get_map_home(map_name)) if map_name else None
+    if home is None:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Maison non définie pour la carte active"},
+        )
+    if pose is None or time.time() - float(pose.get("updated_at", 0.0)) > 2.0:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Position actuelle indisponible"},
+        )
+
+    distance, yaw_error = target_pose_error(home, pose)
+    if distance <= 0.10 and abs(yaw_error) <= math.radians(10.0):
+        await loop.run_in_executor(None, _motors.stop)
+        return {
+            "ok": True,
+            "state": "completed",
+            "message": "Le rover est déjà à la maison",
+            "distance_m": distance,
+            "yaw_error_rad": yaw_error,
+            "home": home,
+        }
+
+    if _patrol and _patrol.active:
+        await _patrol.stop(loop)
+    await loop.run_in_executor(None, lambda: _nav2_motors.follow_waypoints([home]))
+    return {
+        "ok": True,
+        "state": "starting",
+        "goal": "home",
+        "distance_m": distance,
+        "yaw_error_rad": yaw_error,
+        "home": home,
+    }
+
+
+@app.post("/api/nav2/home/stop")
+async def nav2_home_stop() -> dict:
+    if _nav2_motors is None:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Nav2 indisponible"})
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _nav2_motors.cancel)
+    return {"ok": True, "state": "cancelled"}
+
+
+@app.get("/api/nav2/home/status")
+async def nav2_home_status() -> dict:
+    loop = asyncio.get_running_loop()
+    map_name, pose, navigation = await asyncio.gather(
+        loop.run_in_executor(None, _active_map_name),
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
+    )
+    home = await loop.run_in_executor(None, lambda: get_map_home(map_name)) if map_name else None
+    distance = None
+    yaw_error = None
+    if home is not None and pose is not None:
+        distance, yaw_error = target_pose_error(home, pose)
+    return {
+        "ok": navigation is not None,
+        "authorized": bool(_nav2_motors and _nav2_motors.enabled),
+        "map_name": map_name,
+        "home": home,
+        "distance_m": distance,
+        "yaw_error_rad": yaw_error,
+        **(navigation or {"state": "unavailable"}),
+    }
+
+
 @app.post("/api/nav2/patrol/start")
 async def nav2_patrol_start(body: dict[str, Any]) -> dict:
     if _nav2_motors is None or _motors is None:
