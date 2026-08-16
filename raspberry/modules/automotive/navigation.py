@@ -67,7 +67,7 @@ def pose_quality_warning(pose: dict) -> str | None:
         return None
     if position_stddev > WARNING_POSITION_STDDEV_M or yaw_stddev > WARNING_YAW_STDDEV_RAD:
         return (
-            "Précision AMCL limitée "
+            "Estimation AMCL indicative "
             f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°)"
         )
     return None

@@ -51,7 +51,7 @@ def test_pose_quality_warns_without_rejecting_limited_amcl_localization():
     pose = {"position_stddev_m": 0.18, "yaw_stddev_rad": math.radians(10)}
 
     assert pose_quality_error(pose) is None
-    assert pose_quality_warning(pose) == "Précision AMCL limitée (±18 cm, ±10°)"
+    assert pose_quality_warning(pose) == "Estimation AMCL indicative (±18 cm, ±10°)"
     assert pose_quality_error({"position_stddev_m": 0.08, "yaw_stddev_rad": 0.1}) is None
 
 

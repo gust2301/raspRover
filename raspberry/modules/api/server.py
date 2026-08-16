@@ -32,7 +32,6 @@ from modules.automotive.navigation import (
     INSPECTION_STABLE_YAW_DELTA_RAD,
     INSPECTION_YAW_TOLERANCE_RAD,
     pose_delta,
-    pose_quality_error,
     pose_quality_warning,
     target_pose_error,
 )
@@ -1260,9 +1259,9 @@ async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0)
                     f"({last_distance * 100:.0f} cm, maximum "
                     f"{INSPECTION_POSITION_TOLERANCE_M * 100:.0f} cm)"
                 )
-            quality_error = pose_quality_error(pose)
-            if quality_error is not None:
-                raise RuntimeError(quality_error)
+            quality_warning = pose_quality_warning(pose)
+            if quality_warning is not None:
+                log.warning("Capture avec localisation AMCL indicative: %s", quality_warning)
             return pose
         await asyncio.sleep(0.2)
     raise RuntimeError(
@@ -1549,43 +1548,6 @@ async def slam_pose() -> dict:
     if pose is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Pose indisponible"})
     return {"ok": True, **pose}
-
-
-@app.post("/api/slam/relocalize")
-async def slam_relocalize() -> dict:
-    """Réinitialise les particules AMCL sans déplacer automatiquement le rover."""
-    if not _nav2_running():
-        return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: subprocess.run(
-            [
-                "docker",
-                "exec",
-                _slam_container,
-                "bash",
-                "-c",
-                "source /opt/ros/jazzy/setup.bash && "
-                "ros2 service call /reinitialize_global_localization std_srvs/srv/Empty '{}'",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=8.0,
-        ),
-    )
-    if result.returncode != 0:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "ok": False,
-                "error": result.stderr.strip() or "Relocalisation AMCL indisponible",
-            },
-        )
-    return {
-        "ok": True,
-        "message": "AMCL réinitialisé. Tournez lentement le rover sur 360° puis immobilisez-le.",
-    }
 
 
 @app.get("/api/slam/home")
@@ -2137,9 +2099,6 @@ async def automotive_point_capture(body: dict[str, Any]) -> dict:
             status_code=409,
             content={"ok": False, "error": "Le rover ou sa localisation n'est pas stable"},
         )
-    quality_error = pose_quality_error(second)
-    if quality_error is not None:
-        return JSONResponse(status_code=409, content={"ok": False, "error": quality_error})
     quality_warning = pose_quality_warning(second)
     if _pantilt is not None:
         feedback_age = _pantilt.feedback_age_s
