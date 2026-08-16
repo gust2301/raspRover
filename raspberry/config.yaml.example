@@ -104,6 +104,11 @@ slam:
   # Augmenter inflation_radius_m si le rover passe trop pres des obstacles.
   nav2_robot_radius_m: 0.16
   nav2_inflation_radius_m: 0.30
+  # Inspection automobile: répéter fidèlement les poses apprises.
+  nav2_goal_xy_tolerance_m: 0.12
+  nav2_goal_yaw_tolerance_rad: 0.14
+  nav2_progress_radius_m: 0.05
+  nav2_progress_allowance_s: 15.0
   # Pose physique du centre optique LIDAR par rapport au centre du chassis.
   laser_x_m: 0.0
   laser_y_m: 0.0

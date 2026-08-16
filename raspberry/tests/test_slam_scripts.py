@@ -127,8 +127,20 @@ def test_api_detects_composed_nav2_container():
     assert '@app.post("/api/automotive/routes/validate")' in server
     assert "_validate_automotive_poses(" in server
     assert '"position actuelle"' in server
-    assert "started_at + 45.0" in server
-    assert "distance <= 0.25" in server
-    assert 'waypoint["_capture_pan"] = compensated_pan' in server
+    assert "INSPECTION_POSITION_TOLERANCE_M" in server
+    assert "_wait_for_stable_inspection_pose(waypoint)" in server
+    assert 'waypoint["_capture_pan"] = capture_pan' in server
     assert '@app.delete("/api/slam/maps/{map_name}")' in server
     assert '@app.post("/api/automotive/points/capture")' in server
+
+
+def test_navigation_uses_precise_inspection_goal_and_progress_tolerances():
+    launcher = (Path(__file__).parents[1] / "ros" / "start_navigation.sh").read_text()
+    server = (Path(__file__).parents[1] / "modules" / "api" / "server.py").read_text()
+
+    assert 'RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.12' in launcher
+    assert 'RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.14' in launcher
+    assert 'RASPROVER_NAV2_PROGRESS_RADIUS_M:-0.05' in launcher
+    assert 'RASPROVER_NAV2_PROGRESS_ALLOWANCE_S:-15.0' in launcher
+    assert "RASPROVER_NAV2_GOAL_XY_TOLERANCE_M" in server
+    assert "RASPROVER_NAV2_PROGRESS_RADIUS_M" in server

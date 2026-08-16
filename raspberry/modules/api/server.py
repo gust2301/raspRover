@@ -27,10 +27,14 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from modules.audio import AlertPlayer
 from modules.automotive import AutomotiveRepository, InspectionRunner
 from modules.automotive.navigation import (
+    INSPECTION_POSITION_TOLERANCE_M,
+    INSPECTION_STABLE_POSITION_DELTA_M,
+    INSPECTION_STABLE_YAW_DELTA_RAD,
     compensated_capture_pan,
     pose_delta,
     pose_quality_error,
     pose_quality_warning,
+    target_pose_error,
 )
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
@@ -1076,76 +1080,155 @@ def _active_map_name() -> str | None:
 
 
 async def _inspection_navigate(waypoint: dict) -> None:
-    """Run one Nav2 goal and wait for its terminal status before returning."""
+    """Reach one learned pose, then prove the rover is stopped at that pose."""
     if _nav2_motors is None or not _nav2_ready():
         raise RuntimeError("Nav2 non actif")
     loop = asyncio.get_running_loop()
-    sent_at = time.time()
-    await loop.run_in_executor(
-        None,
-        lambda: _nav2_motors.follow_waypoints(
-            [{"x": waypoint["x"], "y": waypoint["y"], "yaw": waypoint["yaw"]}]
-        ),
-    )
-    started_at = time.monotonic()
-    deadline = started_at + 45.0
-    while time.monotonic() < deadline:
-        status, pose = await asyncio.gather(
-            loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
-            loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+    last_error = "Point non atteint"
+    for attempt in range(2):
+        sent_at = time.time()
+        await loop.run_in_executor(
+            None,
+            lambda: _nav2_motors.follow_waypoints(
+                [{"x": waypoint["x"], "y": waypoint["y"], "yaw": waypoint["yaw"]}]
+            ),
         )
-        state = None
-        if status and float(status.get("updated_at", 0.0)) >= sent_at:
-            state = status.get("state")
-            if state == "completed":
-                return
-        elapsed = time.monotonic() - started_at
-        if elapsed >= 6.0 and pose is not None:
-            distance = math.hypot(
-                float(waypoint["x"]) - float(pose["x"]),
-                float(waypoint["y"]) - float(pose["y"]),
+        started_at = time.monotonic()
+        deadline = started_at + 35.0
+        while time.monotonic() < deadline:
+            status, pose = await asyncio.gather(
+                loop.run_in_executor(
+                    None, lambda: _read_container_json("/tmp/nav2_status.json")
+                ),
+                loop.run_in_executor(
+                    None, lambda: _read_container_json("/tmp/current_pose.json")
+                ),
             )
-            learned_pan = float(waypoint.get("pan", 0.0))
-            compensated_pan: float | None = None
-            yaw_error = 0.0
-            if _pantilt is not None:
-                compensated_pan, yaw_error = compensated_capture_pan(
-                    target_yaw=float(waypoint["yaw"]),
-                    current_yaw=float(pose["yaw"]),
-                    learned_pan=learned_pan,
-                    pan_range=_pantilt.pan_range,
+            state = None
+            if status and float(status.get("updated_at", 0.0)) >= sent_at:
+                state = status.get("state")
+
+            # Do not trust Nav2's result alone. Its default goal checker used to
+            # accept a pose 25 cm away, which produced visibly different photos.
+            candidate = state == "completed"
+            if pose is not None and time.time() - float(pose.get("updated_at", 0.0)) <= 1.0:
+                distance, _ = target_pose_error(waypoint, pose)
+                candidate = candidate or (
+                    time.monotonic() - started_at >= 4.0
+                    and distance <= INSPECTION_POSITION_TOLERANCE_M
                 )
-            if distance <= 0.25 and compensated_pan is not None:
-                waypoint["_capture_pan"] = compensated_pan
-                waypoint["_navigation_fallback"] = {
-                    "distance_m": distance,
-                    "yaw_error_deg": math.degrees(yaw_error),
-                }
+            if candidate:
                 await _inspection_cancel_navigation()
-                await asyncio.sleep(0.25)
-                log.info(
-                    "Point %s atteint à %.2f m ; orientation compensée par la caméra (pan %.1f°)",
-                    waypoint.get("sequence", "?"),
-                    distance,
-                    compensated_pan,
+                try:
+                    stable_pose = await _wait_for_stable_inspection_pose(waypoint)
+                    _set_inspection_capture_pan(waypoint, stable_pose)
+                    distance, yaw_error = target_pose_error(waypoint, stable_pose)
+                    waypoint["_arrival_pose"] = stable_pose
+                    log.info(
+                        "Point %s confirmé à %.2f m et %.1f° (tentative %d)",
+                        waypoint.get("sequence", "?"),
+                        distance,
+                        math.degrees(yaw_error),
+                        attempt + 1,
+                    )
+                    return
+                except RuntimeError as exc:
+                    last_error = str(exc)
+                    break
+            if state in {"error", "cancelled"}:
+                last_error = status.get("error") or f"Navigation {state}"
+                break
+            await asyncio.sleep(0.2)
+        else:
+            last_error = "Point non atteint après 35 secondes"
+        await _inspection_cancel_navigation()
+        if attempt == 0:
+            log.warning("Nouvelle tentative vers le point %s: %s", waypoint.get("sequence", "?"), last_error)
+            await asyncio.sleep(0.4)
+    raise RuntimeError(last_error)
+
+
+def _set_inspection_capture_pan(waypoint: dict, pose: dict) -> None:
+    """Preserve the learned world-facing camera angle at the reached pose."""
+    if _pantilt is None:
+        _, yaw_error = target_pose_error(waypoint, pose)
+        if abs(yaw_error) > math.radians(8.0):
+            raise RuntimeError("Orientation du rover différente du point appris")
+        return
+    capture_pan, yaw_error = compensated_capture_pan(
+        target_yaw=float(waypoint["yaw"]),
+        current_yaw=float(pose["yaw"]),
+        learned_pan=float(waypoint.get("pan", 0.0)),
+        pan_range=_pantilt.pan_range,
+    )
+    if capture_pan is None:
+        raise RuntimeError(
+            "Orientation du point non reproductible par la caméra "
+            f"(écart {math.degrees(yaw_error):.0f}°)"
+        )
+    waypoint["_capture_pan"] = capture_pan
+
+
+async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0) -> dict:
+    """Stop the motors and return only after several stable, on-target poses."""
+    if _motors is None:
+        raise RuntimeError("Moteurs absents")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _motors.stop)
+    deadline = time.monotonic() + timeout
+    previous: dict | None = None
+    stable_samples = 0
+    last_distance = math.inf
+    while time.monotonic() < deadline:
+        pose = await loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/current_pose.json")
+        )
+        if pose is None or time.time() - float(pose.get("updated_at", 0.0)) > 1.0:
+            stable_samples = 0
+            await asyncio.sleep(0.2)
+            continue
+        last_distance, _ = target_pose_error(waypoint, pose)
+        if previous is not None:
+            moved, turned = pose_delta(previous, pose)
+            if (
+                moved <= INSPECTION_STABLE_POSITION_DELTA_M
+                and turned <= INSPECTION_STABLE_YAW_DELTA_RAD
+            ):
+                stable_samples += 1
+            else:
+                stable_samples = 0
+        previous = pose
+        if stable_samples >= 3:
+            if last_distance > INSPECTION_POSITION_TOLERANCE_M:
+                raise RuntimeError(
+                    "Rover immobilisé trop loin du point appris "
+                    f"({last_distance * 100:.0f} cm, maximum "
+                    f"{INSPECTION_POSITION_TOLERANCE_M * 100:.0f} cm)"
                 )
-                return
-        if state in {"error", "cancelled"}:
-            raise RuntimeError(status.get("error") or f"Navigation {state}")
-        await asyncio.sleep(0.25)
-    await _inspection_cancel_navigation()
-    raise RuntimeError("Point non atteint après 45 secondes")
+            return pose
+        await asyncio.sleep(0.2)
+    raise RuntimeError(
+        "Rover non stabilisé au point appris"
+        if last_distance <= INSPECTION_POSITION_TOLERANCE_M
+        else f"Rover à {last_distance * 100:.0f} cm du point appris"
+    )
 
 
 async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, dict | None]:
-    """Orient the inspection camera and persist one JPEG locally for the V1."""
+    """Capture only after a final stop check and camera/exposure settling."""
     loop = asyncio.get_running_loop()
+    stable_pose = await _wait_for_stable_inspection_pose(waypoint)
+    _set_inspection_capture_pan(waypoint, stable_pose)
     if _pantilt is not None:
         current_pan, _ = _pantilt.position
         capture_pan = float(waypoint.get("_capture_pan", waypoint["pan"]))
         await loop.run_in_executor(None, lambda: _pantilt.goto(capture_pan, waypoint["tilt"]))
-        settle_time = min(0.9, 0.15 + abs(capture_pan - current_pan) / 90.0 * 0.75)
+        settle_time = min(2.0, 0.8 + abs(capture_pan - current_pan) / 90.0)
         await asyncio.sleep(settle_time)
+    # Discard the first frame after a motion/exposure change. The following
+    # frame is the one persisted and shown to the operator.
+    await loop.run_in_executor(None, capture_photo)
+    await asyncio.sleep(0.25)
     jpeg = await loop.run_in_executor(None, capture_photo)
     inspection_dir = _inspection_media_dir / inspection_id
     await loop.run_in_executor(None, lambda: inspection_dir.mkdir(parents=True, exist_ok=True))
@@ -1153,6 +1236,11 @@ async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, 
     media_path = inspection_dir / filename
     await loop.run_in_executor(None, media_path.write_bytes, jpeg)
     pose = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json"))
+    if pose is not None:
+        distance, yaw_error = target_pose_error(waypoint, pose)
+        pose["target_distance_m"] = distance
+        pose["target_yaw_error_rad"] = yaw_error
+        pose["capture_pan"] = float(waypoint.get("_capture_pan", waypoint.get("pan", 0.0)))
     return str(media_path), pose
 
 
@@ -1637,6 +1725,14 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_NAV2_ROBOT_RADIUS_M={float(cfg.get('nav2_robot_radius_m', 0.16))}",
         "-e",
         f"RASPROVER_NAV2_INFLATION_RADIUS_M={float(cfg.get('nav2_inflation_radius_m', 0.30))}",
+        "-e",
+        f"RASPROVER_NAV2_GOAL_XY_TOLERANCE_M={float(cfg.get('nav2_goal_xy_tolerance_m', 0.12))}",
+        "-e",
+        f"RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD={float(cfg.get('nav2_goal_yaw_tolerance_rad', 0.14))}",
+        "-e",
+        f"RASPROVER_NAV2_PROGRESS_RADIUS_M={float(cfg.get('nav2_progress_radius_m', 0.05))}",
+        "-e",
+        f"RASPROVER_NAV2_PROGRESS_ALLOWANCE_S={float(cfg.get('nav2_progress_allowance_s', 15.0))}",
         "-e",
         f"RASPROVER_INITIAL_POSE_X={pose_values['x']}",
         "-e",

@@ -44,6 +44,22 @@ def test_inspection_links_vehicle_route_and_spatial_capture(tmp_path: pathlib.Pa
     assert stored["captures"][0]["pose"]["x"] == 1.1
 
 
+def test_capture_persists_compensated_camera_pan(tmp_path: pathlib.Path):
+    repository = AutomotiveRepository(tmp_path / "robot.db")
+    repository.init()
+    route = repository.create_route("Place A", "parking", _waypoints())
+    vehicle = repository.upsert_vehicle("AA-123-AA")
+    inspection = repository.create_inspection(vehicle["id"], route["id"])
+    waypoint = route["waypoints"][0]
+    waypoint["_capture_pan"] = -17.5
+
+    capture = repository.add_capture(
+        inspection["id"], waypoint, "/tmp/photo.jpg", {"x": 1.0, "y": 2.0}
+    )
+
+    assert capture["pan"] == -17.5
+
+
 def test_vehicle_is_reused_by_registration(tmp_path: pathlib.Path):
     repository = AutomotiveRepository(tmp_path / "robot.db")
     repository.init()

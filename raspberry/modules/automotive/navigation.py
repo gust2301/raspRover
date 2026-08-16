@@ -8,6 +8,9 @@ WARNING_POSITION_STDDEV_M = 0.20
 WARNING_YAW_STDDEV_RAD = math.radians(15.0)
 LOST_POSITION_STDDEV_M = 1.0
 LOST_YAW_STDDEV_RAD = math.radians(60.0)
+INSPECTION_POSITION_TOLERANCE_M = 0.12
+INSPECTION_STABLE_POSITION_DELTA_M = 0.025
+INSPECTION_STABLE_YAW_DELTA_RAD = math.radians(3.0)
 
 
 def compensated_capture_pan(
@@ -79,3 +82,16 @@ def pose_delta(first: dict, second: dict) -> tuple[float, float]:
         math.cos(float(second["yaw"]) - float(first["yaw"])),
     )
     return distance, abs(yaw_delta)
+
+
+def target_pose_error(target: dict, pose: dict) -> tuple[float, float]:
+    """Return the rover translation and heading error from a learned point."""
+    distance = math.hypot(
+        float(target["x"]) - float(pose["x"]),
+        float(target["y"]) - float(pose["y"]),
+    )
+    yaw_error = math.atan2(
+        math.sin(float(target.get("yaw", 0.0)) - float(pose.get("yaw", 0.0))),
+        math.cos(float(target.get("yaw", 0.0)) - float(pose.get("yaw", 0.0))),
+    )
+    return distance, yaw_error

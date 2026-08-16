@@ -287,7 +287,7 @@ class AutomotiveRepository:
                     _now(),
                     media_path,
                     json.dumps(pose) if pose else None,
-                    waypoint["pan"],
+                    waypoint.get("_capture_pan", waypoint["pan"]),
                     waypoint["tilt"],
                 ),
             )

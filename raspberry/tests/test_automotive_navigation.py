@@ -7,6 +7,7 @@ from modules.automotive.navigation import (
     pose_delta,
     pose_quality_error,
     pose_quality_warning,
+    target_pose_error,
 )
 
 
@@ -71,3 +72,13 @@ def test_pose_delta_normalizes_yaw():
 
     assert distance == pytest.approx(0.05)
     assert math.degrees(yaw_delta) == pytest.approx(2.0)
+
+
+def test_target_pose_error_measures_learned_position_and_normalizes_heading():
+    distance, yaw_error = target_pose_error(
+        {"x": 1.0, "y": 2.0, "yaw": math.radians(-175)},
+        {"x": 0.91, "y": 2.12, "yaw": math.radians(175)},
+    )
+
+    assert distance == pytest.approx(0.15)
+    assert math.degrees(yaw_error) == pytest.approx(10.0)
