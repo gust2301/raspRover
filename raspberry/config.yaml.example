@@ -12,6 +12,9 @@ control:
   baudrate: 115200
   timeout_s: 1.0
   esp32_required: false       # false = l'API demarre meme si l'ESP32 est absent
+  # Modele physique Waveshare. Configure les constantes encodeurs du firmware.
+  chassis_type: "ugv_rover"  # rasprover | ugv_rover | ugv_beast
+  module_type: 2              # 2 = pan-tilt avec retour de position des servos
 
   # Limites de sécurité
   motor_max_speed: 0.5        # Vitesse maximale normalisée (0.0 à 1.0)
@@ -91,12 +94,14 @@ sensors:
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
 
 slam:
-  # Odometrie estimee depuis les consignes moteurs. A calibrer sur le robot reel :
-  # faire rouler 2 m en ligne droite, puis ajuster max_linear_speed_m_s.
+  # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65
-  # Distance effective entre les roues pour le skid-steer. Faire un tour complet
-  # sur place et ajuster jusqu'a ce que l'orientation odometrique soit proche de 360°.
-  wheel_separation_m: 0.18
+  # Odometrie physique issue des encodeurs odl/odr du firmware Waveshare.
+  # Valeur UGV Rover nominale: 0.172 m. Calibrer par une rotation mesuree.
+  wheel_separation_m: 0.172
+  left_encoder_sign: 1.0
+  right_encoder_sign: 1.0
+  encoder_feedback_hz: 10.0
   odometry_udp_port: 7667
   nav2_motor_udp_port: 7668
   nav2_command_udp_port: 7669
@@ -107,8 +112,8 @@ slam:
   nav2_robot_radius_m: 0.16
   nav2_inflation_radius_m: 0.30
   # Inspection automobile: répéter fidèlement les poses apprises.
-  nav2_goal_xy_tolerance_m: 0.12
-  nav2_goal_yaw_tolerance_rad: 0.14
+  nav2_goal_xy_tolerance_m: 0.05
+  nav2_goal_yaw_tolerance_rad: 0.05236 # 3 degres
   nav2_progress_radius_m: 0.05
   nav2_progress_allowance_s: 15.0
   # Pose physique du centre optique LIDAR par rapport au centre du chassis.

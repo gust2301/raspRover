@@ -42,6 +42,7 @@ CMD_REQUEST_BASE_FEEDBACK = 130
 CMD_PANTILT_CTRL = 133
 CMD_SERIAL_FEEDBACK = 131
 CMD_SERIAL_ECHO = 143
+CMD_MM_TYPE_SET = 900
 FEEDBACK_TYPES = {1001, CMD_REQUEST_IMU, CMD_REQUEST_BASE_FEEDBACK}
 
 
@@ -144,6 +145,18 @@ class ESP32Link:
             self.send({"T": CMD_EMERGENCY_STOP})
         finally:
             self.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
+
+    def configure_platform(self, main_type: int, module_type: int = 2) -> None:
+        """Configure les constantes chassis et le module dans le firmware.
+
+        ``main_type`` vaut 1 pour RaspRover, 2 pour UGV Rover et 3 pour UGV
+        Beast. ``module_type=2`` active notamment le retour mesure pan/tilt.
+        """
+        if main_type not in {1, 2, 3}:
+            raise ValueError("main_type ESP32 invalide")
+        if module_type not in {0, 1, 2}:
+            raise ValueError("module_type ESP32 invalide")
+        self.send({"T": CMD_MM_TYPE_SET, "main": main_type, "module": module_type})
 
     def request_feedback(
         self,
@@ -249,5 +262,18 @@ class ESP32Link:
         # Exemple réel : {'T':1001,'L':0,'R':0,'r':0,'p':0,'v':11,'pan':0,'tilt':0}
         return any(
             key in candidate
-            for key in ("v", "voltage", "x", "y", "yaw", "imu", "roll", "pitch", "pan", "tilt")
+            for key in (
+                "v",
+                "voltage",
+                "odl",
+                "odr",
+                "x",
+                "y",
+                "yaw",
+                "imu",
+                "roll",
+                "pitch",
+                "pan",
+                "tilt",
+            )
         )

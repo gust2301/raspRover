@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 
-WARNING_POSITION_STDDEV_M = 0.20
-WARNING_YAW_STDDEV_RAD = math.radians(15.0)
-LOST_POSITION_STDDEV_M = 1.0
-LOST_YAW_STDDEV_RAD = math.radians(60.0)
-INSPECTION_POSITION_TOLERANCE_M = 0.12
+WARNING_POSITION_STDDEV_M = 0.12
+WARNING_YAW_STDDEV_RAD = math.radians(8.0)
+LOST_POSITION_STDDEV_M = 0.20
+LOST_YAW_STDDEV_RAD = math.radians(15.0)
+INSPECTION_POSITION_TOLERANCE_M = 0.05
+INSPECTION_YAW_TOLERANCE_RAD = math.radians(3.0)
 INSPECTION_STABLE_POSITION_DELTA_M = 0.025
 INSPECTION_STABLE_YAW_DELTA_RAD = math.radians(3.0)
 
@@ -38,7 +39,7 @@ def compensated_capture_pan(
 
 
 def pose_quality_error(pose: dict) -> str | None:
-    """Return an error only when AMCL is missing, invalid, or clearly lost."""
+    """Refuse a capture whose map pose cannot reproduce the learned viewpoint."""
     try:
         position_stddev = float(pose["position_stddev_m"])
         yaw_stddev = float(pose["yaw_stddev_rad"])
@@ -48,9 +49,9 @@ def pose_quality_error(pose: dict) -> str | None:
         return "Qualité de localisation AMCL invalide"
     if position_stddev > LOST_POSITION_STDDEV_M or yaw_stddev > LOST_YAW_STDDEV_RAD:
         return (
-            "Localisation AMCL perdue "
+            "Localisation AMCL insuffisante pour une inspection reproductible "
             f"(±{position_stddev * 100:.0f} cm, ±{math.degrees(yaw_stddev):.0f}°). "
-            "Replacez le rover à sa maison puis rechargez la carte"
+            "Relocalisez le rover avant d'enregistrer ou photographier ce point"
         )
     return None
 

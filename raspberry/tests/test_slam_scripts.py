@@ -69,6 +69,19 @@ def test_navigation_starts_nav2_with_selected_persistent_map():
     assert 'basename "${MAP_YAML}" .yaml > /tmp/active_map_name' in script
     assert "pkill -f '[a]sync_slam_toolbox_node'" in script
     assert "Impossible d'arrêter slam_toolbox avant Nav2" in script
+    assert "encoder_odometry.py" in script
+    assert "command_odometry.py --ros-args" not in script
+
+
+def test_slam_uses_physical_encoder_odometry():
+    script = (Path(__file__).parents[1] / "ros" / "start_slam.sh").read_text()
+    dockerfile = (Path(__file__).parents[1] / "Dockerfile.lidar").read_text()
+
+    assert "encoder_odometry.py" in script
+    assert "left_encoder_sign" in script
+    assert "right_encoder_sign" in script
+    assert "command_odometry.py --ros-args" not in script
+    assert "modules/control/encoder_kinematics.py" in dockerfile
 
 
 def test_nav2_bridge_waits_for_amcl_and_uses_latest_tf_timestamp():
@@ -129,7 +142,7 @@ def test_api_detects_composed_nav2_container():
     assert '"position actuelle"' in server
     assert "INSPECTION_POSITION_TOLERANCE_M" in server
     assert "_wait_for_stable_inspection_pose(waypoint)" in server
-    assert 'waypoint["_capture_pan"] = capture_pan' in server
+    assert 'waypoint["_capture_pan"] = float(waypoint.get("pan", 0.0))' in server
     assert '@app.delete("/api/slam/maps/{map_name}")' in server
     assert '@app.post("/api/automotive/points/capture")' in server
 
@@ -138,8 +151,8 @@ def test_navigation_uses_precise_inspection_goal_and_progress_tolerances():
     launcher = (Path(__file__).parents[1] / "ros" / "start_navigation.sh").read_text()
     server = (Path(__file__).parents[1] / "modules" / "api" / "server.py").read_text()
 
-    assert 'RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.12' in launcher
-    assert 'RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.14' in launcher
+    assert 'RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.05' in launcher
+    assert 'RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.05236' in launcher
     assert 'RASPROVER_NAV2_PROGRESS_RADIUS_M:-0.05' in launcher
     assert 'RASPROVER_NAV2_PROGRESS_ALLOWANCE_S:-15.0' in launcher
     assert "RASPROVER_NAV2_GOAL_XY_TOLERANCE_M" in server

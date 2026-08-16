@@ -19,6 +19,8 @@ Conventions :
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 from .esp32_link import CMD_PANTILT_CTRL, ESP32Link
 from .exceptions import InvalidParameterError
@@ -58,6 +60,10 @@ class PanTiltController:
         self.accel = int(accel)
         self._pan = 0.0
         self._tilt = 0.0
+        self._measured_pan: float | None = None
+        self._measured_tilt: float | None = None
+        self._feedback_at = 0.0
+        self._feedback_condition = threading.Condition()
 
     # -- API publique --------------------------------------------------------
 
@@ -100,8 +106,68 @@ class PanTiltController:
 
     @property
     def position(self) -> tuple[float, float]:
-        """Dernière position commandée (pan, tilt) en degrés."""
+        """Position mesuree si disponible, sinon derniere consigne connue."""
+        with self._feedback_condition:
+            if self._measured_pan is not None and self._measured_tilt is not None:
+                return (self._measured_pan, self._measured_tilt)
         return (self._pan, self._tilt)
+
+    @property
+    def commanded_position(self) -> tuple[float, float]:
+        return (self._pan, self._tilt)
+
+    @property
+    def feedback_age_s(self) -> float | None:
+        with self._feedback_condition:
+            return time.monotonic() - self._feedback_at if self._feedback_at else None
+
+    def update_feedback(self, feedback: dict) -> None:
+        """Met a jour les angles reels retournes par les servos ST3215."""
+        try:
+            pan = float(feedback["pan"])
+            tilt = float(feedback["tilt"])
+        except (KeyError, TypeError, ValueError):
+            return
+        with self._feedback_condition:
+            self._measured_pan = pan
+            self._measured_tilt = tilt
+            self._feedback_at = time.monotonic()
+            self._feedback_condition.notify_all()
+
+    def wait_until_reached(
+        self,
+        pan_deg: float,
+        tilt_deg: float,
+        *,
+        tolerance_deg: float = 1.5,
+        timeout_s: float = 3.0,
+    ) -> tuple[float, float]:
+        """Attend la position mesuree et refuse une simple consigne non verifiee."""
+        deadline = time.monotonic() + timeout_s
+        with self._feedback_condition:
+            while time.monotonic() < deadline:
+                age = time.monotonic() - self._feedback_at if self._feedback_at else None
+                if (
+                    age is not None
+                    and age <= 0.5
+                    and self._measured_pan is not None
+                    and self._measured_tilt is not None
+                    and abs(self._measured_pan - pan_deg) <= tolerance_deg
+                    and abs(self._measured_tilt - tilt_deg) <= tolerance_deg
+                ):
+                    return self._measured_pan, self._measured_tilt
+                self._feedback_condition.wait(
+                    timeout=min(0.1, max(0.0, deadline - time.monotonic()))
+                )
+        age = self.feedback_age_s
+        if age is None or age > 0.5:
+            raise RuntimeError("Retour de position pan-tilt indisponible")
+        measured = self.position
+        raise RuntimeError(
+            "Pan-tilt hors position "
+            f"(mesure {measured[0]:.1f}°/{measured[1]:.1f}°, "
+            f"cible {pan_deg:.1f}°/{tilt_deg:.1f}°)"
+        )
 
     # -- Utilitaires --------------------------------------------------------
 

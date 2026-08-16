@@ -13,14 +13,17 @@ trap cleanup EXIT INT TERM
 
 # Nettoie les auxiliaires orphelins d'un lancement précédent interrompu.
 pkill -f '[c]ommand_odometry.py' 2>/dev/null || true
+pkill -f '[e]ncoder_odometry.py' 2>/dev/null || true
 pkill -f '[m]ap_writer.py' 2>/dev/null || true
 pkill -f '[p]ose_writer.py' 2>/dev/null || true
-rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json /tmp/active_map_name
+rm -f /tmp/current_map.json /tmp/current_pose.json /tmp/nav2_status.json \
+  /tmp/active_map_name /tmp/encoder_odometry_status.json
 
-python3 /opt/rasprover/command_odometry.py --ros-args \
+python3 /opt/rasprover/encoder_odometry.py --ros-args \
   -p udp_port:="${RASPROVER_ODOMETRY_UDP_PORT:-7667}" \
-  -p max_linear_speed_m_s:="${RASPROVER_MAX_SPEED_M_S:-0.65}" \
-  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.18}" \
+  -p wheel_separation_m:="${RASPROVER_WHEEL_SEPARATION_M:-0.172}" \
+  -p left_encoder_sign:="${RASPROVER_LEFT_ENCODER_SIGN:-1.0}" \
+  -p right_encoder_sign:="${RASPROVER_RIGHT_ENCODER_SIGN:-1.0}" \
   -p laser_x_m:="${RASPROVER_LASER_X_M:-0.0}" \
   -p laser_y_m:="${RASPROVER_LASER_Y_M:-0.0}" \
   -p laser_yaw_deg:="${RASPROVER_LASER_YAW_DEG:-140.0}" &

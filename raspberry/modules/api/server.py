@@ -30,7 +30,7 @@ from modules.automotive.navigation import (
     INSPECTION_POSITION_TOLERANCE_M,
     INSPECTION_STABLE_POSITION_DELTA_M,
     INSPECTION_STABLE_YAW_DELTA_RAD,
-    compensated_capture_pan,
+    INSPECTION_YAW_TOLERANCE_RAD,
     pose_delta,
     pose_quality_error,
     pose_quality_warning,
@@ -41,7 +41,7 @@ from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
 from modules.control.motor_controller import Direction
 from modules.control.nav2 import Nav2MotorBridge
-from modules.control.odometry import OdometryCommandPublisher
+from modules.control.odometry import EncoderFeedbackPublisher
 from modules.control.patrol import PatrolController
 from modules.control.tracker import TrackerController
 from modules.map_image import occupancy_grid_pixels
@@ -97,7 +97,7 @@ _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
-_odometry_commands: OdometryCommandPublisher | None = None
+_encoder_feedback: EncoderFeedbackPublisher | None = None
 _nav2_motors: Nav2MotorBridge | None = None
 _automotive_repository: AutomotiveRepository | None = None
 _inspection_runner: InspectionRunner | None = None
@@ -109,6 +109,36 @@ def _load_config() -> dict:
         with CONFIG_PATH.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
+_CHASSIS = {
+    "rasprover": {"main_type": 1, "wheel_separation_m": 0.125},
+    "ugv_rover": {"main_type": 2, "wheel_separation_m": 0.172},
+    "ugv_beast": {"main_type": 3, "wheel_separation_m": 0.141},
+}
+
+
+def _chassis_settings(config: dict | None = None) -> dict[str, float | int | str]:
+    config = config or _load_config()
+    control = config.get("control", {})
+    slam = config.get("slam", {})
+    chassis_type = str(control.get("chassis_type", "ugv_rover")).strip().lower()
+    chassis = _CHASSIS.get(chassis_type)
+    if chassis is None:
+        raise RuntimeError(f"Type de chassis inconnu: {chassis_type}")
+    return {
+        "chassis_type": chassis_type,
+        "main_type": int(chassis["main_type"]),
+        "module_type": int(control.get("module_type", 2)),
+        "wheel_separation_m": float(slam.get("wheel_separation_m", chassis["wheel_separation_m"])),
+        "left_encoder_sign": float(slam.get("left_encoder_sign", 1.0)),
+        "right_encoder_sign": float(slam.get("right_encoder_sign", 1.0)),
+    }
+
+
+def _on_chassis_feedback(feedback: dict) -> None:
+    if _pantilt is not None:
+        _pantilt.update_feedback(feedback)
 
 
 async def _auto_record_coro(mp4_path: str, incident_id: int) -> None:
@@ -190,7 +220,7 @@ async def lifespan(app: FastAPI):
         _human_detector, \
         _tracker, \
         _rover_name, \
-        _odometry_commands, \
+        _encoder_feedback, \
         _nav2_motors, \
         _automotive_repository, \
         _inspection_runner
@@ -213,14 +243,12 @@ async def lifespan(app: FastAPI):
     _link = ESP32Link(port=port, baudrate=baudrate, timeout_s=timeout_s)
     try:
         _link.open()
-        _odometry_commands = OdometryCommandPublisher(
-            port=int(slam_cfg.get("odometry_udp_port", 7667))
-        )
+        chassis = _chassis_settings(cfg)
+        _link.configure_platform(int(chassis["main_type"]), int(chassis["module_type"]))
         _motors = MotorController(
             _link,
             max_speed=ctrl.get("motor_max_speed", 0.5),
             default_speed=ctrl.get("motor_default_speed", 0.35),
-            command_observer=_odometry_commands.publish,
         )
         _nav2_motors = Nav2MotorBridge(
             _motors.drive,
@@ -236,8 +264,19 @@ async def lifespan(app: FastAPI):
             speed=pt_cfg.get("servo_speed", 600),
             accel=pt_cfg.get("servo_accel", 50),
         )
+        _encoder_feedback = EncoderFeedbackPublisher(
+            _link,
+            port=int(slam_cfg.get("odometry_udp_port", 7667)),
+            frequency_hz=float(slam_cfg.get("encoder_feedback_hz", 10.0)),
+            on_feedback=_on_chassis_feedback,
+        )
         _lights = LightController(_link)
-        log.info("ESP32 connecte - port=%s", port)
+        log.info(
+            "ESP32 connecte - port=%s chassis=%s entraxe=%.3fm",
+            port,
+            chassis["chassis_type"],
+            chassis["wheel_separation_m"],
+        )
     except Exception as exc:  # noqa: BLE001
         _motors = None
         _pantilt = None
@@ -424,9 +463,9 @@ async def lifespan(app: FastAPI):
         _nav2_motors = None
     if _motors:
         _motors.shutdown()
-    if _odometry_commands:
-        _odometry_commands.close()
-        _odometry_commands = None
+    if _encoder_feedback:
+        _encoder_feedback.close()
+        _encoder_feedback = None
     if _link:
         _link.close()
     _alert.close()
@@ -912,6 +951,16 @@ def _nav2_running() -> bool:
     return result.returncode == 0
 
 
+def _encoder_odometry_ready(status: dict | None = None) -> bool:
+    status = status or _read_container_json("/tmp/encoder_odometry_status.json")
+    if not status or not status.get("ready"):
+        return False
+    try:
+        return time.time() - float(status.get("updated_at", 0.0)) <= 1.0
+    except (TypeError, ValueError):
+        return False
+
+
 def _nav2_ready() -> bool:
     """True only when the bridge sees Nav2's FollowWaypoints action server."""
     if not _nav2_running():
@@ -923,7 +972,11 @@ def _nav2_ready() -> bool:
         heartbeat = float(status.get("heartbeat_at", status.get("updated_at", 0.0)))
     except (TypeError, ValueError):
         return False
-    return time.time() - heartbeat <= 2.0 and bool(status.get("action_server_ready"))
+    return (
+        time.time() - heartbeat <= 2.0
+        and bool(status.get("action_server_ready"))
+        and _encoder_odometry_ready()
+    )
 
 
 def _navigation_launcher_running() -> bool:
@@ -1098,12 +1151,8 @@ async def _inspection_navigate(waypoint: dict) -> None:
         deadline = started_at + 35.0
         while time.monotonic() < deadline:
             status, pose = await asyncio.gather(
-                loop.run_in_executor(
-                    None, lambda: _read_container_json("/tmp/nav2_status.json")
-                ),
-                loop.run_in_executor(
-                    None, lambda: _read_container_json("/tmp/current_pose.json")
-                ),
+                loop.run_in_executor(None, lambda: _read_container_json("/tmp/nav2_status.json")),
+                loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
             )
             state = None
             if status and float(status.get("updated_at", 0.0)) >= sent_at:
@@ -1144,30 +1193,23 @@ async def _inspection_navigate(waypoint: dict) -> None:
             last_error = "Point non atteint après 35 secondes"
         await _inspection_cancel_navigation()
         if attempt == 0:
-            log.warning("Nouvelle tentative vers le point %s: %s", waypoint.get("sequence", "?"), last_error)
+            log.warning(
+                "Nouvelle tentative vers le point %s: %s", waypoint.get("sequence", "?"), last_error
+            )
             await asyncio.sleep(0.4)
     raise RuntimeError(last_error)
 
 
 def _set_inspection_capture_pan(waypoint: dict, pose: dict) -> None:
-    """Preserve the learned world-facing camera angle at the reached pose."""
-    if _pantilt is None:
-        _, yaw_error = target_pose_error(waypoint, pose)
-        if abs(yaw_error) > math.radians(8.0):
-            raise RuntimeError("Orientation du rover différente du point appris")
-        return
-    capture_pan, yaw_error = compensated_capture_pan(
-        target_yaw=float(waypoint["yaw"]),
-        current_yaw=float(pose["yaw"]),
-        learned_pan=float(waypoint.get("pan", 0.0)),
-        pan_range=_pantilt.pan_range,
-    )
-    if capture_pan is None:
+    """Require the learned chassis heading and replay the exact camera angle."""
+    _, yaw_error = target_pose_error(waypoint, pose)
+    if abs(yaw_error) > INSPECTION_YAW_TOLERANCE_RAD:
         raise RuntimeError(
-            "Orientation du point non reproductible par la caméra "
-            f"(écart {math.degrees(yaw_error):.0f}°)"
+            "Orientation du rover différente du point appris "
+            f"({math.degrees(abs(yaw_error)):.1f}°, maximum "
+            f"{math.degrees(INSPECTION_YAW_TOLERANCE_RAD):.1f}°)"
         )
-    waypoint["_capture_pan"] = capture_pan
+    waypoint["_capture_pan"] = float(waypoint.get("pan", 0.0))
 
 
 async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0) -> dict:
@@ -1181,10 +1223,22 @@ async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0)
     stable_samples = 0
     last_distance = math.inf
     while time.monotonic() < deadline:
-        pose = await loop.run_in_executor(
-            None, lambda: _read_container_json("/tmp/current_pose.json")
+        pose, odometry = await asyncio.gather(
+            loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+            loop.run_in_executor(
+                None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
+            ),
         )
-        if pose is None or time.time() - float(pose.get("updated_at", 0.0)) > 1.0:
+        physically_stopped = bool(
+            _encoder_odometry_ready(odometry)
+            and abs(float(odometry.get("linear_m_s", math.inf))) <= 0.015
+            and abs(float(odometry.get("angular_rad_s", math.inf))) <= 0.08
+        )
+        if (
+            pose is None
+            or time.time() - float(pose.get("updated_at", 0.0)) > 1.0
+            or not physically_stopped
+        ):
             stable_samples = 0
             await asyncio.sleep(0.2)
             continue
@@ -1206,6 +1260,9 @@ async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0)
                     f"({last_distance * 100:.0f} cm, maximum "
                     f"{INSPECTION_POSITION_TOLERANCE_M * 100:.0f} cm)"
                 )
+            quality_error = pose_quality_error(pose)
+            if quality_error is not None:
+                raise RuntimeError(quality_error)
             return pose
         await asyncio.sleep(0.2)
     raise RuntimeError(
@@ -1221,11 +1278,18 @@ async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, 
     stable_pose = await _wait_for_stable_inspection_pose(waypoint)
     _set_inspection_capture_pan(waypoint, stable_pose)
     if _pantilt is not None:
-        current_pan, _ = _pantilt.position
         capture_pan = float(waypoint.get("_capture_pan", waypoint["pan"]))
         await loop.run_in_executor(None, lambda: _pantilt.goto(capture_pan, waypoint["tilt"]))
-        settle_time = min(2.0, 0.8 + abs(capture_pan - current_pan) / 90.0)
-        await asyncio.sleep(settle_time)
+        await loop.run_in_executor(
+            None,
+            lambda: _pantilt.wait_until_reached(
+                capture_pan,
+                float(waypoint["tilt"]),
+                tolerance_deg=1.5,
+                timeout_s=3.0,
+            ),
+        )
+        await asyncio.sleep(0.35)
     # Discard the first frame after a motion/exposure change. The following
     # frame is the one persisted and shown to the operator.
     await loop.run_in_executor(None, capture_photo)
@@ -1328,6 +1392,7 @@ async def slam_status() -> dict:
         current_map,
         pose,
         active_map,
+        encoder_odometry,
     ) = await asyncio.gather(
         loop.run_in_executor(None, _slam_running),
         loop.run_in_executor(None, _nav2_running),
@@ -1337,19 +1402,25 @@ async def slam_status() -> dict:
         loop.run_in_executor(None, lambda: _read_ros2_map_once(_slam_container)),
         loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
         loop.run_in_executor(None, _active_map_name),
+        loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
+        ),
     )
     required = {"/scan", "/odom", "/map"}
+    encoder_ready = _encoder_odometry_ready(encoder_odometry)
     return {
         "running": running or navigation,
         "mode": "mapping" if running else "navigation" if navigation else "stopped",
         "ready": (running or navigation_ready)
         and required.issubset(topics)
-        and current_map is not None,
+        and current_map is not None
+        and encoder_ready,
         "container": _slam_container,
         "topics": {name.removeprefix("/"): name in topics for name in sorted(required)},
         "error": None if running or navigation_ready else slam_log,
         "pose": pose,
         "active_map": active_map,
+        "odometry": encoder_odometry,
     }
 
 
@@ -1507,12 +1578,18 @@ async def slam_start() -> dict:
             status_code=503, content={"ok": False, "error": "container ros2-lidar absent"}
         )
 
-    cfg = _load_config().get("slam", {})
+    config = _load_config()
+    cfg = config.get("slam", {})
+    chassis = _chassis_settings(config)
     environment = [
         "-e",
         f"RASPROVER_MAX_SPEED_M_S={float(cfg.get('max_linear_speed_m_s', 0.65))}",
         "-e",
-        f"RASPROVER_WHEEL_SEPARATION_M={float(cfg.get('wheel_separation_m', 0.18))}",
+        f"RASPROVER_WHEEL_SEPARATION_M={chassis['wheel_separation_m']}",
+        "-e",
+        f"RASPROVER_LEFT_ENCODER_SIGN={chassis['left_encoder_sign']}",
+        "-e",
+        f"RASPROVER_RIGHT_ENCODER_SIGN={chassis['right_encoder_sign']}",
         "-e",
         f"RASPROVER_LASER_X_M={float(cfg.get('laser_x_m', 0.0))}",
         "-e",
@@ -1702,14 +1779,20 @@ async def slam_load(body: dict[str, Any]) -> dict:
             status_code=400, content={"ok": False, "error": "Pose initiale invalide"}
         )
 
-    cfg = _load_config().get("slam", {})
+    config = _load_config()
+    cfg = config.get("slam", {})
+    chassis = _chassis_settings(config)
     environment = [
         "-e",
         f"RASPROVER_MAP_YAML={yaml_path}",
         "-e",
         f"RASPROVER_MAX_SPEED_M_S={float(cfg.get('max_linear_speed_m_s', 0.65))}",
         "-e",
-        f"RASPROVER_WHEEL_SEPARATION_M={float(cfg.get('wheel_separation_m', 0.18))}",
+        f"RASPROVER_WHEEL_SEPARATION_M={chassis['wheel_separation_m']}",
+        "-e",
+        f"RASPROVER_LEFT_ENCODER_SIGN={chassis['left_encoder_sign']}",
+        "-e",
+        f"RASPROVER_RIGHT_ENCODER_SIGN={chassis['right_encoder_sign']}",
         "-e",
         f"RASPROVER_LASER_X_M={float(cfg.get('laser_x_m', 0.0))}",
         "-e",
@@ -1727,9 +1810,9 @@ async def slam_load(body: dict[str, Any]) -> dict:
         "-e",
         f"RASPROVER_NAV2_INFLATION_RADIUS_M={float(cfg.get('nav2_inflation_radius_m', 0.30))}",
         "-e",
-        f"RASPROVER_NAV2_GOAL_XY_TOLERANCE_M={float(cfg.get('nav2_goal_xy_tolerance_m', 0.12))}",
+        f"RASPROVER_NAV2_GOAL_XY_TOLERANCE_M={float(cfg.get('nav2_goal_xy_tolerance_m', 0.05))}",
         "-e",
-        f"RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD={float(cfg.get('nav2_goal_yaw_tolerance_rad', 0.14))}",
+        f"RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD={float(cfg.get('nav2_goal_yaw_tolerance_rad', 0.05236))}",
         "-e",
         f"RASPROVER_NAV2_PROGRESS_RADIUS_M={float(cfg.get('nav2_progress_radius_m', 0.05))}",
         "-e",
@@ -1947,13 +2030,29 @@ async def automotive_point_capture(body: dict[str, Any]) -> dict:
     await asyncio.sleep(0.35)
     first = await loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json"))
     await asyncio.sleep(0.45)
-    second = await loop.run_in_executor(
-        None, lambda: _read_container_json("/tmp/current_pose.json")
+    second, odometry = await asyncio.gather(
+        loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+        loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
+        ),
     )
     if first is None or second is None:
         return JSONResponse(status_code=409, content={"ok": False, "error": "Pose indisponible"})
     if time.time() - float(second.get("updated_at", 0.0)) > 1.0:
         return JSONResponse(status_code=409, content={"ok": False, "error": "Pose trop ancienne"})
+    if not _encoder_odometry_ready(odometry):
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Odométrie physique des encodeurs indisponible"},
+        )
+    if (
+        abs(float(odometry.get("linear_m_s", math.inf))) > 0.015
+        or abs(float(odometry.get("angular_rad_s", math.inf))) > 0.08
+    ):
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Le rover roule encore physiquement"},
+        )
     distance, yaw_delta = pose_delta(first, second)
     if distance > 0.04 or yaw_delta > math.radians(5.0):
         return JSONResponse(
@@ -1964,7 +2063,16 @@ async def automotive_point_capture(body: dict[str, Any]) -> dict:
     if quality_error is not None:
         return JSONResponse(status_code=409, content={"ok": False, "error": quality_error})
     quality_warning = pose_quality_warning(second)
-    pan, tilt = _pantilt.position if _pantilt is not None else (0.0, 0.0)
+    if _pantilt is not None:
+        feedback_age = _pantilt.feedback_age_s
+        if feedback_age is None or feedback_age > 0.5:
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error": "Position réelle de la caméra indisponible"},
+            )
+        pan, tilt = _pantilt.position
+    else:
+        pan, tilt = (0.0, 0.0)
     point = {
         "zone": zone,
         "x": float(second["x"]),

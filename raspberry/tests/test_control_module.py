@@ -55,6 +55,12 @@ class TestESP32Link:
         assert 900 < fb["v"] <= 1260  # centivolts : 9.00 V → 12.60 V
         assert "x" in fb and "y" in fb and "yaw" in fb
 
+    def test_configure_platform_enables_measured_pantilt_feedback(self, emulator):
+        with ESP32Link(port=emulator["url"]) as link:
+            link.configure_platform(main_type=2, module_type=2)
+            fb = link.request_feedback(timeout_s=1.0, command_type=130)
+        assert "pan" in fb and "tilt" in fb
+
     def test_feedback_timeout_on_silent_server(self):
         """Un serveur TCP qui accepte mais ne repond jamais doit causer un timeout."""
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -219,6 +225,15 @@ class TestPanTiltController:
             with emulator["state"]._lock:
                 assert emulator["state"].pan_deg == pytest.approx(15)
                 assert emulator["state"].tilt_deg == pytest.approx(2)
+
+    def test_wait_until_reached_uses_measured_feedback(self, emulator):
+        with ESP32Link(port=emulator["url"]) as link:
+            pt = PanTiltController(link)
+            pt.goto(pan_deg=12, tilt_deg=-4)
+            feedback = link.request_feedback(timeout_s=1.0, command_type=130)
+            pt.update_feedback(feedback)
+            measured = pt.wait_until_reached(12, -4, timeout_s=0.2)
+        assert measured == pytest.approx((12, -4))
 
 
 # --- Integration end-to-end --------------------------------------------------

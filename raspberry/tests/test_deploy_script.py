@@ -10,3 +10,4 @@ def test_deploy_restarts_lidar_before_control_api():
 
     assert lidar_restart < lidar_wait < api_restart
     assert "docker inspect -f '{{.State.Running}}' ros2-lidar" in script
+    assert "modules/control/encoder_kinematics" in script

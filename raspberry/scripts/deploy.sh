@@ -41,7 +41,7 @@ if [ "${BEFORE}" != "${AFTER}" ]; then
     LIDAR_SERVICE_CHANGED=true
   fi
   if git -C "${REPO_DIR}" diff --name-only "${BEFORE}" "${AFTER}" \
-    | grep -Eq '^raspberry/(Dockerfile\.lidar|map_writer\.py|ros/)'; then
+    | grep -Eq '^raspberry/(Dockerfile\.lidar|map_writer\.py|ros/|modules/control/encoder_kinematics\.py$)'; then
     ROS_IMAGE_CHANGED=true
   fi
 fi
