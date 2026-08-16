@@ -102,6 +102,11 @@ _automotive_repository: AutomotiveRepository | None = None
 _inspection_runner: InspectionRunner | None = None
 _inspection_media_dir = pathlib.Path.home() / ".rasprover" / "inspection-media"
 
+_HOME_POSITION_STDDEV_MAX_M = 0.30
+_HOME_YAW_STDDEV_MAX_RAD = math.radians(25.0)
+_HOME_ODOMETRY_POSITION_TOLERANCE_M = 0.20
+_HOME_ODOMETRY_YAW_TOLERANCE_RAD = math.radians(20.0)
+
 
 def _load_config() -> dict:
     if CONFIG_PATH.exists():
@@ -2338,9 +2343,12 @@ async def nav2_home_start() -> dict:
             content={"ok": False, "error": "Une navigation est déjà en cours"},
         )
 
-    map_name, pose = await asyncio.gather(
+    map_name, pose, odometry = await asyncio.gather(
         loop.run_in_executor(None, _active_map_name),
         loop.run_in_executor(None, lambda: _read_container_json("/tmp/current_pose.json")),
+        loop.run_in_executor(
+            None, lambda: _read_container_json("/tmp/encoder_odometry_status.json")
+        ),
     )
     home = await loop.run_in_executor(None, lambda: get_map_home(map_name)) if map_name else None
     if home is None:
@@ -2354,8 +2362,58 @@ async def nav2_home_start() -> dict:
             content={"ok": False, "error": "Position actuelle indisponible"},
         )
 
+    position_stddev = float(pose.get("position_stddev_m", math.inf))
+    yaw_stddev = float(pose.get("yaw_stddev_rad", math.inf))
+    if (
+        position_stddev > _HOME_POSITION_STDDEV_MAX_M
+        or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD
+    ):
+        await loop.run_in_executor(None, _motors.stop)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": "Position du rover instable sur la carte : retour maison désactivé",
+                "position_stddev_m": position_stddev,
+                "yaw_stddev_rad": yaw_stddev,
+            },
+        )
+
     distance, yaw_error = target_pose_error(home, pose)
     if distance <= 0.10 and abs(yaw_error) <= math.radians(10.0):
+        if not _encoder_odometry_ready(odometry):
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error": "Odométrie indisponible pour confirmer la maison"},
+            )
+        odometry_distance = math.hypot(
+            float(odometry.get("x", math.inf)),
+            float(odometry.get("y", math.inf)),
+        )
+        odometry_yaw = abs(
+            math.atan2(
+                math.sin(float(odometry.get("yaw", math.inf))),
+                math.cos(float(odometry.get("yaw", math.inf))),
+            )
+        )
+        if (
+            odometry_distance > _HOME_ODOMETRY_POSITION_TOLERANCE_M
+            or odometry_yaw > _HOME_ODOMETRY_YAW_TOLERANCE_RAD
+        ):
+            await loop.run_in_executor(None, _motors.stop)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error": (
+                        "La position AMCL ressemble à la maison mais l'odométrie confirme "
+                        "que le rover s'est déplacé"
+                    ),
+                    "distance_m": distance,
+                    "odometry_distance_m": odometry_distance,
+                    "odometry_yaw_rad": odometry_yaw,
+                },
+            )
         await loop.run_in_executor(None, _motors.stop)
         return {
             "ok": True,
