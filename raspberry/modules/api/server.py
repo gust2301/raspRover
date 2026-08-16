@@ -114,8 +114,11 @@ _HOME_ODOMETRY_YAW_TOLERANCE_RAD = math.radians(20.0)
 # instable.
 _HOME_AMCL_REFRESH_TIMEOUT_S = 2.5
 _HOME_AMCL_REFRESH_POLL_S = 0.25
-_HOME_AMCL_REFRESH_SEED_POSITION_STDDEV_M = 0.35
-_HOME_AMCL_REFRESH_SEED_YAW_STDDEV_RAD = math.radians(20.0)
+# Plus etroit que par le passe (0.35m/20°) : avec des alphas AMCL abaisses et
+# plus de particules/faisceaux, une reconvergence genuine doit se resserrer
+# nettement en dessous de ce seed, pas juste le reproduire.
+_HOME_AMCL_REFRESH_SEED_POSITION_STDDEV_M = 0.20
+_HOME_AMCL_REFRESH_SEED_YAW_STDDEV_RAD = math.radians(15.0)
 
 
 def _load_config() -> dict:
@@ -1941,6 +1944,28 @@ async def slam_load(body: dict[str, Any]) -> dict:
         f"RASPROVER_NAV2_PROGRESS_RADIUS_M={float(cfg.get('nav2_progress_radius_m', 0.05))}",
         "-e",
         f"RASPROVER_NAV2_PROGRESS_ALLOWANCE_S={float(cfg.get('nav2_progress_allowance_s', 15.0))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_ALPHA1={float(cfg.get('amcl_alpha1', 0.08))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_ALPHA2={float(cfg.get('amcl_alpha2', 0.08))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_ALPHA3={float(cfg.get('amcl_alpha3', 0.08))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_ALPHA4={float(cfg.get('amcl_alpha4', 0.08))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_ALPHA5={float(cfg.get('amcl_alpha5', 0.08))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_MAX_PARTICLES={int(cfg.get('amcl_max_particles', 3000))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_MIN_PARTICLES={int(cfg.get('amcl_min_particles', 800))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_MAX_BEAMS={int(cfg.get('amcl_max_beams', 120))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_SIGMA_HIT={float(cfg.get('amcl_sigma_hit', 0.15))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_UPDATE_MIN_D={float(cfg.get('amcl_update_min_d', 0.15))}",
+        "-e",
+        f"RASPROVER_NAV2_AMCL_UPDATE_MIN_A={float(cfg.get('amcl_update_min_a', 0.15))}",
         "-e",
         f"RASPROVER_INITIAL_POSE_X={pose_values['x']}",
         "-e",

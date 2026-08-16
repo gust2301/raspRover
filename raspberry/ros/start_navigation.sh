@@ -80,6 +80,23 @@ GOAL_XY_TOLERANCE_M="${RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.05}"
 GOAL_YAW_TOLERANCE_RAD="${RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.05236}"
 PROGRESS_RADIUS_M="${RASPROVER_NAV2_PROGRESS_RADIUS_M:-0.05}"
 PROGRESS_ALLOWANCE_S="${RASPROVER_NAV2_PROGRESS_ALLOWANCE_S:-15.0}"
+# AMCL: les alphas par defaut (0.2) supposent une odometrie generique bruitee.
+# Notre odometrie encodeurs est desormais calibree (empattement CW/CCW) et
+# recalee par ICP LiDAR (residu typique < 2cm) : on peut donc lui faire
+# confiance et injecter beaucoup moins de bruit de mouvement a chaque mise a
+# jour. Plus de particules et de faisceaux affinent la convergence sur la
+# carte; un sigma_hit plus bas rend le modele de capteur plus discriminant.
+AMCL_ALPHA1="${RASPROVER_NAV2_AMCL_ALPHA1:-0.08}"
+AMCL_ALPHA2="${RASPROVER_NAV2_AMCL_ALPHA2:-0.08}"
+AMCL_ALPHA3="${RASPROVER_NAV2_AMCL_ALPHA3:-0.08}"
+AMCL_ALPHA4="${RASPROVER_NAV2_AMCL_ALPHA4:-0.08}"
+AMCL_ALPHA5="${RASPROVER_NAV2_AMCL_ALPHA5:-0.08}"
+AMCL_MAX_PARTICLES="${RASPROVER_NAV2_AMCL_MAX_PARTICLES:-3000}"
+AMCL_MIN_PARTICLES="${RASPROVER_NAV2_AMCL_MIN_PARTICLES:-800}"
+AMCL_MAX_BEAMS="${RASPROVER_NAV2_AMCL_MAX_BEAMS:-120}"
+AMCL_SIGMA_HIT="${RASPROVER_NAV2_AMCL_SIGMA_HIT:-0.15}"
+AMCL_UPDATE_MIN_D="${RASPROVER_NAV2_AMCL_UPDATE_MIN_D:-0.15}"
+AMCL_UPDATE_MIN_A="${RASPROVER_NAV2_AMCL_UPDATE_MIN_A:-0.15}"
 sed -E \
   -e 's/base_footprint/base_link/g' \
   -e "s/^([[:space:]]*robot_radius:).*/\\1 ${ROBOT_RADIUS}/" \
@@ -92,6 +109,17 @@ sed -E \
   -e "s/^([[:space:]]*required_movement_radius:).*/\\1 ${PROGRESS_RADIUS_M}/" \
   -e "s/^([[:space:]]*movement_time_allowance:).*/\\1 ${PROGRESS_ALLOWANCE_S}/" \
   -e 's/^([[:space:]]*stop_on_failure:).*/\1 true/' \
+  -e "s/^([[:space:]]*alpha1:).*/\\1 ${AMCL_ALPHA1}/" \
+  -e "s/^([[:space:]]*alpha2:).*/\\1 ${AMCL_ALPHA2}/" \
+  -e "s/^([[:space:]]*alpha3:).*/\\1 ${AMCL_ALPHA3}/" \
+  -e "s/^([[:space:]]*alpha4:).*/\\1 ${AMCL_ALPHA4}/" \
+  -e "s/^([[:space:]]*alpha5:).*/\\1 ${AMCL_ALPHA5}/" \
+  -e "s/^([[:space:]]*max_particles:).*/\\1 ${AMCL_MAX_PARTICLES}/" \
+  -e "s/^([[:space:]]*min_particles:).*/\\1 ${AMCL_MIN_PARTICLES}/" \
+  -e "s/^([[:space:]]*max_beams:).*/\\1 ${AMCL_MAX_BEAMS}/" \
+  -e "s/^([[:space:]]*sigma_hit:).*/\\1 ${AMCL_SIGMA_HIT}/" \
+  -e "s/^([[:space:]]*update_min_d:).*/\\1 ${AMCL_UPDATE_MIN_D}/" \
+  -e "s/^([[:space:]]*update_min_a:).*/\\1 ${AMCL_UPDATE_MIN_A}/" \
   "${NAV2_DEFAULT_PARAMS}" > "${NAV2_PARAMS}"
 
 ros2 launch nav2_bringup bringup_launch.py \
