@@ -12,6 +12,21 @@ from collections.abc import Callable
 log = logging.getLogger(__name__)
 
 
+def compensate_motor_deadzone(
+    left: float, right: float, minimum_command: float
+) -> tuple[float, float]:
+    """Raise a non-zero wheel pair above the physical motor dead zone.
+
+    Both sides are scaled by the same factor so Nav2's requested curvature is
+    preserved. Exact zero remains zero and can always stop the rover.
+    """
+    magnitude = max(abs(left), abs(right))
+    if magnitude <= 1e-6 or magnitude >= minimum_command:
+        return left, right
+    scale = minimum_command / magnitude
+    return left * scale, right * scale
+
+
 class Nav2MotorBridge:
     """Accept Nav2 wheel commands only while an API-authorized mission is active."""
 
@@ -23,12 +38,16 @@ class Nav2MotorBridge:
         motor_port: int = 7668,
         command_port: int = 7669,
         timeout_s: float = 0.6,
+        minimum_motor_command: float = 0.12,
     ) -> None:
+        if not 0.0 <= minimum_motor_command <= 1.0:
+            raise ValueError("minimum_motor_command doit être compris entre 0 et 1")
         self._drive = drive
         self._stop = stop
         self._motor_port = motor_port
         self._command_port = command_port
         self._timeout_s = timeout_s
+        self._minimum_motor_command = minimum_motor_command
         self._enabled = False
         self._received_command = False
         self._closed = threading.Event()
@@ -99,6 +118,9 @@ class Nav2MotorBridge:
                 command = json.loads(raw)
                 left = max(-1.0, min(1.0, float(command["left"])))
                 right = max(-1.0, min(1.0, float(command["right"])))
+                left, right = compensate_motor_deadzone(
+                    left, right, self._minimum_motor_command
+                )
                 mission_finished = bool(command.get("mission_finished", False))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 log.warning("Commande moteur Nav2 UDP invalide")

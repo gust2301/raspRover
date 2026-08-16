@@ -100,6 +100,8 @@ slam:
   odometry_udp_port: 7667
   nav2_motor_udp_port: 7668
   nav2_command_udp_port: 7669
+  # Compensation de la zone morte matérielle : en dessous, les moteurs ne tournent pas.
+  nav2_min_motor_command: 0.12
   # Empreinte et marge de securite Nav2 adaptees au petit chassis.
   # Augmenter inflation_radius_m si le rover passe trop pres des obstacles.
   nav2_robot_radius_m: 0.16

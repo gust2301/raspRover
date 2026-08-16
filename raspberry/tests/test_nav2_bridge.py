@@ -2,7 +2,7 @@ import json
 import socket
 import time
 
-from modules.control.nav2 import Nav2MotorBridge
+from modules.control.nav2 import Nav2MotorBridge, compensate_motor_deadzone
 
 
 def _free_udp_port() -> int:
@@ -11,6 +11,37 @@ def _free_udp_port() -> int:
     port = int(sock.getsockname()[1])
     sock.close()
     return port
+
+
+def test_motor_deadzone_compensation_preserves_curvature_and_zero():
+    left, right = compensate_motor_deadzone(0.006, 0.003, 0.12)
+
+    assert left == 0.12
+    assert right == 0.06
+    assert compensate_motor_deadzone(0.0, 0.0, 0.12) == (0.0, 0.0)
+    assert compensate_motor_deadzone(-0.2, 0.1, 0.12) == (-0.2, 0.1)
+
+
+def test_nav2_bridge_applies_minimum_motor_command():
+    commands: list[tuple[float, float]] = []
+    motor_port = _free_udp_port()
+    bridge = Nav2MotorBridge(
+        lambda left, right: commands.append((left, right)),
+        lambda: None,
+        motor_port=motor_port,
+        command_port=_free_udp_port(),
+        minimum_motor_command=0.12,
+    )
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        bridge.enable()
+        sender.sendto(b'{"left":0.006,"right":0.003}', ("127.0.0.1", motor_port))
+        time.sleep(0.15)
+
+        assert commands == [(0.12, 0.06)]
+    finally:
+        sender.close()
+        bridge.close()
 
 
 def test_nav2_motor_commands_require_explicit_authorization():

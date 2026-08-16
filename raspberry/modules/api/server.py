@@ -227,6 +227,7 @@ async def lifespan(app: FastAPI):
             _motors.stop,
             motor_port=int(slam_cfg.get("nav2_motor_udp_port", 7668)),
             command_port=int(slam_cfg.get("nav2_command_udp_port", 7669)),
+            minimum_motor_command=float(slam_cfg.get("nav2_min_motor_command", 0.12)),
         )
         _pantilt = PanTiltController(
             _link,
