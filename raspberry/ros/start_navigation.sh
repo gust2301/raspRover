@@ -47,7 +47,7 @@ python3 /opt/rasprover/encoder_odometry.py --ros-args \
   -p laser_x_m:="${RASPROVER_LASER_X_M:-0.0}" \
   -p laser_y_m:="${RASPROVER_LASER_Y_M:-0.0}" \
   -p laser_z_m:="${RASPROVER_LASER_Z_M:-0.30}" \
-  -p laser_yaw_deg:="${RASPROVER_LASER_YAW_DEG:-140.0}" &
+  -p laser_yaw_deg:="${RASPROVER_LASER_YAW_DEG:--40.0}" &
 ODOM_PID=$!
 
 python3 /opt/rasprover/map_writer.py &

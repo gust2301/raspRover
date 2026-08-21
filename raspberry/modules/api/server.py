@@ -395,7 +395,7 @@ async def lifespan(app: FastAPI):
         obstacle_cm=float(
             ros2_cfg.get("obstacle_threshold_cm", lidar_cfg.get("obstacle_threshold_cm", 45.0))
         ),
-        angle_offset_deg=float(ros2_cfg.get("angle_offset_deg", 140.0)),
+        angle_offset_deg=float(ros2_cfg.get("angle_offset_deg", 320.0)),
     )
     log.info("ROS2LidarBridge démarré")
 
@@ -1714,7 +1714,7 @@ async def slam_start() -> dict:
         "-e",
         f"RASPROVER_LASER_Z_M={float(cfg.get('laser_z_m', 0.30))}",
         "-e",
-        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 140.0))}",
+        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', -40.0))}",
         "-e",
         f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
     ]
@@ -1929,7 +1929,7 @@ async def slam_load(body: dict[str, Any]) -> dict:
         "-e",
         f"RASPROVER_LASER_Z_M={float(cfg.get('laser_z_m', 0.30))}",
         "-e",
-        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 140.0))}",
+        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', -40.0))}",
         "-e",
         f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
         "-e",

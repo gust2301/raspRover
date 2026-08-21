@@ -36,7 +36,7 @@ class EncoderOdometry(Node):
         self.declare_parameter("laser_x_m", 0.0)
         self.declare_parameter("laser_y_m", 0.0)
         self.declare_parameter("laser_z_m", 0.30)
-        self.declare_parameter("laser_yaw_deg", 140.0)
+        self.declare_parameter("laser_yaw_deg", -40.0)
 
         port = int(self.get_parameter("udp_port").value)
         self._timeout = float(self.get_parameter("feedback_timeout_s").value)
