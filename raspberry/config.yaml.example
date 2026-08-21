@@ -80,7 +80,8 @@ sensors:
     # Offset pour aligner le 0° du scan ROS2 avec l'avant du robot.
     # Mesure : mettre un objet devant le robot, lire l'angle_deg du point le plus proche
     # dans /api/lidar/scan, puis angle_offset_deg = (360 - angle_mesure) % 360
-    angle_offset_deg: 320     # Montage supérieur : ancien repère 140° corrigé de 180°.
+    # Montage supérieur centré : l'angle brut 180° pointe vers l'avant du rover.
+    angle_offset_deg: 180
     obstacle_threshold_cm: 45 # Seuil frontal pour la securite manuelle et la patrouille
 
   vision:
@@ -143,7 +144,7 @@ slam:
   laser_x_m: 0.0
   laser_y_m: 0.0
   laser_z_m: 0.30
-  laser_yaw_deg: -40.0
+  laser_yaw_deg: 180.0
 
 patrol:
   navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY

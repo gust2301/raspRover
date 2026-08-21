@@ -222,8 +222,8 @@ puis corrigée par le scan matching. Les paramètres physiques sont dans la sect
 2. ajuster `wheel_separation_m` après une rotation complète sur place ;
 3. renseigner la position et l'orientation réelles du LIDAR avec `laser_x_m`,
    `laser_y_m`, `laser_z_m` et `laser_yaw_deg`. Le montage supérieur actuel
-   utilise `laser_x_m: 0.0`, `laser_y_m: 0.0` et `laser_z_m: 0.30` ; l'angle
-   `laser_yaw_deg` doit correspondre à l'orientation réelle du scanner.
+   utilise `laser_x_m: 0.0`, `laser_y_m: 0.0`, `laser_z_m: 0.30` et
+   `laser_yaw_deg: 180.0` : l'angle brut 180° du scanner pointe vers l'avant.
 
 Le statut doit indiquer `ready: true` et les trois topics `scan`, `odom` et `map`.
 
