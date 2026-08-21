@@ -35,6 +35,7 @@ class EncoderOdometry(Node):
         self.declare_parameter("feedback_timeout_s", 0.6)
         self.declare_parameter("laser_x_m", 0.0)
         self.declare_parameter("laser_y_m", 0.0)
+        self.declare_parameter("laser_z_m", 0.30)
         self.declare_parameter("laser_yaw_deg", 140.0)
 
         port = int(self.get_parameter("udp_port").value)
@@ -72,6 +73,7 @@ class EncoderOdometry(Node):
         transform.child_frame_id = "laser"
         transform.transform.translation.x = float(self.get_parameter("laser_x_m").value)
         transform.transform.translation.y = float(self.get_parameter("laser_y_m").value)
+        transform.transform.translation.z = float(self.get_parameter("laser_z_m").value)
         transform.transform.rotation = quaternion_from_yaw(
             math.radians(float(self.get_parameter("laser_yaw_deg").value))
         )

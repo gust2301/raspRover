@@ -139,8 +139,10 @@ slam:
   amcl_update_min_d: 0.15
   amcl_update_min_a: 0.15
   # Pose physique du centre optique LIDAR par rapport au centre du chassis.
+  # Montage actuel : au-dessus du rover, horizontal et centré, à 30 cm du sol.
   laser_x_m: 0.0
   laser_y_m: 0.0
+  laser_z_m: 0.30
   laser_yaw_deg: 140.0
 
 patrol:
