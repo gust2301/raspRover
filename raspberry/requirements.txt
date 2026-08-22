@@ -3,8 +3,6 @@ PyYAML>=6.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 boto3>=1.34.0
-# OpenCV de Raspberry Pi OS est encore compile pour l'ABI NumPy 1.x.
-numpy>=1.24,<2
 # picamera2 est fourni par Raspberry Pi OS Bookworm sur la Pi.
 # Le backend tente aussi l'import depuis /usr/lib/python3/dist-packages
 # quand il tourne dans un venv isole.

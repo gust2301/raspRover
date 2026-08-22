@@ -14,11 +14,19 @@ Dégradé si OpenCV absent : obstacle = False partout.
 from __future__ import annotations
 
 import logging
+import pathlib
 import queue
+import sys
 import threading
 import time
 
 log = logging.getLogger(__name__)
+
+# OpenCV et NumPy sont fournis ensemble par Raspberry Pi OS. Ne pas mélanger
+# ces extensions avec le NumPy du venv OAK, qui vit dans un processus séparé.
+_SYSTEM_SITE = "/usr/lib/python3/dist-packages"
+if pathlib.Path(_SYSTEM_SITE).exists() and _SYSTEM_SITE not in sys.path:
+    sys.path.append(_SYSTEM_SITE)
 
 # ---------------------------------------------------------------------------
 # Import OpenCV — optionnel
