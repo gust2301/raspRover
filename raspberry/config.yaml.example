@@ -141,7 +141,8 @@ slam:
   laser_x_m: 0.0
   laser_y_m: 0.0
   laser_z_m: 0.30
-  laser_yaw_deg: 0.0
+  # L'orientation vient exclusivement de sensors.ros2_lidar.angle_offset_deg
+  # afin que l'API, SLAM et Nav2 partagent exactement le même repère.
 
 patrol:
   navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY

@@ -889,6 +889,20 @@ def _persist_lidar_calibration(angle_offset_deg: float, invert_angles: bool) -> 
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
 
 
+def _ros2_laser_yaw_deg(config: dict[str, Any]) -> float:
+    """Return the mounting yaw shared by the API, SLAM and Nav2.
+
+    ``slam.laser_yaw_deg`` used to be a second, independent calibration. That
+    allowed obstacle sectors to be correct in the API while the ROS TF still
+    used another orientation. Keep it only as a compatibility fallback for
+    installations which do not yet have the ROS2 LiDAR section.
+    """
+    ros2_cfg = config.get("sensors", {}).get("ros2_lidar", {})
+    if "angle_offset_deg" in ros2_cfg:
+        return float(ros2_cfg["angle_offset_deg"]) % 360.0
+    return float(config.get("slam", {}).get("laser_yaw_deg", 0.0)) % 360.0
+
+
 @app.get("/api/lidar/calibration")
 async def get_lidar_calibration() -> dict:
     if _lidar is not None:
@@ -1714,7 +1728,7 @@ async def slam_start() -> dict:
         "-e",
         f"RASPROVER_LASER_Z_M={float(cfg.get('laser_z_m', 0.30))}",
         "-e",
-        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 0.0))}",
+        f"RASPROVER_LASER_YAW_DEG={_ros2_laser_yaw_deg(config)}",
         "-e",
         f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
     ]
@@ -1929,7 +1943,7 @@ async def slam_load(body: dict[str, Any]) -> dict:
         "-e",
         f"RASPROVER_LASER_Z_M={float(cfg.get('laser_z_m', 0.30))}",
         "-e",
-        f"RASPROVER_LASER_YAW_DEG={float(cfg.get('laser_yaw_deg', 0.0))}",
+        f"RASPROVER_LASER_YAW_DEG={_ros2_laser_yaw_deg(config)}",
         "-e",
         f"RASPROVER_ODOMETRY_UDP_PORT={int(cfg.get('odometry_udp_port', 7667))}",
         "-e",
