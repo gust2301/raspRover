@@ -90,7 +90,10 @@ class ROS2LidarBridge:
             _CONTAINER_NAME,
             "bash",
             "-c",
-            f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC}",
+            # ROS 2 tronque les longues séquences à 128 éléments par défaut.
+            # Un LaserScan A1 contient ~720 distances : sans --full-length,
+            # trois quarts du balayage 360° disparaissent avant le parsing.
+            f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC} --full-length",
         ]
         log.info("ROS2LidarBridge: docker exec %s ... ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
         self._proc = subprocess.Popen(  # type: ignore[assignment]
