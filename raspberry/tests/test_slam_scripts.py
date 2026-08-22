@@ -153,9 +153,9 @@ def test_navigation_uses_precise_inspection_goal_and_progress_tolerances():
     launcher = (Path(__file__).parents[1] / "ros" / "start_navigation.sh").read_text()
     server = (Path(__file__).parents[1] / "modules" / "api" / "server.py").read_text()
 
-    assert 'RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.05' in launcher
-    assert 'RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.05236' in launcher
-    assert 'RASPROVER_NAV2_PROGRESS_RADIUS_M:-0.05' in launcher
-    assert 'RASPROVER_NAV2_PROGRESS_ALLOWANCE_S:-15.0' in launcher
+    assert "RASPROVER_NAV2_GOAL_XY_TOLERANCE_M:-0.05" in launcher
+    assert "RASPROVER_NAV2_GOAL_YAW_TOLERANCE_RAD:-0.05236" in launcher
+    assert "RASPROVER_NAV2_PROGRESS_RADIUS_M:-0.05" in launcher
+    assert "RASPROVER_NAV2_PROGRESS_ALLOWANCE_S:-15.0" in launcher
     assert "RASPROVER_NAV2_GOAL_XY_TOLERANCE_M" in server
     assert "RASPROVER_NAV2_PROGRESS_RADIUS_M" in server

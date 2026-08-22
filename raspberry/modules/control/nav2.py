@@ -131,9 +131,7 @@ class Nav2MotorBridge:
                 command = json.loads(raw)
                 left = max(-1.0, min(1.0, float(command["left"])))
                 right = max(-1.0, min(1.0, float(command["right"])))
-                left, right = compensate_motor_deadzone(
-                    left, right, self._minimum_motor_command
-                )
+                left, right = compensate_motor_deadzone(left, right, self._minimum_motor_command)
                 mission_finished = bool(command.get("mission_finished", False))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 log.warning("Commande moteur Nav2 UDP invalide")

@@ -16,9 +16,7 @@ class FeedbackLink:
 
     def send(self, payload: dict) -> None:
         if payload == {"T": 130}:
-            self.pending.append(
-                json.dumps({"T": 1001, "L": 0.25, "R": -0.5, "odl": 12, "odr": -7})
-            )
+            self.pending.append(json.dumps({"T": 1001, "L": 0.25, "R": -0.5, "odl": 12, "odr": -7}))
 
     def read_line(self, **_kwargs) -> str | None:
         return self.pending.pop(0) if self.pending else None

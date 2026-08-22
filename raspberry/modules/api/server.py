@@ -1587,12 +1587,8 @@ async def slam_status() -> dict:
         and current_map is not None
         and encoder_ready,
         "container": _slam_container,
-        "topics": {
-            name.removeprefix("/"): publishers[name] > 0 for name in sorted(required)
-        },
-        "publishers": {
-            name.removeprefix("/"): publishers[name] for name in sorted(required)
-        },
+        "topics": {name.removeprefix("/"): publishers[name] > 0 for name in sorted(required)},
+        "publishers": {name.removeprefix("/"): publishers[name] for name in sorted(required)},
         "error": status_error,
         "pose": pose,
         "active_map": active_map,
@@ -2548,10 +2544,7 @@ async def nav2_home_start() -> dict:
 
     position_stddev = float(pose.get("position_stddev_m", math.inf))
     yaw_stddev = float(pose.get("yaw_stddev_rad", math.inf))
-    if (
-        position_stddev > _HOME_POSITION_STDDEV_MAX_M
-        or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD
-    ):
+    if position_stddev > _HOME_POSITION_STDDEV_MAX_M or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD:
         # La covariance peut être figée depuis le dernier mouvement (AMCL ne
         # republie pas à l'arrêt). Force une reconvergence sur place avant de
         # conclure à une instabilité réelle.
@@ -2559,10 +2552,7 @@ async def nav2_home_start() -> dict:
         pose = await _refresh_amcl_pose(loop, pose)
         position_stddev = float(pose.get("position_stddev_m", math.inf))
         yaw_stddev = float(pose.get("yaw_stddev_rad", math.inf))
-        if (
-            position_stddev > _HOME_POSITION_STDDEV_MAX_M
-            or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD
-        ):
+        if position_stddev > _HOME_POSITION_STDDEV_MAX_M or yaw_stddev > _HOME_YAW_STDDEV_MAX_RAD:
             return JSONResponse(
                 status_code=409,
                 content={

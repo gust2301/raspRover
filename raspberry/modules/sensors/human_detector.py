@@ -100,7 +100,9 @@ class HumanDetector:
                 "tracking_confidence": round(weight, 3),
                 "tracking_detector_available": _CV2_AVAILABLE,
                 "tracking_source": (
-                    "oak" if time.monotonic() - self._external_update_ts <= _TARGET_STALE_S else "hog"
+                    "oak"
+                    if time.monotonic() - self._external_update_ts <= _TARGET_STALE_S
+                    else "hog"
                 ),
             }
         return {
