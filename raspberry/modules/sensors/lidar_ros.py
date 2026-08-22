@@ -54,6 +54,7 @@ class ROS2LidarBridge:
     def stop(self) -> None:
         self._stop_event.set()
         _kill_proc(self._proc)
+        _kill_remote_scan_processes()
         if self._thread:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -78,13 +79,21 @@ class ROS2LidarBridge:
                 self._stop_event.wait(5.0)
 
     def _stream(self) -> None:
+        # ``docker exec`` ne propage pas toujours la terminaison de son client
+        # au processus créé dans le conteneur. Après un redémarrage de l'API,
+        # les anciens ``ros2 topic echo`` restaient donc actifs et finissaient
+        # par saturer Nav2. Il ne doit exister qu'un seul lecteur RaspRover.
+        _kill_remote_scan_processes()
         cmd = [
             "docker",
             "exec",
             _CONTAINER_NAME,
             "bash",
             "-c",
-            f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC}",
+            # ROS 2 tronque les longues séquences à 128 éléments par défaut.
+            # Un LaserScan A1 contient ~720 distances : sans --full-length,
+            # trois quarts du balayage 360° disparaissent avant le parsing.
+            f"source /opt/ros/jazzy/setup.bash && ros2 topic echo {_TOPIC} --full-length",
         ]
         log.info("ROS2LidarBridge: docker exec %s ... ros2 topic echo %s", _CONTAINER_NAME, _TOPIC)
         self._proc = subprocess.Popen(  # type: ignore[assignment]
@@ -209,4 +218,31 @@ def _kill_proc(proc: subprocess.Popen | None) -> None:  # type: ignore[type-arg]
     try:
         proc.terminate()
     except Exception:  # noqa: BLE001
+        return
+    try:
+        proc.wait(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=2.0)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _kill_remote_scan_processes() -> None:
+    """Supprime les lecteurs /scan laissés dans le conteneur par docker exec."""
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                _CONTAINER_NAME,
+                "pkill",
+                "-f",
+                "[r]os2 topic echo /scan",
+            ],
+            capture_output=True,
+            timeout=3.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         pass

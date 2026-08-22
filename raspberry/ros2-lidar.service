@@ -12,8 +12,17 @@ ExecStart=/usr/bin/docker run --rm --name ros2-lidar \
   --device=/dev/ttyUSB0 \
   --network=host \
   --volume=rasprover-maps:/maps \
+  --env=FASTRTPS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml \
+  --env=FASTDDS_DEFAULT_PROFILES_FILE=/opt/rasprover/fastdds_udp_only.xml \
   ros2-lidar \
-  ros2 launch rplidar_ros rplidar.launch.py
+  ros2 run rplidar_ros rplidar_composition --ros-args \
+    -r __node:=rplidar_composition \
+    -p serial_port:=/dev/ttyUSB0 \
+    -p serial_baudrate:=115200 \
+    -p frame_id:=laser \
+    -p inverted:=false \
+    -p angle_compensate:=true \
+    -p flip_x_axis:=true
 ExecStop=/usr/bin/docker stop -t 10 ros2-lidar
 Restart=always
 RestartSec=5

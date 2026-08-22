@@ -42,6 +42,7 @@ CMD_REQUEST_BASE_FEEDBACK = 130
 CMD_PANTILT_CTRL = 133
 CMD_SERIAL_FEEDBACK = 131
 CMD_SERIAL_ECHO = 143
+CMD_MM_TYPE_SET = 900
 FEEDBACK_TYPES = {1001, CMD_REQUEST_IMU, CMD_REQUEST_BASE_FEEDBACK}
 
 
@@ -78,6 +79,8 @@ class ESP32Link:
         self.timeout_s = timeout_s
         self._ser: serial.Serial | None = None
         self._lock = threading.Lock()
+        self._read_lock = threading.Lock()
+        self._read_buffer = bytearray()
         self.stats = LinkStats()
 
     # -- Gestion de cycle de vie ---------------------------------------------
@@ -92,6 +95,7 @@ class ESP32Link:
         try:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
+            self._read_buffer.clear()
         except (serial.SerialException, AttributeError, NotImplementedError):
             pass
 
@@ -144,6 +148,18 @@ class ESP32Link:
             self.send({"T": CMD_EMERGENCY_STOP})
         finally:
             self.send({"T": CMD_SPEED_CTRL, "L": 0.0, "R": 0.0})
+
+    def configure_platform(self, main_type: int, module_type: int = 2) -> None:
+        """Configure les constantes chassis et le module dans le firmware.
+
+        ``main_type`` vaut 1 pour RaspRover, 2 pour UGV Rover et 3 pour UGV
+        Beast. ``module_type=2`` active notamment le retour mesure pan/tilt.
+        """
+        if main_type not in {1, 2, 3}:
+            raise ValueError("main_type ESP32 invalide")
+        if module_type not in {0, 1, 2}:
+            raise ValueError("module_type ESP32 invalide")
+        self.send({"T": CMD_MM_TYPE_SET, "main": main_type, "module": module_type})
 
     def request_feedback(
         self,
@@ -228,20 +244,34 @@ class ESP32Link:
         self.send({"T": CMD_SERIAL_ECHO, "cmd": 1 if enabled else 0})
 
     def read_line(self, timeout_s: float | None = None) -> str | None:
-        """Lit une ligne brute du port serie pour le diagnostic."""
+        """Lit une ligne complète sans perdre les fragments reçus sur timeout."""
         if not self.is_open:
             raise LinkNotOpenError("Port non ouvert")
         assert self._ser is not None
-        previous_timeout = self._ser.timeout
-        try:
-            if timeout_s is not None:
-                self._ser.timeout = timeout_s
-            raw = self._ser.read_until(b"\n", size=4096)
-        finally:
-            self._ser.timeout = previous_timeout
-        if not raw:
-            return None
-        return raw.decode("ascii", errors="replace").rstrip("\r\n")
+        deadline = time.monotonic() + (self.timeout_s if timeout_s is None else timeout_s)
+        with self._read_lock:
+            previous_timeout = self._ser.timeout
+            try:
+                while True:
+                    newline = self._read_buffer.find(b"\n")
+                    if newline >= 0:
+                        raw = bytes(self._read_buffer[:newline])
+                        del self._read_buffer[: newline + 1]
+                        return raw.decode("ascii", errors="replace").rstrip("\r")
+
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return None
+                    self._ser.timeout = min(0.05, remaining)
+                    waiting = int(getattr(self._ser, "in_waiting", 0) or 0)
+                    chunk = self._ser.read(max(1, min(waiting, 4096)))
+                    if chunk:
+                        self._read_buffer.extend(chunk)
+                        if len(self._read_buffer) > 65536:
+                            self._read_buffer.clear()
+                            log.warning("Buffer UART vidé: aucune fin de ligne détectée")
+            finally:
+                self._ser.timeout = previous_timeout
 
     @staticmethod
     def _looks_like_feedback(candidate: dict[str, Any]) -> bool:
@@ -249,5 +279,18 @@ class ESP32Link:
         # Exemple réel : {'T':1001,'L':0,'R':0,'r':0,'p':0,'v':11,'pan':0,'tilt':0}
         return any(
             key in candidate
-            for key in ("v", "voltage", "x", "y", "yaw", "imu", "roll", "pitch", "pan", "tilt")
+            for key in (
+                "v",
+                "voltage",
+                "odl",
+                "odr",
+                "x",
+                "y",
+                "yaw",
+                "imu",
+                "roll",
+                "pitch",
+                "pan",
+                "tilt",
+            )
         )

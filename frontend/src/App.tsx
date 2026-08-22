@@ -12,6 +12,7 @@ import Pilotage from './pages/Pilotage'
 import MapView from './pages/MapView'
 import Network from './pages/Network'
 import ConnectScreen from './pages/ConnectScreen'
+import VehicleInspections from './pages/VehicleInspections'
 import { RobotConnectionProvider } from './context/RobotConnectionContext'
 import UpdatePrompt from './components/UpdatePrompt'
 
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="network" element={<Network />} />
             <Route path="map" element={<MapView />} />
+            <Route path="vehicle-inspections" element={<VehicleInspections />} />
           </Route>
         </Routes>
       </BrowserRouter>

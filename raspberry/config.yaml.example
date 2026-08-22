@@ -12,6 +12,9 @@ control:
   baudrate: 115200
   timeout_s: 1.0
   esp32_required: false       # false = l'API demarre meme si l'ESP32 est absent
+  # Modele physique Waveshare. Configure les constantes encodeurs du firmware.
+  chassis_type: "rasprover"  # rasprover | ugv_rover | ugv_beast
+  module_type: 2              # 2 = pan-tilt avec retour de position des servos
 
   # Limites de sécurité
   motor_max_speed: 0.5        # Vitesse maximale normalisée (0.0 à 1.0)
@@ -74,10 +77,8 @@ sensors:
     enabled: false            # RPLIDAR A1 serie — desactive, ROS2 (ros2-lidar) est utilise a la place
 
   ros2_lidar:
-    # Offset pour aligner le 0° du scan ROS2 avec l'avant du robot.
-    # Mesure : mettre un objet devant le robot, lire l'angle_deg du point le plus proche
-    # dans /api/lidar/scan, puis angle_offset_deg = (360 - angle_mesure) % 360
-    angle_offset_deg: 140     # (scan_angle + 140) % 360 = angle robot. Ajuster si avant/arriere inverses (+/-180)
+    # Montage conforme au repère SLAMTEC : +X/0° pointe vers l'avant du rover.
+    angle_offset_deg: 0
     obstacle_threshold_cm: 45 # Seuil frontal pour la securite manuelle et la patrouille
 
   vision:
@@ -91,19 +92,57 @@ sensors:
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
 
 slam:
-  # Odometrie estimee depuis les consignes moteurs. A calibrer sur le robot reel :
-  # faire rouler 2 m en ligne droite, puis ajuster max_linear_speed_m_s.
+  # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65
-  # Distance effective entre les roues pour le skid-steer. Faire un tour complet
-  # sur place et ajuster jusqu'a ce que l'orientation odometrique soit proche de 360°.
-  wheel_separation_m: 0.18
+  # Odometrie physique issue des encodeurs odl/odr du firmware Waveshare.
+  # Ecartement cinematique effectif du RaspRover PT 4WD sur sol interieur.
+  # Il dépasse les 0.125 m géométriques à cause du glissement en virage.
+  # Valeur mesurée en comparant les rotations encodeurs aux scans LiDAR.
+  wheel_separation_m: 0.33
+  counterclockwise_wheel_separation_m: 0.26
+  clockwise_wheel_separation_m: 0.44
+  left_encoder_sign: 1.0
+  right_encoder_sign: 1.0
+  encoder_feedback_hz: 5.0
   odometry_udp_port: 7667
   nav2_motor_udp_port: 7668
   nav2_command_udp_port: 7669
+  # Compensation de la zone morte matérielle : en dessous, les moteurs ne tournent pas.
+  nav2_min_motor_command: 0.12
+  # Empreinte et marge de securite Nav2 adaptees au petit chassis.
+  # Augmenter inflation_radius_m si le rover passe trop pres des obstacles.
+  nav2_robot_radius_m: 0.16
+  nav2_inflation_radius_m: 0.30
+  # Inspection automobile: répéter fidèlement les poses apprises.
+  nav2_goal_xy_tolerance_m: 0.05
+  nav2_goal_yaw_tolerance_rad: 0.05236 # 3 degres
+  nav2_progress_radius_m: 0.05
+  nav2_progress_allowance_s: 15.0
+  # Reglages AMCL. Les defauts Nav2 (alpha 0.2) supposent une odometrie
+  # generique bruitee ; notre odometrie encodeurs calibree + recalage LiDAR
+  # (residu ICP typiquement < 2cm, cf encoder_odometry.py) est plus fiable,
+  # d'ou des alphas plus bas pour moins gonfler l'incertitude a chaque
+  # mouvement. Plus de particules/faisceaux et un sigma_hit plus bas
+  # affinent la convergence. Objectif: position_stddev_m et yaw_stddev_rad
+  # nettement sous les seuils de retour maison (cf server.py).
+  amcl_alpha1: 0.08
+  amcl_alpha2: 0.08
+  amcl_alpha3: 0.08
+  amcl_alpha4: 0.08
+  amcl_alpha5: 0.08
+  amcl_max_particles: 3000
+  amcl_min_particles: 800
+  amcl_max_beams: 120
+  amcl_sigma_hit: 0.15
+  amcl_update_min_d: 0.15
+  amcl_update_min_a: 0.15
   # Pose physique du centre optique LIDAR par rapport au centre du chassis.
+  # Montage actuel : au-dessus du rover, horizontal et centré, à 30 cm du sol.
   laser_x_m: 0.0
   laser_y_m: 0.0
-  laser_yaw_deg: 140.0
+  laser_z_m: 0.30
+  # L'orientation vient exclusivement de sensors.ros2_lidar.angle_offset_deg
+  # afin que l'API, SLAM et Nav2 partagent exactement le même repère.
 
 patrol:
   navigation_mode: "LIDAR_ONLY" # LIDAR_ONLY | HYBRID | LEGACY

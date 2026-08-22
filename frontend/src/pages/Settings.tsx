@@ -160,7 +160,7 @@ export default function Settings() {
                 Sauvegarder
               </button>
               <button
-                onClick={() => conn.setLidarCalibration({ angle_offset_deg: 0, invert_angles: false })}
+                onClick={() => conn.setLidarCalibration({ angle_offset_deg: 0, invert_angles: false, save: true })}
                 disabled={!connected}
                 className="h-10 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40"
               >

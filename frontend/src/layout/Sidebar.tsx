@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, Camera, Route, AlertTriangle,
+  LayoutDashboard, Camera, Route, AlertTriangle, Car,
   Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map, Network,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: "Vue d'ensemble", highlight: false },
   { to: '/pilotage', icon: Gamepad2, label: 'Pilotage', highlight: true },
   { to: '/cameras', icon: Camera, label: 'Caméras', highlight: false },
+  { to: '/vehicle-inspections', icon: Car, label: 'Inspections véhicules', highlight: true },
   { to: '/patrols', icon: Route, label: 'Patrouilles', highlight: false },
   { to: '/map', icon: Map, label: 'Carte SLAM', highlight: false },
   { to: '/incidents', icon: AlertTriangle, label: 'Incidents', highlight: false },

@@ -75,7 +75,10 @@ def _camera_settings() -> tuple[int, int, int]:
     cfg = _load_camera_config()
     width = int(cfg.get("width", 640))
     height = int(cfg.get("height", 480))
-    framerate = max(1, int(cfg.get("framerate", 24)))
+    # 12 i/s restent fluides pour le pilotage tout en laissant assez de CPU à
+    # Nav2/AMCL sur la Pi. Le flux 24 i/s pouvait retarder les commandes sur la
+    # vue Inspection, qui affiche simultanément caméra, carte et localisation.
+    framerate = max(1, int(cfg.get("framerate", 12)))
     return width, height, framerate
 
 

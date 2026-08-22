@@ -41,7 +41,7 @@ if [ "${BEFORE}" != "${AFTER}" ]; then
     LIDAR_SERVICE_CHANGED=true
   fi
   if git -C "${REPO_DIR}" diff --name-only "${BEFORE}" "${AFTER}" \
-    | grep -Eq '^raspberry/(Dockerfile\.lidar|map_writer\.py|ros/)'; then
+    | grep -Eq '^raspberry/(Dockerfile\.lidar|map_writer\.py|ros/|modules/control/encoder_kinematics\.py$)'; then
     ROS_IMAGE_CHANGED=true
   fi
 fi
@@ -52,26 +52,93 @@ if [ "${ROS_IMAGE_CHANGED}" = "true" ]; then
   echo "  OK"
 fi
 
-# Toujours redémarre l'API Python
-echo "==> Redémarrage rasprover-control..."
-sudo systemctl restart rasprover-control.service
-echo "  OK"
-
-# Redémarre le lidar uniquement si son .service a changé
+# Redémarre d'abord le lidar quand son service ou son image a changé. L'API
+# ouvre ensuite son abonnement /scan sur le nouveau conteneur, jamais sur celui
+# que Docker vient de supprimer.
+LIDAR_RESTARTED=false
 if [ "${LIDAR_SERVICE_CHANGED}" = "true" ]; then
   echo "==> ros2-lidar.service modifié — mise à jour et redémarrage..."
   sed "s/^User=.*/User=${CURRENT_USER}/" "${RASPBERRY_DIR}/ros2-lidar.service" \
     | sudo tee /etc/systemd/system/ros2-lidar.service > /dev/null
   sudo systemctl daemon-reload
   sudo systemctl restart ros2-lidar.service
+  LIDAR_RESTARTED=true
   echo "  OK"
 elif [ "${ROS_IMAGE_CHANGED}" = "true" ]; then
   echo "==> Image ROS modifiée — redémarrage ros2-lidar..."
   sudo systemctl restart ros2-lidar.service
+  LIDAR_RESTARTED=true
   echo "  OK"
 else
   echo "==> ros2-lidar inchangé — ROS non redémarré."
 fi
+
+if [ "${LIDAR_RESTARTED}" = "true" ]; then
+  echo "==> Attente du nouveau conteneur ros2-lidar..."
+  LIDAR_READY=false
+  for _attempt in $(seq 1 40); do
+    if docker inspect -f '{{.State.Running}}' ros2-lidar 2>/dev/null | grep -qx true; then
+      LIDAR_READY=true
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "${LIDAR_READY}" != "true" ]; then
+    echo "Le nouveau conteneur ros2-lidar n'est pas démarré." >&2
+    exit 1
+  fi
+  echo "  OK"
+
+  # Un conteneur peut être "running" alors que le pilote RPLIDAR reste bloqué
+  # avant l'ouverture du port série. Valide le flux réel et tente une seule
+  # reprise propre, cas observé après une reconstruction d'image.
+  echo "==> Vérification du flux /scan..."
+  SCAN_READY=false
+  for _attempt in $(seq 1 30); do
+    if docker exec ros2-lidar bash -c \
+      "source /opt/ros/jazzy/setup.bash && ros2 topic info /scan 2>/dev/null" \
+      | grep -Eq 'Publisher count: [1-9][0-9]*'; then
+      SCAN_READY=true
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "${SCAN_READY}" != "true" ]; then
+    echo "    Aucun scan publié — seconde initialisation du pilote LIDAR..."
+    sudo systemctl restart ros2-lidar.service
+    for _attempt in $(seq 1 30); do
+      if docker exec ros2-lidar bash -c \
+        "source /opt/ros/jazzy/setup.bash && ros2 topic info /scan 2>/dev/null" \
+        | grep -Eq 'Publisher count: [1-9][0-9]*'; then
+        SCAN_READY=true
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if [ "${SCAN_READY}" != "true" ]; then
+    echo "Le pilote RPLIDAR ne publie aucun scan après deux tentatives." >&2
+    exit 1
+  fi
+  echo "  OK"
+fi
+
+# Toujours redémarrer l'API après le lidar pour renouveler le pont /scan.
+echo "==> Redémarrage rasprover-control..."
+sudo systemctl stop --no-block rasprover-control.service
+for _attempt in $(seq 1 20); do
+  CONTROL_STATE=$(systemctl is-active rasprover-control.service 2>/dev/null || true)
+  if [ "${CONTROL_STATE}" != "deactivating" ]; then
+    break
+  fi
+  sleep 0.5
+done
+if [ "${CONTROL_STATE:-unknown}" = "deactivating" ]; then
+  echo "    Arrêt gracieux trop long — terminaison du groupe de processus..."
+  sudo systemctl kill --kill-who=all --signal=SIGKILL rasprover-control.service
+fi
+sudo systemctl start rasprover-control.service
+echo "  OK"
 
 echo ""
 echo "==> Déploiement terminé."

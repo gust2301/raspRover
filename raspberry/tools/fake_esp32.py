@@ -57,6 +57,10 @@ class RobotState:
     x: float = 0.0  # position en mètres
     y: float = 0.0
     heading_rad: float = 0.0  # cap (0 = +x)
+    left_distance_m: float = 0.0
+    right_distance_m: float = 0.0
+    main_type: int = 2
+    module_type: int = 2
     voltage: float = 12.6  # batterie 3S pleine
     uptime_s: float = 0.0
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -68,6 +72,8 @@ class RobotState:
             v_r = self.R * MAX_SPEED_M_S
             v = 0.5 * (v_l + v_r)
             omega = (v_r - v_l) / WHEELBASE_M
+            self.left_distance_m += v_l * dt
+            self.right_distance_m += v_r * dt
             self.x += v * math.cos(self.heading_rad) * dt
             self.y += v * math.sin(self.heading_rad) * dt
             self.heading_rad = (self.heading_rad + omega * dt + math.pi) % (2 * math.pi) - math.pi
@@ -87,14 +93,19 @@ class RobotState:
                 "x": round(self.x, 3),
                 "y": round(self.y, 3),
                 "yaw": round(math.degrees(self.heading_rad), 1),
-                "L": round(self.L, 3),
-                "R": round(self.R, 3),
-                "pan": round(self.pan_deg, 1),
-                "tilt": round(self.tilt_deg, 1),
+                "L": round(self.L * MAX_SPEED_M_S, 4),
+                "R": round(self.R * MAX_SPEED_M_S, 4),
+                "odl": int(self.left_distance_m * 100),
+                "odr": int(self.right_distance_m * 100),
                 # Champ 'v' : centivolts comme le firmware Waveshare réel
                 # Le JS officiel fait data['v']/100 → 1260 = 12.60 V
                 "v": round(self.voltage * 100),
                 "uptime": round(self.uptime_s, 1),
+                **(
+                    {"pan": round(self.pan_deg, 1), "tilt": round(self.tilt_deg, 1)}
+                    if self.module_type == 2
+                    else {}
+                ),
             }
 
 
@@ -164,6 +175,11 @@ class ESP32Handler(socketserver.StreamRequestHandler):
             data = (json.dumps(snap, separators=(",", ":")) + "\n").encode("ascii")
             self.request.sendall(data)
             print(f"[SIM] CMD T={t} FEEDBACK → sent {snap}")
+        elif t == 900:
+            with state._lock:
+                state.main_type = int(cmd.get("main", state.main_type))
+                state.module_type = int(cmd.get("module", state.module_type))
+            print(f"[SIM] CMD T=900 PLATFORM main={state.main_type} module={state.module_type}")
         else:
             print(f"[SIM] ? commande inconnue T={t}: {cmd}")
 

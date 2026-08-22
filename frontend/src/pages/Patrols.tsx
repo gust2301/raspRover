@@ -366,6 +366,7 @@ export default function Patrols() {
                         onClick={() => conn.setLidarCalibration({
                           angle_offset_deg: 0,
                           invert_angles: false,
+                          save: true,
                         })}
                         disabled={!isConnected}
                         className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs hover:bg-slate-700 disabled:opacity-40"

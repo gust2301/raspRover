@@ -27,6 +27,26 @@ from modules.control import (
 
 
 class TestESP32Link:
+    def test_read_line_keeps_uart_fragments_until_newline(self):
+        class FragmentedSerial:
+            is_open = True
+            timeout = 1.0
+
+            def __init__(self):
+                self.fragments = [b'{"T":', b'1001,"L":0', b',"R":0}\n']
+
+            @property
+            def in_waiting(self):
+                return len(self.fragments[0]) if self.fragments else 0
+
+            def read(self, _size):
+                return self.fragments.pop(0) if self.fragments else b""
+
+        link = ESP32Link()
+        link._ser = FragmentedSerial()  # type: ignore[assignment]
+
+        assert link.read_line(timeout_s=0.2) == '{"T":1001,"L":0,"R":0}'
+
     def test_open_close(self, emulator):
         link = ESP32Link(port=emulator["url"])
         assert not link.is_open
@@ -54,6 +74,12 @@ class TestESP32Link:
         # _enrich_feedback() dans server.py divise par 100 pour obtenir les vrais volts.
         assert 900 < fb["v"] <= 1260  # centivolts : 9.00 V → 12.60 V
         assert "x" in fb and "y" in fb and "yaw" in fb
+
+    def test_configure_platform_enables_measured_pantilt_feedback(self, emulator):
+        with ESP32Link(port=emulator["url"]) as link:
+            link.configure_platform(main_type=2, module_type=2)
+            fb = link.request_feedback(timeout_s=1.0, command_type=130)
+        assert "pan" in fb and "tilt" in fb
 
     def test_feedback_timeout_on_silent_server(self):
         """Un serveur TCP qui accepte mais ne repond jamais doit causer un timeout."""
@@ -219,6 +245,15 @@ class TestPanTiltController:
             with emulator["state"]._lock:
                 assert emulator["state"].pan_deg == pytest.approx(15)
                 assert emulator["state"].tilt_deg == pytest.approx(2)
+
+    def test_wait_until_reached_uses_measured_feedback(self, emulator):
+        with ESP32Link(port=emulator["url"]) as link:
+            pt = PanTiltController(link)
+            pt.goto(pan_deg=12, tilt_deg=-4)
+            feedback = link.request_feedback(timeout_s=1.0, command_type=130)
+            pt.update_feedback(feedback)
+            measured = pt.wait_until_reached(12, -4, timeout_s=0.2)
+        assert measured == pytest.approx((12, -4))
 
 
 # --- Integration end-to-end --------------------------------------------------
