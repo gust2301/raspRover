@@ -289,6 +289,7 @@ async def lifespan(app: FastAPI):
         _nav2_motors = Nav2MotorBridge(
             _motors.drive,
             _motors.stop,
+            rear_blocked=_obstacle_rear,
             motor_port=int(slam_cfg.get("nav2_motor_udp_port", 7668)),
             command_port=int(slam_cfg.get("nav2_command_udp_port", 7669)),
             minimum_motor_command=float(slam_cfg.get("nav2_min_motor_command", 0.12)),
@@ -689,6 +690,28 @@ def _obstacle_front() -> bool:
     return _ultrasonic.reading.front.obstacle if _ultrasonic else False
 
 
+def _obstacle_rear() -> bool:
+    """Obstacle suffisamment proche pour interdire toute translation arrière."""
+    if _lidar:
+        snap = _lidar.snapshot
+        threshold = _lidar.obstacle_threshold_cm
+        if (
+            snap.connected
+            and snap.rear_distance_cm is not None
+            and snap.rear_distance_cm < threshold
+        ):
+            return True
+    elif _lidar_ros_adapter:
+        snap = _lidar_ros_adapter.snapshot
+        if (
+            snap.connected
+            and snap.rear_distance_cm is not None
+            and snap.rear_distance_cm < _lidar_ros_adapter._obstacle_cm
+        ):
+            return True
+    return _ultrasonic.reading.rear.obstacle if _ultrasonic else False
+
+
 def _system_status() -> dict:
     pan, tilt = _pantilt.position if _pantilt else (0.0, 0.0)
     light_state = _lights.state if _lights else {"camera_light": False}
@@ -772,6 +795,17 @@ async def motors_move(body: dict[str, Any]) -> dict:
     except ValueError:
         return JSONResponse(
             status_code=400, content={"ok": False, "error": f"direction inconnue: {direction_str}"}
+        )
+
+    if direction == Direction.FORWARD and _obstacle_front():
+        _motors.stop()
+        return JSONResponse(
+            status_code=409, content={"ok": False, "error": "Obstacle détecté à l'avant"}
+        )
+    if direction == Direction.BACKWARD and _obstacle_rear():
+        _motors.stop()
+        return JSONResponse(
+            status_code=409, content={"ok": False, "error": "Obstacle détecté à l'arrière"}
         )
 
     loop = asyncio.get_running_loop()
@@ -2927,6 +2961,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                                 }
                             )
                             continue
+                        if y < -0.1 and _obstacle_rear():
+                            await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
+                            await ws.send_json(
+                                {
+                                    "type": "obstacle_blocked",
+                                    "message": "Obstacle détecté à l'arrière",
+                                }
+                            )
+                            continue
                         left, right = _mixer.mix(x, y)
                         await loop.run_in_executor(
                             None,
@@ -2944,6 +2987,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                                 {
                                     "type": "obstacle_blocked",
                                     "message": "Obstacle détecté à l'avant",
+                                }
+                            )
+                            continue
+                        if direction == Direction.BACKWARD and _obstacle_rear():
+                            await loop.run_in_executor(None, _motors.stop)  # type: ignore[union-attr]
+                            await ws.send_json(
+                                {
+                                    "type": "obstacle_blocked",
+                                    "message": "Obstacle détecté à l'arrière",
                                 }
                             )
                             continue

@@ -380,6 +380,12 @@ class PatrolController:
 
             if decision.action == AvoidanceAction.BACK_UP:
                 self._state = PatrolState.BACKING_UP
+                if self._rear_blocked():
+                    await loop.run_in_executor(None, self._motors.stop)
+                    self._last_decision = AvoidanceAction.STOP.value
+                    self._last_decision_reason = "obstacle arrière, recul interdit"
+                    await asyncio.sleep(_POLL)
+                    continue
                 await loop.run_in_executor(
                     None,
                     lambda: self._motors.from_direction(Direction.BACKWARD, self.speed * 0.65),
@@ -704,6 +710,14 @@ class PatrolController:
             NavigationMode.HYBRID,
         )
 
+    def _rear_blocked(self) -> bool:
+        """Fail-safe directionnel utilisé avant et pendant chaque recul."""
+        if self._lidar is not None:
+            rear_cm = self._lidar.snapshot.rear_distance_cm
+            if rear_cm is not None and rear_cm < self._lidar_planner.rear_clearance_cm:
+                return True
+        return bool(self._ultrasonic and self._ultrasonic.reading.rear.obstacle)
+
     # ------------------------------------------------------------------
     # Évitement directionnel
     # ------------------------------------------------------------------
@@ -809,11 +823,20 @@ class PatrolController:
             reason,
         )
         spd = self.speed
-        # Phase recul — durée fixe, pas de check capteur (obstacle est devant)
+        # Phase recul — surveille continuellement le secteur arrière.
+        if self._rear_blocked():
+            log.warning("Patrol avoid: recul annulé, obstacle arrière")
+            await loop.run_in_executor(None, self._motors.stop)
+            return
         await loop.run_in_executor(
             None, lambda s=spd: self._motors.from_direction(Direction.BACKWARD, s)
         )
-        await asyncio.sleep(_REVERSE_FRONT)
+        reverse_end = time.monotonic() + _REVERSE_FRONT
+        while time.monotonic() < reverse_end:
+            if self._rear_blocked():
+                log.warning("Patrol avoid: obstacle arrière détecté pendant le recul")
+                break
+            await asyncio.sleep(_POLL)
         await loop.run_in_executor(None, self._motors.stop)
         await asyncio.sleep(_TURN_PAUSE)
         # Phase rotation — stoppe si l'US détecte quelque chose de très proche

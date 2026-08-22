@@ -35,6 +35,7 @@ class Nav2MotorBridge:
         drive: Callable[[float, float], None],
         stop: Callable[[], None],
         *,
+        rear_blocked: Callable[[], bool] | None = None,
         motor_port: int = 7668,
         command_port: int = 7669,
         timeout_s: float = 0.6,
@@ -44,6 +45,7 @@ class Nav2MotorBridge:
             raise ValueError("minimum_motor_command doit être compris entre 0 et 1")
         self._drive = drive
         self._stop = stop
+        self._rear_blocked = rear_blocked
         self._motor_port = motor_port
         self._command_port = command_port
         self._timeout_s = timeout_s
@@ -144,6 +146,14 @@ class Nav2MotorBridge:
             if abs(left) > 1e-6 or abs(right) > 1e-6:
                 self._received_command = True
             stopped_for_timeout = False
+            if (
+                (left + right) * 0.5 < -1e-6
+                and self._rear_blocked is not None
+                and self._rear_blocked()
+            ):
+                log.warning("Commande Nav2 arrière bloquée par le LIDAR")
+                self._stop()
+                continue
             self._drive(left, right)
             if mission_finished:
                 self.disable()
