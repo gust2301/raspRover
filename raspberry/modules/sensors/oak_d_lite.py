@@ -213,9 +213,7 @@ class OakDLiteSensor:
         if self._on_person:
             self._on_person(target)
 
-    def _publish_depth(
-        self, zones: dict[str, bool], distances: dict[str, float | None]
-    ) -> None:
+    def _publish_depth(self, zones: dict[str, bool], distances: dict[str, float | None]) -> None:
         if self._on_depth:
             self._on_depth(zones, distances)
 

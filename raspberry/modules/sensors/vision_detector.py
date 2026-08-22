@@ -176,9 +176,7 @@ class VisionObstacleDetector:
             self._depth_zones = {
                 name: bool(zones.get(name, False)) for name in ("left", "center", "right")
             }
-            self._depth_cm = {
-                name: distances_cm.get(name) for name in ("left", "center", "right")
-            }
+            self._depth_cm = {name: distances_cm.get(name) for name in ("left", "center", "right")}
             self._depth_update_ts = time.monotonic()
 
     def _fresh_depth_zones(self) -> dict[str, bool]:

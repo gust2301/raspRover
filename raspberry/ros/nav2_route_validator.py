@@ -40,10 +40,13 @@ class RouteValidator(Node):
             return {"ok": False, "error": "Planificateur Nav2 indisponible", "failed_point": None}
 
         for segment, (start, goal) in enumerate(zip(poses, poses[1:], strict=False)):
-            if math.hypot(
-                float(goal["x"]) - float(start["x"]),
-                float(goal["y"]) - float(start["y"]),
-            ) < 0.05:
+            if (
+                math.hypot(
+                    float(goal["x"]) - float(start["x"]),
+                    float(goal["y"]) - float(start["y"]),
+                )
+                < 0.05
+            ):
                 # Plusieurs vues caméra peuvent légitimement partager la même
                 # position et ne nécessitent aucun calcul de trajet.
                 continue
@@ -71,15 +74,11 @@ class RouteValidator(Node):
             wrapped = result_future.result()
             result = wrapped.result
             succeeded = (
-                wrapped.status == GoalStatus.STATUS_SUCCEEDED
-                and int(result.error_code) == 0
+                wrapped.status == GoalStatus.STATUS_SUCCEEDED and int(result.error_code) == 0
             )
             if not succeeded:
                 detail = str(getattr(result, "error_msg", "")).strip()
-                message = (
-                    f"« {labels[segment + 1]} » inaccessible depuis "
-                    f"« {labels[segment]} »"
-                )
+                message = f"« {labels[segment + 1]} » inaccessible depuis « {labels[segment]} »"
                 if detail:
                     message = f"{message} : {detail}"
                 return {

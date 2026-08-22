@@ -84,6 +84,7 @@ _SCAN_READ_SECS = 0.5
 # LIDAR_ONLY : séquences d'échappement engagées pour éviter avant/arrière et toupie.
 _LIDAR_REVERSE_COMMIT_S = 0.65
 _LIDAR_ESCAPE_TURN_S = 0.90
+_LIDAR_ESCAPE_MIN_TURN_S = 0.25
 _LIDAR_MAX_TURN_S = 1.40
 _LIDAR_TURN_PAUSE_S = 0.30
 _LIDAR_SCAN_PULSE_S = 0.55
@@ -352,6 +353,7 @@ class PatrolController:
     async def _run_lidar_only(self, loop: asyncio.AbstractEventLoop, Direction) -> None:
         log.info("Patrol LIDAR_ONLY: boucle intelligente 360 demarree")
         keepalive_ts = 0.0
+        commanded_action: AvoidanceAction | None = None
         while True:
             decision = self._lidar_planner.decide(self._lidar.snapshot)
             decision = self._guard_lidar_decision(decision, time.monotonic())
@@ -362,6 +364,7 @@ class PatrolController:
             if decision.action == AvoidanceAction.STOP:
                 self._state = PatrolState.STOPPED
                 await loop.run_in_executor(None, self._motors.stop)
+                commanded_action = decision.action
                 log.warning("Patrol LIDAR_ONLY: STOP - %s", decision.reason)
                 await asyncio.sleep(0.25)
                 continue
@@ -375,6 +378,7 @@ class PatrolController:
                     ),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(0.25)
                 continue
 
@@ -391,6 +395,7 @@ class PatrolController:
                     lambda: self._motors.from_direction(Direction.BACKWARD, self.speed * 0.65),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(_POLL)
                 continue
 
@@ -401,6 +406,7 @@ class PatrolController:
                     lambda: self._motors.from_direction(Direction.LEFT, self.patrol_turn_speed),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(_POLL)
                 continue
 
@@ -411,6 +417,7 @@ class PatrolController:
                     lambda: self._motors.from_direction(Direction.RIGHT, self.patrol_turn_speed),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(_POLL)
                 continue
 
@@ -421,6 +428,7 @@ class PatrolController:
                     lambda: self._motors.arc(self.speed * 0.65, -0.28),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(_POLL)
                 continue
 
@@ -431,6 +439,7 @@ class PatrolController:
                     lambda: self._motors.arc(self.speed * 0.65, 0.28),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
                 await asyncio.sleep(_POLL)
                 continue
 
@@ -438,12 +447,16 @@ class PatrolController:
             speed = (
                 self.speed * 0.7 if decision.action == AvoidanceAction.SLOW_FORWARD else self.speed
             )
-            if now - keepalive_ts >= _MOTOR_KEEPALIVE:
+            # Envoyer l'avance dès la première décision CLEAR. Auparavant le
+            # keepalive d'une rotation venait d'être rafraîchi et son ancienne
+            # commande restait active jusqu'à 400 ms supplémentaires.
+            if commanded_action != decision.action or now - keepalive_ts >= _MOTOR_KEEPALIVE:
                 await loop.run_in_executor(
                     None,
                     lambda s=speed: self._motors.from_direction(Direction.FORWARD, s),
                 )
                 keepalive_ts = now
+                commanded_action = decision.action
             await asyncio.sleep(_POLL)
 
     def _guard_lidar_decision(self, decision: AvoidanceDecision, now: float) -> AvoidanceDecision:
@@ -462,6 +475,18 @@ class PatrolController:
             return self._override_decision(decision, AvoidanceAction.STOP, "pause de réévaluation")
 
         if self._forced_turn is not None:
+            forced_elapsed = now - self._maneuver_started_ts
+            if (
+                decision.action == AvoidanceAction.CLEAR
+                and forced_elapsed >= _LIDAR_ESCAPE_MIN_TURN_S
+            ):
+                self._forced_turn = None
+                self._remember_maneuver(AvoidanceAction.CLEAR, now)
+                return self._override_decision(
+                    decision,
+                    AvoidanceAction.CLEAR,
+                    "passage libre détecté pendant la rotation",
+                )
             if now < self._forced_turn_until:
                 return self._override_decision(
                     decision, self._forced_turn, "rotation engagée après recul"
