@@ -7,6 +7,7 @@ CURRENT_USER="$(logname 2>/dev/null || whoami)"
 REPO_DIR="/home/${CURRENT_USER}/raspRover"
 RASPBERRY_DIR="${REPO_DIR}/raspberry"
 VENV="${RASPBERRY_DIR}/.venv"
+OAK_VENV="${RASPBERRY_DIR}/.venv-oak"
 
 echo "==> Mise à jour du code..."
 BRANCH="${1:-$(git -C "${REPO_DIR}" branch --show-current)}"
@@ -26,6 +27,10 @@ AFTER=$(git -C "${REPO_DIR}" rev-parse HEAD)
 
 echo "==> Mise à jour des dépendances Python..."
 "${VENV}/bin/pip" install -r "${RASPBERRY_DIR}/requirements.txt" -q
+if [ ! -x "${OAK_VENV}/bin/python" ]; then
+  python3 -m venv "${OAK_VENV}"
+fi
+"${OAK_VENV}/bin/pip" install -r "${RASPBERRY_DIR}/requirements-oak.txt" -q
 
 if ! /usr/bin/python3 -c 'import cv2, numpy' 2>/dev/null; then
   echo "==> OpenCV système absent — installation pour le tracking humain..."

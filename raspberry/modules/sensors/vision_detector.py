@@ -125,6 +125,13 @@ class VisionObstacleDetector:
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=2)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._depth_zones = {"left": False, "center": False, "right": False}
+        self._depth_cm: dict[str, float | None] = {
+            "left": None,
+            "center": None,
+            "right": None,
+        }
+        self._depth_update_ts = 0.0
 
     # ------------------------------------------------------------------
     # Propriétés thread-safe
@@ -142,11 +149,34 @@ class VisionObstacleDetector:
     def zones(self) -> dict[str, bool]:
         """Résultat par zone : {"left": bool, "center": bool, "right": bool}."""
         with self._lock:
+            depth = self._fresh_depth_zones()
             return {
-                "left": self._zone_left.obstacle,
-                "center": self._zone_center.obstacle,
-                "right": self._zone_right.obstacle,
+                "left": self._zone_left.obstacle or depth["left"],
+                "center": self._zone_center.obstacle or depth["center"],
+                "right": self._zone_right.obstacle or depth["right"],
             }
+
+    @property
+    def depth_zones(self) -> dict[str, bool]:
+        with self._lock:
+            return dict(self._fresh_depth_zones())
+
+    def update_external_depth(
+        self, zones: dict[str, bool], distances_cm: dict[str, float | None]
+    ) -> None:
+        with self._lock:
+            self._depth_zones = {
+                name: bool(zones.get(name, False)) for name in ("left", "center", "right")
+            }
+            self._depth_cm = {
+                name: distances_cm.get(name) for name in ("left", "center", "right")
+            }
+            self._depth_update_ts = time.monotonic()
+
+    def _fresh_depth_zones(self) -> dict[str, bool]:
+        if time.monotonic() - self._depth_update_ts > 1.0:
+            return {"left": False, "center": False, "right": False}
+        return self._depth_zones
 
     @property
     def last_update_ts(self) -> float:
@@ -156,6 +186,7 @@ class VisionObstacleDetector:
 
     def to_dict(self) -> dict:
         with self._lock:
+            depth = self._fresh_depth_zones()
             any_obs = (
                 self._zone_left.obstacle or self._zone_center.obstacle or self._zone_right.obstacle
             )
@@ -170,13 +201,15 @@ class VisionObstacleDetector:
                 if z.obstacle and z.confidence >= best_conf:
                     best_method = z.method
             return {
-                "vision_obstacle": any_obs,
-                "vision_left": self._zone_left.obstacle,
-                "vision_center": self._zone_center.obstacle,
-                "vision_right": self._zone_right.obstacle,
+                "vision_obstacle": any_obs or any(depth.values()),
+                "vision_left": self._zone_left.obstacle or depth["left"],
+                "vision_center": self._zone_center.obstacle or depth["center"],
+                "vision_right": self._zone_right.obstacle or depth["right"],
                 "vision_confidence": round(best_conf, 3),
                 "vision_available": _CV2_AVAILABLE,
                 "vision_method": best_method,
+                "depth_obstacle_zones": dict(depth),
+                "depth_distance_cm": dict(self._depth_cm),
             }
 
     # ------------------------------------------------------------------

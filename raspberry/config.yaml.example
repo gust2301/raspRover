@@ -91,6 +91,15 @@ sensors:
                               # Réduire (ex: 12) si faux positifs sur sol uniforme
     history: 3                # Nombre de frames pour le vote majoritaire (lissage)
 
+  oak:
+    enabled: true
+    model: "mobilenet-ssd"    # Personne/voiture exécuté sur l'OAK, pas sur la Pi
+    fps: 8                    # Fréquence publiée; branchement USB 3 requis
+    obstacle_distance_mm: 700 # Sécurité profondeur devant le rover
+    depth_roi_top: 0.45       # ROI verticale: exclut plafond/horizon
+    depth_roi_bottom: 0.82    # Exclut le bas extrême où le sol domine
+    min_valid_pixels: 80      # Rejette les pixels stéréo isolés
+
 slam:
   # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65

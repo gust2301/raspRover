@@ -248,6 +248,49 @@ Les fichiers YAML/PGM sont conservés dans le volume Docker nommé
 `rasprover-maps`. Le conteneur peut donc être reconstruit ou supprimé sans
 perdre les cartes. Ne supprimez pas ce volume lors d'un nettoyage Docker.
 
+---
+
+## 9. OAK-D Lite
+
+L'OAK-D Lite doit être branchée directement sur un port USB 3 bleu avec un
+câble SuperSpeed. La commande suivante doit afficher `5000M` lorsque le
+firmware de la caméra est chargé :
+
+```bash
+lsusb -t
+```
+
+DepthAI tourne dans `raspberry/.venv-oak`, séparé du backend. Cette séparation
+est obligatoire : DepthAI et l'OpenCV fourni par Raspberry Pi OS n'utilisent
+pas nécessairement la même ABI NumPy. Le script `deploy` crée et met à jour les
+deux environnements automatiquement.
+
+Le RaspRover alimente la Pi 5 par sa carte 5 V sans négociation USB-PD. Avec
+une alimentation réellement capable de fournir 5 A, le budget USB 1,6 A se
+configure ainsi, puis nécessite un redémarrage :
+
+```bash
+echo 'usb_max_current_enable=1' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+```
+
+Ne forcez pas cette option avec une alimentation insuffisante. Utilisez alors
+un hub USB 3 alimenté. Vérifications :
+
+```bash
+vcgencmd get_config usb_max_current_enable
+vcgencmd get_throttled
+curl http://localhost:8080/api/vision
+```
+
+Le statut attendu contient `oak_connected: true`, `oak_usb_speed: SUPER`, les
+distances des trois zones et les détections spatiales. Le test matériel isolé
+s'exécute avec :
+
+```bash
+raspberry/.venv-oak/bin/python raspberry/tools/oak_smoke_v2.py
+```
+
 ### Validation d'une feature Nav2 sur la Pi
 
 Lors du tout premier essai (la version actuelle de `deploy` sur `master` ne
