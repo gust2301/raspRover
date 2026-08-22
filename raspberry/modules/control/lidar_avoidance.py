@@ -253,6 +253,17 @@ class LidarAvoidancePlanner:
             return decision
         if decision.action == AvoidanceAction.STOP:
             return decision
+        # Une ouverture frontale valide doit interrompre immédiatement une
+        # ancienne rotation. La conserver au nom de l'anti-oscillation fait
+        # dépasser l'ouverture au rover, qui retrouve alors l'obstacle et
+        # recommence à tourner autour de lui.
+        if decision.action == AvoidanceAction.CLEAR and self._last_action in (
+            AvoidanceAction.TURN_LEFT,
+            AvoidanceAction.TURN_RIGHT,
+            AvoidanceAction.ARC_LEFT,
+            AvoidanceAction.ARC_RIGHT,
+        ):
+            return decision
         if self._last_action == decision.action:
             return decision
         if self._last_action in (
