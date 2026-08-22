@@ -46,7 +46,7 @@ from modules.control.tracker import TrackerController
 from modules.map_image import occupancy_grid_pixels
 from modules.map_names import normalize_map_name, validate_map_name
 from modules.navigation_plan import add_return_home
-from modules.sensors import RPLidarA1, UltrasonicSensor, VisionObstacleDetector
+from modules.sensors import OakDLiteSensor, RPLidarA1, UltrasonicSensor, VisionObstacleDetector
 from modules.sensors.human_detector import HumanDetector
 from modules.sensors.lidar import LidarPoint, LidarSnapshot
 from modules.sensors.lidar_ros import ROS2LidarBridge
@@ -92,6 +92,7 @@ _lidar_ros: ROS2LidarBridge | None = None
 _vision: VisionObstacleDetector | None = None
 _patrol: PatrolController | None = None
 _human_detector: HumanDetector | None = None
+_oak: OakDLiteSensor | None = None
 _tracker: TrackerController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
@@ -254,6 +255,7 @@ async def lifespan(app: FastAPI):
         _vision, \
         _patrol, \
         _human_detector, \
+        _oak, \
         _tracker, \
         _rover_name, \
         _encoder_feedback, \
@@ -387,6 +389,25 @@ async def lifespan(app: FastAPI):
     start_standalone_vision_producer()
     log.info("HumanDetector démarré")
 
+    # OAK-D Lite: accélérateur optionnel pour détection spatiale et obstacles
+    # proches. Les détecteurs historiques restent actifs comme repli.
+    oak_cfg = cfg.get("sensors", {}).get("oak", {})
+    if oak_cfg.get("enabled", True):
+        _oak = OakDLiteSensor(
+            model=str(oak_cfg.get("model", "mobilenet-ssd")),
+            fps=int(oak_cfg.get("fps", 8)),
+            obstacle_distance_mm=int(oak_cfg.get("obstacle_distance_mm", 700)),
+            depth_roi_top=float(oak_cfg.get("depth_roi_top", 0.45)),
+            depth_roi_bottom=float(oak_cfg.get("depth_roi_bottom", 0.82)),
+            min_valid_pixels=int(oak_cfg.get("min_valid_pixels", 80)),
+            on_person=_human_detector.update_external_target,
+            on_depth=_vision.update_external_depth if _vision else None,
+        )
+        _oak.start()
+        log.info("Initialisation OAK-D Lite demandée")
+    else:
+        log.info("OAK-D Lite désactivée (sensors.oak.enabled: false)")
+
     # ROS2 LIDAR bridge — démarré avant la patrouille pour que l'adapter soit disponible
     _lidar_ros = ROS2LidarBridge()
     _lidar_ros.start()
@@ -482,6 +503,8 @@ async def lifespan(app: FastAPI):
         _tracker.stop()
     if get_recording_state()["is_recording"]:
         stop_video_recording()
+    if _oak:
+        _oak.stop()
     if _human_detector:
         unregister_frame_callback(_human_detector.push_frame)
         _human_detector.stop()
@@ -723,6 +746,7 @@ def _system_status() -> dict:
     human_data = _human_detector.to_dict() if _human_detector else {}
     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
     vision_data = _vision.to_dict() if _vision else {}
+    oak_data = _oak.to_dict() if _oak else {"oak_available": False, "oak_connected": False}
     if _lidar:
         lidar_data = _lidar.to_dict()
     elif _lidar_ros_adapter:
@@ -738,6 +762,7 @@ def _system_status() -> dict:
         **light_state,
         **distance_data,
         **vision_data,
+        **oak_data,
         **lidar_data,
         **patrol_data,
         **tracker_data,
@@ -896,7 +921,10 @@ async def get_vision() -> dict:
             status_code=503,
             content={"error": "Détecteur vision non activé (sensors.vision.enabled: false)"},
         )
-    return _vision.to_dict()
+    return {
+        **_vision.to_dict(),
+        **(_oak.to_dict() if _oak else {"oak_available": False, "oak_connected": False}),
+    }
 
 
 @app.get("/api/lidar")

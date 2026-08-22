@@ -57,6 +57,8 @@ class HumanDetector:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._hog: cv2.HOGDescriptor | None = None  # type: ignore[name-defined]
+        self._external_target: tuple[float, float, float] | None = None
+        self._external_update_ts: float = 0.0
 
     # ------------------------------------------------------------------
     # Propriétés thread-safe
@@ -66,9 +68,17 @@ class HumanDetector:
     def best_target(self) -> tuple[float, float, float] | None:
         """(cx, cy, weight) normalisé, ou None si pas de personne."""
         with self._lock:
+            if time.monotonic() - self._external_update_ts <= _TARGET_STALE_S:
+                return self._external_target
             if time.monotonic() - self._last_update_ts > _TARGET_STALE_S:
                 return None
             return self._best_target
+
+    def update_external_target(self, target: tuple[float, float, float] | None) -> None:
+        """Prefer a fresh accelerator-provided target (for example OAK-D)."""
+        with self._lock:
+            self._external_target = target
+            self._external_update_ts = time.monotonic()
 
     @property
     def person_detected(self) -> bool:
@@ -89,6 +99,9 @@ class HumanDetector:
                 "tracking_cy": round(cy, 3),
                 "tracking_confidence": round(weight, 3),
                 "tracking_detector_available": _CV2_AVAILABLE,
+                "tracking_source": (
+                    "oak" if time.monotonic() - self._external_update_ts <= _TARGET_STALE_S else "hog"
+                ),
             }
         return {
             "tracking_person_detected": False,
@@ -96,6 +109,7 @@ class HumanDetector:
             "tracking_cy": None,
             "tracking_confidence": 0.0,
             "tracking_detector_available": _CV2_AVAILABLE,
+            "tracking_source": None,
         }
 
     # ------------------------------------------------------------------

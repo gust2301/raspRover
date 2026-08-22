@@ -683,6 +683,18 @@ class PatrolController:
             # Centre volontairement ignoré : l'ultrason le couvre.
             # Warmup court (0.3 s) pour laisser le vote se stabiliser
             # sans risquer de percuter un obstacle non vu pendant trop longtemps.
+            if self._vision and elapsed >= _VISION_WARMUP:
+                depth_zones = getattr(self._vision, "depth_zones", {})
+                if depth_zones.get("center", False):
+                    log.info("Patrol OAK: obstacle 3D CENTRE après %.1fs", elapsed)
+                    return "depth:center"
+                if depth_zones.get("left", False) and depth_zones.get("right", False):
+                    return "depth:center"
+                if depth_zones.get("left", False):
+                    return "depth:left"
+                if depth_zones.get("right", False):
+                    return "depth:right"
+
             if (
                 self._vision
                 and elapsed >= _VISION_WARMUP

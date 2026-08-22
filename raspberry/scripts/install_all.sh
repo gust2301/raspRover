@@ -42,6 +42,15 @@ EOF
   echo "    Règle udev créée : ${UDEV_RULE}"
 fi
 
+# OAK-D Lite / Myriad X. Cette règle officielle Luxonis autorise l'accès au
+# périphérique depuis le service utilisateur sans lancer l'API en root.
+OAK_UDEV_RULE="/etc/udev/rules.d/80-movidius.rules"
+cat <<'EOF' > "${OAK_UDEV_RULE}"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03e7", MODE="0666"
+EOF
+udevadm control --reload-rules
+udevadm trigger
+
 # ── 4. Python venv + dépendances ─────────────────────────────────────────────
 echo ""
 echo "==> Installation des dépendances Python..."
@@ -53,6 +62,12 @@ if [[ ! -d "${VENV}" ]]; then
 fi
 sudo -u "${CURRENT_USER}" "${VENV}/bin/pip" install --upgrade pip -q
 sudo -u "${CURRENT_USER}" "${VENV}/bin/pip" install -r "${RASPBERRY_DIR}/requirements.txt" -q
+OAK_VENV="${RASPBERRY_DIR}/.venv-oak"
+if [[ ! -d "${OAK_VENV}" ]]; then
+  sudo -u "${CURRENT_USER}" python3 -m venv "${OAK_VENV}"
+fi
+sudo -u "${CURRENT_USER}" "${OAK_VENV}/bin/pip" install \
+  -r "${RASPBERRY_DIR}/requirements-oak.txt" -q
 echo "    Dépendances Python installées."
 
 # ── 5. Systemd services ──────────────────────────────────────────────────────
