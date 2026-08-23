@@ -39,29 +39,29 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (key: string
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
-    <div className="relative rounded-xl border border-slate-800 overflow-hidden bg-slate-900/50">
+    <div className="relative rounded-xl border border-slate-200 overflow-hidden bg-white dark:border-slate-800 dark:bg-slate-900/50">
       {item.type === 'photo' ? (
         <a href={item.url} target="_blank" rel="noopener noreferrer">
           <img
             src={item.url}
             alt={item.key}
-            className="w-full aspect-video object-cover bg-slate-950"
+            className="w-full aspect-video object-cover bg-slate-100 dark:bg-slate-950"
             loading="lazy"
           />
         </a>
       ) : (
-        <video src={item.url} controls className="w-full aspect-video bg-slate-950" preload="metadata" />
+        <video src={item.url} controls className="w-full aspect-video bg-slate-100 dark:bg-slate-950" preload="metadata" />
       )}
 
       <div className="px-3 py-2 flex items-center gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-slate-400 font-mono truncate">{formatTimestamp(item.key)}</p>
-          <p className="text-xs text-slate-600">{formatBytes(item.size)}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">{formatTimestamp(item.key)}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-600">{formatBytes(item.size)}</p>
         </div>
         <a
           href={item.url}
           download={item.key.replace(/^.*\//, '')}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors"
           title="Télécharger"
         >
           <Download size={13} />
@@ -70,13 +70,13 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (key: string
           <div className="flex items-center gap-1">
             <button
               onClick={() => onDelete(item.key)}
-              className="px-2 py-1 rounded text-xs text-red-400 hover:bg-red-500/10 border border-red-500/30 transition-colors"
+              className="px-2 py-1 rounded text-xs text-red-600 hover:bg-red-50 border border-red-300 dark:text-red-400 dark:hover:bg-red-500/10 dark:border-red-500/30 transition-colors"
             >
               Confirmer
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-800 transition-colors"
+              className="px-2 py-1 rounded text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
             >
               ✕
             </button>
@@ -84,7 +84,7 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (key: string
         ) : (
           <button
             onClick={() => setConfirmDelete(true)}
-            className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:text-slate-600 dark:hover:text-red-400 dark:hover:bg-red-500/10 transition-colors"
             title="Supprimer"
           >
             <Trash2 size={13} />
@@ -146,15 +146,15 @@ export default function Cameras() {
 
   return (
     <div className="max-w-7xl mx-auto w-full">
-      <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
+      <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] overflow-hidden">
 
         {/* ── Barre titre ──────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <Camera size={16} className="text-emerald-400" />
-            <h1 className="text-white font-semibold text-sm">Galerie</h1>
+            <Camera size={16} className="text-emerald-600 dark:text-emerald-400" />
+            <h1 className="text-slate-900 dark:text-white font-semibold text-sm">Galerie</h1>
             {media.items.length > 0 && (
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">
                 {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} · {totalVideos} vidéo{totalVideos !== 1 ? 's' : ''}
               </span>
             )}
@@ -162,7 +162,7 @@ export default function Cameras() {
           <button
             onClick={media.fetchMedia}
             disabled={media.isLoading || !connected}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-40 transition-colors px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <RefreshCw size={12} className={media.isLoading ? 'animate-spin' : ''} />
             Actualiser
@@ -171,11 +171,11 @@ export default function Cameras() {
 
         {/* ── Filtres (visibles seulement si des items existent) ───────────── */}
         {media.items.length > 0 && (
-          <div className="px-4 py-3 border-b border-slate-800 space-y-2.5">
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
 
             {/* Type */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500 w-14 flex-shrink-0">Type</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500 w-14 flex-shrink-0">Type</span>
               <div className="flex gap-1">
                 {TYPE_OPTIONS.map(o => {
                   const count = o.value === 'all' ? media.items.length
@@ -187,7 +187,7 @@ export default function Cameras() {
                       className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                         typeFilter === o.value
                           ? 'bg-slate-600 text-white'
-                          : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                          : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
                       {o.icon}
@@ -200,32 +200,30 @@ export default function Cameras() {
 
             {/* Date range */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500 w-14 flex-shrink-0">Date</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500 w-14 flex-shrink-0">Date</span>
               <div className="flex items-center gap-1.5">
                 <input
                   type="date"
                   value={dateFrom}
                   max={dateTo || todayStr()}
                   onChange={e => setDateFrom(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
-                  style={{ colorScheme: 'dark' }}
+                  className="bg-white border border-slate-300 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
                   placeholder="Du"
                 />
-                <span className="text-slate-600 text-xs">→</span>
+                <span className="text-slate-400 dark:text-slate-600 text-xs">→</span>
                 <input
                   type="date"
                   value={dateTo}
                   min={dateFrom || undefined}
                   max={todayStr()}
                   onChange={e => setDateTo(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
-                  style={{ colorScheme: 'dark' }}
+                  className="bg-white border border-slate-300 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors"
                   placeholder="Au"
                 />
                 {hasDateFilter && (
                   <button
                     onClick={() => { setDateFrom(''); setDateTo('') }}
-                    className="text-slate-500 hover:text-slate-300 transition-colors"
+                    className="text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
                     title="Effacer les dates"
                   >
                     <X size={13} />
@@ -236,9 +234,9 @@ export default function Cameras() {
 
             {/* Résumé de la sélection active */}
             {(hasDateFilter || typeFilter !== 'all') && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
                 {filtered.length} résultat{filtered.length !== 1 ? 's' : ''}
-                {typeFilter !== 'all' && <> · <span className="text-slate-300">{typeFilter === 'photo' ? 'photos' : 'vidéos'}</span></>}
+                {typeFilter !== 'all' && <> · <span className="text-slate-600 dark:text-slate-300">{typeFilter === 'photo' ? 'photos' : 'vidéos'}</span></>}
               </p>
             )}
           </div>
@@ -247,38 +245,38 @@ export default function Cameras() {
         {/* ── Contenu ──────────────────────────────────────────────────────── */}
         <div className="p-5">
           {media.error && (
-            <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
+            <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 dark:text-red-300 dark:bg-red-500/10 dark:border-red-500/20 rounded-lg px-3 py-2 mb-4">
               <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
               <span>{media.error}</span>
             </div>
           )}
 
           {!connected && (
-            <p className="text-center text-slate-600 text-sm py-12">
+            <p className="text-center text-slate-400 dark:text-slate-600 text-sm py-12">
               Connectez-vous au robot pour accéder à la galerie.
             </p>
           )}
 
           {connected && media.isLoading && media.items.length === 0 && (
             <div className="flex justify-center py-12">
-              <Loader2 size={24} className="text-slate-600 animate-spin" />
+              <Loader2 size={24} className="text-slate-400 dark:text-slate-600 animate-spin" />
             </div>
           )}
 
           {connected && !media.isLoading && media.items.length === 0 && !media.error && (
             <div className="text-center py-12 space-y-2">
-              <Camera size={32} className="mx-auto text-slate-700" />
-              <p className="text-slate-600 text-sm">Aucun média. Prenez des photos ou vidéos depuis les pages Pilotage ou Patrouille.</p>
+              <Camera size={32} className="mx-auto text-slate-300 dark:text-slate-700" />
+              <p className="text-slate-400 dark:text-slate-600 text-sm">Aucun média. Prenez des photos ou vidéos depuis les pages Pilotage ou Patrouille.</p>
             </div>
           )}
 
           {connected && media.items.length > 0 && filtered.length === 0 && (
             <div className="text-center py-12 space-y-2">
-              <Camera size={32} className="mx-auto text-slate-700" />
-              <p className="text-slate-600 text-sm">Aucun média pour cette sélection.</p>
+              <Camera size={32} className="mx-auto text-slate-300 dark:text-slate-700" />
+              <p className="text-slate-400 dark:text-slate-600 text-sm">Aucun média pour cette sélection.</p>
               <button
                 onClick={() => { setTypeFilter('all'); setDateFrom(''); setDateTo('') }}
-                className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
+                className="text-xs text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300 underline transition-colors"
               >
                 Réinitialiser les filtres
               </button>
@@ -290,7 +288,7 @@ export default function Cameras() {
               {/* Photos */}
               {(typeFilter === 'all' || typeFilter === 'photo') && photos.length > 0 && (
                 <div>
-                  <h2 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+                  <h2 className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3">
                     Photos ({photos.length})
                   </h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -304,7 +302,7 @@ export default function Cameras() {
               {/* Vidéos */}
               {(typeFilter === 'all' || typeFilter === 'video') && videos.length > 0 && (
                 <div>
-                  <h2 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+                  <h2 className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3">
                     Vidéos ({videos.length})
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -286,12 +286,12 @@ export default function MapView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center">
-            <Map size={18} className="text-purple-400" />
+          <div className="w-9 h-9 rounded-lg bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center">
+            <Map size={18} className="text-purple-600 dark:text-purple-400" />
           </div>
           <div>
-            <h1 className="text-white font-semibold text-lg">Carte SLAM</h1>
-            <p className="text-slate-500 text-xs">
+            <h1 className="text-slate-900 dark:text-white font-semibold text-lg">Carte SLAM</h1>
+            <p className="text-slate-400 dark:text-slate-500 text-xs">
               {mode === 'navigation' ? 'Nav2 + AMCL' : 'slam_toolbox online_async'} — ROS 2 Jazzy
             </p>
           </div>
@@ -303,7 +303,7 @@ export default function MapView() {
             <>
               <button
                 onClick={() => { void fetchMap() }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 dark:text-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
               >
                 <RefreshCw size={13} />
                 Actualiser
@@ -311,7 +311,7 @@ export default function MapView() {
               <button
                 onClick={handleSave}
                 disabled={saving || !mapData}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-600/20 hover:bg-emerald-600/40 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-700 bg-emerald-100 hover:bg-emerald-200 dark:text-emerald-300 dark:bg-emerald-600/20 dark:hover:bg-emerald-600/40 disabled:opacity-40 transition-colors"
               >
                 <Save size={13} />
                 {saving ? 'Sauvegarde…' : 'Sauvegarder'}
@@ -323,8 +323,8 @@ export default function MapView() {
             disabled={loading || !isOnline}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 ${
               slamRunning
-                ? 'text-red-300 bg-red-600/20 hover:bg-red-600/40'
-                : 'text-blue-300 bg-blue-600/20 hover:bg-blue-600/40'
+                ? 'text-red-700 bg-red-100 hover:bg-red-200 dark:text-red-300 dark:bg-red-600/20 dark:hover:bg-red-600/40'
+                : 'text-blue-700 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-600/20 dark:hover:bg-blue-600/40'
             }`}
           >
             {slamRunning ? <Square size={13} /> : <Play size={13} />}
@@ -337,43 +337,43 @@ export default function MapView() {
 
       {/* Error */}
       {error && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-500/10 dark:border-red-500/30 text-red-600 dark:text-red-400 text-sm">
           <AlertTriangle size={15} />
           {error}
         </div>
       )}
 
       {statusMessage && !error && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 text-sm">
           <AlertTriangle size={15} />
           {statusMessage}
         </div>
       )}
 
       {notice && (
-        <div className="fixed z-50 right-4 bottom-4 max-w-sm flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-sm shadow-2xl">
+        <div className="fixed z-50 right-4 bottom-4 max-w-sm flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-300 dark:bg-emerald-950 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-sm shadow-2xl">
           <CheckCircle size={17} className="shrink-0" />
           <span>{notice}</span>
-          <button onClick={() => setNotice(null)} className="ml-2 text-emerald-500 hover:text-emerald-200" aria-label="Fermer">×</button>
+          <button onClick={() => setNotice(null)} className="ml-2 text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-200" aria-label="Fermer">×</button>
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        <div className="flex items-center gap-2 mb-3 text-sm font-medium text-slate-200">
+      <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40 p-4">
+        <div className="flex items-center gap-2 mb-3 text-sm font-medium text-slate-700 dark:text-slate-200">
           <FolderOpen size={15} /> Cartes enregistrées
         </div>
         {savedMaps.length === 0 ? (
-          <p className="text-xs text-slate-500">Aucune carte persistante.</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Aucune carte persistante.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {savedMaps.map(saved => (
               <div key={saved.name} className="flex rounded-lg overflow-hidden">
                 <button onClick={() => { void handleLoadMap(saved.name) }} disabled={loading}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 disabled:opacity-40">
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-xs text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 disabled:opacity-40">
                   Charger {saved.name}
                 </button>
                 <button onClick={() => { void handleDeleteMap(saved.name) }} disabled={loading}
-                  className="px-3 bg-red-500/15 text-red-400 hover:bg-red-500/25 disabled:opacity-40"
+                  className="px-3 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25 disabled:opacity-40"
                   title={`Supprimer ${saved.name}`}>
                   <Trash2 size={13} />
                 </button>
@@ -386,24 +386,24 @@ export default function MapView() {
       <div className={slamRunning && mode === 'mapping' ? 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]' : ''}>
       {/* Map display */}
       <div
-        className="rounded-xl overflow-hidden flex items-center justify-center"
-        style={{ background: '#0f1629', border: '1px solid #1e293b', minHeight: '420px' }}
+        className="rounded-xl overflow-hidden flex items-center justify-center border border-slate-200 bg-white dark:border-[#1e293b] dark:bg-[#0f1629]"
+        style={{ minHeight: '420px' }}
       >
         {!isOnline ? (
-          <div className="text-center text-slate-500 space-y-2">
+          <div className="text-center text-slate-400 dark:text-slate-500 space-y-2">
             <Map size={40} className="mx-auto opacity-30" />
             <p className="text-sm">Robot non connecté</p>
           </div>
         ) : !slamRunning ? (
-          <div className="text-center text-slate-500 space-y-3">
+          <div className="text-center text-slate-400 dark:text-slate-500 space-y-3">
             <Map size={40} className="mx-auto opacity-30" />
             <p className="text-sm">Lance le SLAM pour démarrer la cartographie</p>
-            <p className="text-xs text-slate-600">
-              Nécessite le container <code className="text-slate-500">ros2-slam</code>
+            <p className="text-xs text-slate-400 dark:text-slate-600">
+              Nécessite le container <code className="text-slate-400 dark:text-slate-500">ros2-slam</code>
             </p>
           </div>
         ) : !mapData ? (
-          <div className="text-center text-slate-500 space-y-2">
+          <div className="text-center text-slate-400 dark:text-slate-500 space-y-2">
             <RefreshCw size={28} className="mx-auto animate-spin opacity-50" />
             <p className="text-sm">Attente de la première carte…</p>
           </div>
@@ -411,7 +411,7 @@ export default function MapView() {
           <div className="p-4 space-y-2 w-full">
             <div className="relative w-full max-w-2xl mx-auto">
               <img src={`data:image/png;base64,${mapData.image}`} alt="Carte SLAM"
-                className="block w-full rounded border border-slate-700" style={{ imageRendering: 'pixelated' }} />
+                className="block w-full rounded border border-slate-200 dark:border-slate-700" style={{ imageRendering: 'pixelated' }} />
               {pose && (() => {
                 const left = (pose.x - mapData.origin_x) / mapData.resolution_m / mapData.width * 100
                 const top = 100 - (pose.y - mapData.origin_y) / mapData.resolution_m / mapData.height * 100
@@ -429,7 +429,7 @@ export default function MapView() {
                 </div>
               })()}
             </div>
-            <div className="flex items-center justify-center gap-6 text-xs text-slate-500 mt-2">
+            <div className="flex items-center justify-center gap-6 text-xs text-slate-400 dark:text-slate-500 mt-2">
               <span>{mapData.width} × {mapData.height} px</span>
               <span>{(mapData.resolution_m * 100).toFixed(1)} cm/px</span>
               {lastUpdate && <span>Mis à jour {lastUpdate.toLocaleTimeString()}</span>}
@@ -441,20 +441,20 @@ export default function MapView() {
       </div>
 
       {mode === 'navigation' && (
-        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex flex-wrap items-center gap-3">
-          <Navigation size={17} className="text-blue-400" />
+        <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-500/20 dark:bg-blue-500/5 p-4 flex flex-wrap items-center gap-3">
+          <Navigation size={17} className="text-blue-600 dark:text-blue-400" />
           <div className="flex-1 min-w-48">
-            <p className="text-sm text-slate-200">Navigation Nav2 · {navState}</p>
-            <p className="text-xs text-slate-500">Un seul objectif : rejoindre la maison enregistrée.</p>
+            <p className="text-sm text-slate-700 dark:text-slate-200">Navigation Nav2 · {navState}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">Un seul objectif : rejoindre la maison enregistrée.</p>
           </div>
           <button onClick={() => { void handleSetHome() }} disabled={savingHome || !pose}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 text-xs text-amber-300 disabled:opacity-40">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-100 text-xs text-amber-700 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25 disabled:opacity-40">
             <House size={14} />
             {savingHome ? 'Enregistrement…' : home ? 'Redéfinir la maison' : 'Définir comme maison'}
           </button>
           {navState === 'running' || navState === 'starting' ? (
             <button onClick={() => { void handleStopHome() }} disabled={homeBusy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600/30 text-xs text-red-300 disabled:opacity-40">
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-100 text-xs text-red-700 hover:bg-red-200 dark:bg-red-600/30 dark:text-red-300 disabled:opacity-40">
               <Square size={14} /> Arrêter le retour
             </button>
           ) : (
@@ -467,13 +467,13 @@ export default function MapView() {
       )}
 
       {/* Legend */}
-      <div className="flex items-center gap-6 text-xs text-slate-500">
+      <div className="flex items-center gap-6 text-xs text-slate-400 dark:text-slate-500">
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-white" />
+          <div className="w-3 h-3 rounded-sm bg-white border border-slate-300 dark:border-transparent" />
           <span>Libre</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-black border border-slate-700" />
+          <div className="w-3 h-3 rounded-sm bg-black border border-slate-300 dark:border-slate-700" />
           <span>Occupé</span>
         </div>
         <div className="flex items-center gap-1.5">

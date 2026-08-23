@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Bot, Radar, Play, Square,
-  ChevronDown, ChevronUp, AlertTriangle, Eye, Camera, CameraOff,
-  RotateCcw, Save,
+  AlertTriangle, Eye, Camera, CameraOff,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotStreamUrl } from '../lib/robotTransport'
@@ -13,29 +12,20 @@ import LidarRadar360 from '../components/LidarRadar360'
 // ---------------------------------------------------------------------------
 
 const STATE_LABEL: Record<string, { text: string; color: string; pulse: boolean }> = {
-  idle:     { text: 'En attente',         color: 'text-slate-400',   pulse: false },
-  scanning: { text: 'Scan LIDAR',         color: 'text-cyan-400',    pulse: true  },
-  forward:  { text: 'En déplacement',     color: 'text-emerald-400', pulse: true  },
-  avoiding: { text: 'Évitement…',         color: 'text-amber-400',   pulse: true  },
-  turning_left:  { text: 'Rotation gauche', color: 'text-amber-400', pulse: true  },
-  turning_right: { text: 'Rotation droite', color: 'text-amber-400', pulse: true  },
-  backing_up: { text: 'Recul sécurisé',   color: 'text-orange-400',  pulse: true  },
-  stopped:  { text: 'Stop sécurité',      color: 'text-red-400',     pulse: true  },
-  stuck:    { text: 'Coincé — recul…',    color: 'text-orange-400',  pulse: true  },
+  idle:     { text: 'En attente',         color: 'text-slate-400 dark:text-slate-400',   pulse: false },
+  scanning: { text: 'Scan LIDAR',         color: 'text-cyan-600 dark:text-cyan-400',    pulse: true  },
+  forward:  { text: 'En déplacement',     color: 'text-emerald-600 dark:text-emerald-400', pulse: true  },
+  avoiding: { text: 'Évitement…',         color: 'text-amber-600 dark:text-amber-400',   pulse: true  },
+  turning_left:  { text: 'Rotation gauche', color: 'text-amber-600 dark:text-amber-400', pulse: true  },
+  turning_right: { text: 'Rotation droite', color: 'text-amber-600 dark:text-amber-400', pulse: true  },
+  backing_up: { text: 'Recul sécurisé',   color: 'text-orange-600 dark:text-orange-400',  pulse: true  },
+  stopped:  { text: 'Stop sécurité',      color: 'text-red-600 dark:text-red-400',     pulse: true  },
+  stuck:    { text: 'Coincé — recul…',    color: 'text-orange-600 dark:text-orange-400',  pulse: true  },
 }
-
-const LIDAR_ZONE_LABEL: Record<string, string> = {
-  front: 'Avant',
-  right: 'Droite',
-  rear: 'Arrière',
-  left: 'Gauche',
-}
-
-const LIDAR_ZONE_ORDER = ['front', 'right', 'rear', 'left'] as const
 
 function DistanceBar({ cm, label }: { cm: number | null | undefined; label: string }) {
   const pct = cm != null ? Math.max(0, Math.min(100, (cm / 300) * 100)) : 0
-  const color = cm == null ? 'bg-slate-700'
+  const color = cm == null ? 'bg-slate-400 dark:bg-slate-700'
     : cm < 20 ? 'bg-red-500'
     : cm < 50 ? 'bg-amber-500'
     : 'bg-emerald-500'
@@ -43,12 +33,12 @@ function DistanceBar({ cm, label }: { cm: number | null | undefined; label: stri
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
-        <span className="text-slate-400">{label}</span>
-        <span className={`font-mono font-medium ${cm == null ? 'text-slate-600' : cm < 20 ? 'text-red-400' : cm < 50 ? 'text-amber-400' : 'text-emerald-400'}`}>
+        <span className="text-slate-400 dark:text-slate-400">{label}</span>
+        <span className={`font-mono font-medium ${cm == null ? 'text-slate-400 dark:text-slate-600' : cm < 20 ? 'text-red-600 dark:text-red-400' : cm < 50 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
           {cm != null ? `${cm.toFixed(0)} cm` : '—'}
         </span>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
         <div className={`h-full rounded-full transition-all duration-300 ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -65,7 +55,6 @@ export default function Patrols() {
   const [streamUnavailable, setStreamUnavailable] = useState(false)
   const [streamKey, setStreamKey] = useState(0)
   const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [showSettings, setShowSettings] = useState(false)
 
   const patrolActive      = conn.lastStatus?.patrol_active ?? false
   const patrolState       = conn.lastStatus?.patrol_state ?? 'idle'
@@ -80,19 +69,6 @@ export default function Patrols() {
   const visionConfidence  = conn.lastStatus?.vision_confidence ?? 0
   const visionAvailable   = conn.lastStatus?.vision_available ?? false
   const visionMethod      = conn.lastStatus?.vision_method ?? 'none'
-  const lidarOffset       = conn.lastStatus?.lidar_angle_offset_deg
-  const lidarInverted     = conn.lastStatus?.lidar_invert_angles ?? false
-  const lidarDebugPoints  = conn.lastStatus?.lidar_debug_points ?? []
-  const lidarZones        = conn.lastStatus?.lidar_calibration?.zones ?? {
-    front: conn.lastStatus?.lidar_front_cm,
-    right: conn.lastStatus?.lidar_right_cm,
-    rear: conn.lastStatus?.lidar_rear_cm,
-    left: conn.lastStatus?.lidar_left_cm,
-  }
-  const nearestLidarZone  = LIDAR_ZONE_ORDER
-    .map(zone => ({ zone, cm: lidarZones?.[zone] }))
-    .filter((entry): entry is { zone: typeof LIDAR_ZONE_ORDER[number]; cm: number } => typeof entry.cm === 'number')
-    .sort((a, b) => a.cm - b.cm)[0]
   const stateInfo         = STATE_LABEL[patrolState] ?? STATE_LABEL.idle
   const isConnected       = conn.status === 'connected'
 
@@ -101,15 +77,6 @@ export default function Patrols() {
     setStreamKey(k => k + 1)
     if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
   }, [conn.robotIp, conn.status])
-
-  useEffect(() => {
-    if (!showSettings || !isConnected) return
-    void conn.refreshLidarCalibration()
-    const id = setInterval(() => {
-      void conn.refreshLidarCalibration()
-    }, 1000)
-    return () => clearInterval(id)
-  }, [conn.refreshLidarCalibration, isConnected, showSettings])
 
   return (
     <div className="-m-3 sm:-m-4 lg:-m-6 flex flex-col min-h-full" style={{ background: '#070d1a' }}>
@@ -231,32 +198,32 @@ export default function Patrols() {
         </div>
 
         {/* ── Contrôles droite (colonne fixe, scrollable) ── */}
-        <div className="w-full xl:w-96 flex-shrink-0 overflow-y-auto" style={{ background: '#0a0f1e' }}>
+        <div className="w-full xl:w-96 flex-shrink-0 overflow-y-auto bg-white dark:bg-[#0a0f1e]">
           <div className="px-5 py-5 space-y-4">
 
             {/* Patrol controls */}
-            <div className="rounded-xl border border-slate-800 p-5" style={{ background: '#0f1629' }}>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#0f1629] p-5">
               <div className="flex items-center gap-2 mb-4">
-                <Bot size={16} className="text-blue-400" />
-                <h2 className="text-white font-semibold text-sm">Contrôle patrouille</h2>
+                <Bot size={16} className="text-blue-600 dark:text-blue-400" />
+                <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Contrôle patrouille</h2>
               </div>
 
               {/* State */}
-              <div className="flex items-center justify-between mb-5 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700">
-                <span className="text-xs text-slate-400">État</span>
+              <div className="flex items-center justify-between mb-5 px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 dark:bg-slate-800/50 dark:border-slate-700">
+                <span className="text-xs text-slate-500 dark:text-slate-400">État</span>
                 <div className="flex items-center gap-2">
                   {stateInfo.pulse && <div className={`w-2 h-2 rounded-full animate-pulse ${patrolState === 'avoiding' ? 'bg-amber-400' : 'bg-emerald-400'}`} />}
                   <span className={`text-sm font-bold ${stateInfo.color}`}>{stateInfo.text}</span>
                 </div>
               </div>
               {(patrolDecision || patrolReason) && (
-                <div className="mb-5 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2">
                   <div className="flex justify-between gap-3 text-xs">
-                    <span className="text-slate-500">Décision</span>
-                    <span className="font-mono text-cyan-300">{patrolDecision ?? '--'}</span>
+                    <span className="text-slate-400 dark:text-slate-500">Décision</span>
+                    <span className="font-mono text-cyan-700 dark:text-cyan-300">{patrolDecision ?? '--'}</span>
                   </div>
                   {patrolReason && (
-                    <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{patrolReason}</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{patrolReason}</p>
                   )}
                 </div>
               )}
@@ -267,10 +234,10 @@ export default function Patrols() {
                 disabled={!isConnected}
                 className={`w-full py-4 rounded-xl border-2 font-bold text-base flex items-center justify-center gap-3 transition-all active:scale-95 ${
                   !isConnected
-                    ? 'bg-slate-800/40 text-slate-600 border-slate-800 cursor-not-allowed'
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed dark:bg-slate-800/40 dark:text-slate-600 dark:border-slate-800'
                     : patrolActive
-                      ? 'bg-red-600/15 text-red-400 border-red-600/50 hover:bg-red-600 hover:text-white hover:border-red-600'
-                      : 'bg-blue-600/15 text-blue-400 border-blue-600/50 hover:bg-blue-600 hover:text-white hover:border-blue-600'
+                      ? 'bg-red-50 text-red-600 border-red-300 hover:bg-red-600 hover:text-white hover:border-red-600 dark:bg-red-600/15 dark:text-red-400 dark:border-red-600/50'
+                      : 'bg-blue-50 text-blue-600 border-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-600 dark:bg-blue-600/15 dark:text-blue-400 dark:border-blue-600/50'
                 }`}
               >
                 {patrolActive ? <Square size={20} /> : <Play size={20} />}
@@ -278,139 +245,30 @@ export default function Patrols() {
               </button>
 
               {!isConnected && (
-                <p className="mt-3 text-xs text-slate-500 text-center">Connectez-vous au robot pour démarrer</p>
-              )}
-
-              {/* Settings toggle */}
-              <button
-                onClick={() => setShowSettings(v => !v)}
-                className="w-full mt-4 flex items-center justify-between text-xs text-slate-500 hover:text-slate-300 transition-colors px-1"
-              >
-                <span>Paramètres avancés</span>
-                {showSettings ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-
-              {showSettings && (
-                <div className="mt-3 space-y-4 text-xs text-slate-400 border border-slate-800 rounded-lg px-4 py-3">
-                  <p className="text-slate-500">Ces paramètres se configurent dans <code className="text-blue-400">config.yaml</code> sur le Pi :</p>
-                  <pre className="text-slate-400 bg-slate-900 rounded p-2 text-[11px] leading-relaxed">{`patrol:
-  speed: 0.3                # 0-1
-  obstacle_cm: 40           # cm (ultrason)
-  step_duration: 0.7        # s par étape
-  stuck_timeout: 3.5        # s avant recul
-  scan_with_pantilt: false  # sweep caméra L/C/D`}</pre>
-
-                  <div className="border-t border-slate-800 pt-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-slate-300 font-medium">Calibration LIDAR</span>
-                      <span className="font-mono text-cyan-300">
-                        {lidarOffset != null ? `${lidarOffset.toFixed(0)}°` : '--'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      <button
-                        onClick={() => conn.adjustLidarOffset(-15)}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        -15°
-                      </button>
-                      <button
-                        onClick={() => conn.adjustLidarOffset(-5)}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        -5°
-                      </button>
-                      <button
-                        onClick={() => conn.adjustLidarOffset(5)}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        +5°
-                      </button>
-                      <button
-                        onClick={() => conn.adjustLidarOffset(15)}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        +15°
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 mt-2">
-                      <button
-                        onClick={() => conn.toggleLidarInversion()}
-                        disabled={!isConnected}
-                        className={`h-9 rounded-lg border flex items-center justify-center gap-1.5 text-xs disabled:opacity-40 ${
-                          lidarInverted
-                            ? 'bg-amber-600/20 border-amber-500/50 text-amber-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-                        }`}
-                      >
-                        <RotateCcw size={13} />
-                        Sens
-                      </button>
-                      <button
-                        onClick={() => conn.setLidarCalibration({
-                          angle_offset_deg: lidarOffset ?? 0,
-                          invert_angles: lidarInverted,
-                          save: true,
-                        })}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-emerald-600/15 border border-emerald-500/40 text-emerald-300 flex items-center justify-center gap-1.5 text-xs hover:bg-emerald-600/25 disabled:opacity-40"
-                      >
-                        <Save size={13} />
-                        Sauver
-                      </button>
-                      <button
-                        onClick={() => conn.setLidarCalibration({
-                          angle_offset_deg: 0,
-                          invert_angles: false,
-                          save: true,
-                        })}
-                        disabled={!isConnected}
-                        className="h-9 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        Reset
-                      </button>
-                    </div>
-                    <div className="mt-2 flex justify-between text-[11px] text-slate-500">
-                      <span>Sens</span>
-                      <span>{lidarInverted ? 'inversé' : 'normal'}</span>
-                    </div>
-                    <div className="mt-1 flex justify-between text-[11px] text-slate-500">
-                      <span>Obstacle le plus proche</span>
-                      <span>
-                        {nearestLidarZone
-                          ? `${LIDAR_ZONE_LABEL[nearestLidarZone.zone]} ${nearestLidarZone.cm.toFixed(0)} cm`
-                          : '--'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <p className="mt-3 text-xs text-slate-400 dark:text-slate-500 text-center">Connectez-vous au robot pour démarrer</p>
               )}
             </div>
 
             {/* Sensors */}
-            <div className="rounded-xl border border-slate-800 p-5" style={{ background: '#0f1629' }}>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#0f1629] p-5">
               <div className="flex items-center gap-2 mb-4">
-                <Radar size={16} className="text-blue-400" />
-                <h2 className="text-white font-semibold text-sm">Détection d'obstacles</h2>
+                <Radar size={16} className="text-blue-600 dark:text-blue-400" />
+                <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Détection d'obstacles</h2>
               </div>
 
               {conn.lastStatus?.sensor_error ? (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/40 border border-red-800/40 mb-4">
-                  <AlertTriangle size={14} className="text-red-400 flex-shrink-0" />
-                  <span className="text-xs text-red-400">{conn.lastStatus.sensor_error}</span>
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/40 dark:border-red-800/40 mb-4">
+                  <AlertTriangle size={14} className="text-red-600 dark:text-red-400 flex-shrink-0" />
+                  <span className="text-xs text-red-600 dark:text-red-400">{conn.lastStatus.sensor_error}</span>
                 </div>
               ) : !isConnected ? (
-                <p className="text-xs text-slate-600 mb-4">Données indisponibles</p>
+                <p className="text-xs text-slate-400 dark:text-slate-600 mb-4">Données indisponibles</p>
               ) : null}
 
               {/* Ultrason */}
               <div className="flex items-center gap-1.5 mb-2">
-                <Radar size={11} className="text-slate-500" />
-                <span className="text-xs text-slate-500 uppercase tracking-wide">Ultrason</span>
+                <Radar size={11} className="text-slate-400 dark:text-slate-500" />
+                <span className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide">Ultrason</span>
               </div>
               <div className="space-y-3 mb-4">
                 <DistanceBar cm={conn.lastStatus?.front_cm} label="Avant" />
@@ -419,9 +277,9 @@ export default function Patrols() {
 
               {/* LIDAR 360° radar */}
               <div className="flex items-center gap-1.5 mb-2">
-                <Radar size={11} className={conn.lastScan?.connected ? 'text-cyan-400' : 'text-slate-500'} />
-                <span className="text-xs text-slate-500 uppercase tracking-wide">LIDAR 360°</span>
-                <span className={`ml-auto text-[10px] font-mono ${conn.lastScan?.connected ? 'text-cyan-400' : 'text-slate-600'}`}>
+                <Radar size={11} className={conn.lastScan?.connected ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-400 dark:text-slate-500'} />
+                <span className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide">LIDAR 360°</span>
+                <span className={`ml-auto text-[10px] font-mono ${conn.lastScan?.connected ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-400 dark:text-slate-600'}`}>
                   {conn.lastScan?.connected ? `${conn.lastScan.points.length} pts` : 'hors ligne'}
                 </span>
               </div>
@@ -437,8 +295,8 @@ export default function Patrols() {
 
               {/* LIDAR robot frame */}
               <div className="flex items-center gap-1.5 mb-2">
-                <Radar size={11} className="text-slate-500" />
-                <span className="text-xs text-slate-500 uppercase tracking-wide">LIDAR — repère robot</span>
+                <Radar size={11} className="text-slate-400 dark:text-slate-500" />
+                <span className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide">LIDAR — repère robot</span>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <DistanceBar cm={conn.lastStatus?.lidar_front_cm} label="Avant" />
@@ -446,53 +304,30 @@ export default function Patrols() {
                 <DistanceBar cm={conn.lastStatus?.lidar_rear_cm} label="Arrière" />
                 <DistanceBar cm={conn.lastStatus?.lidar_left_cm} label="Gauche" />
               </div>
-              {showSettings && lidarDebugPoints.length > 0 && (
-                <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-                  <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
-                    <span>Brut</span>
-                    <span>Corr.</span>
-                    <span>Zone</span>
-                    <span className="text-right">cm</span>
-                  </div>
-                  <div className="max-h-36 overflow-y-auto">
-                    {lidarDebugPoints.slice(0, 12).map((p, idx) => (
-                      <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
-                        <span>{p.raw_angle.toFixed(0)}°</span>
-                        <span>{p.corrected_angle.toFixed(0)}°</span>
-                        <span className={p.zone === 'front' ? 'text-red-300' : p.zone === 'right' ? 'text-cyan-300' : p.zone === 'left' ? 'text-blue-300' : 'text-slate-500'}>
-                          {LIDAR_ZONE_LABEL[p.zone] ?? p.zone}
-                        </span>
-                        <span className="text-right">{p.distance_cm.toFixed(0)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Vision 3 zones */}
               <div className="flex items-center gap-1.5 mb-2">
-                <Eye size={11} className="text-slate-500" />
-                <span className="text-xs text-slate-500 uppercase tracking-wide">Caméra — zones L/C/D</span>
+                <Eye size={11} className="text-slate-400 dark:text-slate-500" />
+                <span className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide">Caméra — zones L/C/D</span>
                 {isConnected && !visionAvailable && (
-                  <span className="ml-auto text-xs text-amber-500/70">OpenCV absent</span>
+                  <span className="ml-auto text-xs text-amber-600 dark:text-amber-500/70">OpenCV absent</span>
                 )}
               </div>
               <div className="grid grid-cols-3 gap-1.5 mb-3">
                 {([['G', visionLeft], ['C', visionCenter], ['D', visionRight]] as [string, boolean][]).map(([label, obs]) => (
                   <div key={label} className={`flex flex-col items-center py-2 rounded-lg border text-xs font-bold transition-colors ${
                     obs
-                      ? 'bg-red-950/60 border-red-700/50 text-red-400 animate-pulse'
+                      ? 'bg-red-50 border-red-300 text-red-600 animate-pulse dark:bg-red-950/60 dark:border-red-700/50 dark:text-red-400'
                       : visionAvailable
-                        ? 'bg-slate-800/40 border-slate-700 text-slate-500'
-                        : 'bg-slate-800/20 border-slate-800 text-slate-700'
+                        ? 'bg-slate-100 border-slate-200 text-slate-500 dark:bg-slate-800/40 dark:border-slate-700 dark:text-slate-500'
+                        : 'bg-slate-50 border-slate-100 text-slate-300 dark:bg-slate-800/20 dark:border-slate-800 dark:text-slate-700'
                   }`}>
-                    <span className="text-[10px] text-slate-500 mb-0.5">{label === 'G' ? 'Gauche' : label === 'C' ? 'Centre' : 'Droite'}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">{label === 'G' ? 'Gauche' : label === 'C' ? 'Centre' : 'Droite'}</span>
                     <span>{obs ? '⚠' : '✓'}</span>
                   </div>
                 ))}
               </div>
               {visionAvailable && visionObstacle && (
-                <div className="text-[10px] text-slate-500 text-right mb-3 font-mono">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 text-right mb-3 font-mono">
                   {visionMethod === 'uniform' ? 'surface lisse' : 'contours'} · {Math.round(visionConfidence * 100)}%
                 </div>
               )}
@@ -501,8 +336,8 @@ export default function Patrols() {
               {conn.lastStatus && (
                 <div className={`px-3 py-2 rounded-lg text-center text-xs font-bold transition-colors ${
                   conn.lastStatus.obstacle
-                    ? 'bg-red-950/60 border border-red-700/50 text-red-400 animate-pulse'
-                    : 'bg-slate-800/40 border border-slate-700 text-slate-500'
+                    ? 'bg-red-50 border border-red-300 text-red-600 animate-pulse dark:bg-red-950/60 dark:border-red-700/50 dark:text-red-400'
+                    : 'bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800/40 dark:border-slate-700 dark:text-slate-500'
                 }`}>
                   {conn.lastStatus.obstacle ? '⚠ OBSTACLE DÉTECTÉ' : 'Voie libre'}
                 </div>

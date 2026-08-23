@@ -15,19 +15,18 @@ export default function VideoFeedCard() {
 
   return (
     <div
-      className="rounded-xl border border-slate-800 overflow-hidden"
-      style={{ background: '#0f1629' }}
+      className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] overflow-hidden"
     >
-      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
-        <h2 className="text-white font-semibold text-sm">Flux vidéo en direct</h2>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800">
+        <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Flux vidéo en direct</h2>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <div className={`w-2 h-2 rounded-full ${conn.status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
-            <span className={`text-xs font-medium ${conn.status === 'connected' ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <div className={`w-2 h-2 rounded-full ${conn.status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-slate-500'}`} />
+            <span className={`text-xs font-medium ${conn.status === 'connected' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
               {conn.status === 'connected' ? 'En direct' : 'Hors ligne'}
             </span>
           </div>
-          <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+          <button className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors">
             <Maximize2 size={15} />
           </button>
         </div>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Route, AlertTriangle, Car,
-  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map, Network,
+  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -18,7 +18,6 @@ const navItems = [
   { to: '/robots', icon: Bot, label: 'Robots', highlight: false },
   { to: '/sites', icon: MapPin, label: 'Sites', highlight: false },
   { to: '/reports', icon: FileText, label: 'Rapports', highlight: false },
-  { to: '/network', icon: Network, label: 'Wi-Fi', highlight: false },
   { to: '/settings', icon: Settings, label: 'Paramètres', highlight: false },
 ]
 
@@ -44,13 +43,12 @@ export default function Sidebar({
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] flex flex-col transform transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:max-w-none lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] flex flex-col transform transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:max-w-none lg:translate-x-0 border-r border-slate-200 dark:border-[#1e293b] bg-white dark:bg-[#0a0f1e] ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
-        style={{ background: '#0a0f1e', borderRight: '1px solid #1e293b' }}
       >
-        <div className="flex items-center gap-3 px-5 py-4 md:px-6 md:py-5 border-b border-slate-800">
-          <div className="w-9 h-9 rounded-lg overflow-hidden bg-slate-900/80 ring-1 ring-slate-700/80 flex items-center justify-center flex-shrink-0">
+        <div className="flex items-center gap-3 px-5 py-4 md:px-6 md:py-5 border-b border-slate-200 dark:border-slate-800">
+          <div className="w-9 h-9 rounded-lg overflow-hidden bg-slate-100 ring-1 ring-slate-200 dark:bg-slate-900/80 dark:ring-slate-700/80 flex items-center justify-center flex-shrink-0">
             <img
               src="/assets/icons/android-chrome-192x192.png"
               alt="SENTRYX"
@@ -58,12 +56,12 @@ export default function Sidebar({
             />
           </div>
           <div className="min-w-0">
-            <span className="text-white font-bold text-lg tracking-widest">SENTRYX</span>
+            <span className="text-slate-900 dark:text-white font-bold text-lg tracking-widest">SENTRYX</span>
             <div className="text-slate-500 text-xs">Security Platform</div>
           </div>
           <button
             onClick={onClose}
-            className="ml-auto p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 md:hidden"
+            className="ml-auto p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 md:hidden"
           >
             <X size={18} />
           </button>
@@ -78,10 +76,10 @@ export default function Sidebar({
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                   isActive
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-600/30'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-600/20 dark:text-blue-400 dark:border-blue-600/30'
                     : highlight
-                      ? 'text-blue-300 hover:text-white hover:bg-blue-600/20 border border-blue-600/20'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                      ? 'text-blue-700 hover:text-blue-900 hover:bg-blue-50 border border-blue-100 dark:text-blue-300 dark:hover:text-white dark:hover:bg-blue-600/20 dark:border-blue-600/20'
+                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/50'
                 }`
               }
             >
@@ -91,38 +89,35 @@ export default function Sidebar({
           ))}
         </nav>
 
-        <div className="px-4 py-4 border-t border-slate-800 space-y-3">
-          <div
-            className="rounded-lg p-3"
-            style={{ background: '#0f1629', border: '1px solid #1e293b' }}
-          >
+        <div className="px-4 py-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="rounded-lg p-3 border border-slate-200 bg-slate-50 dark:border-[#1e293b] dark:bg-[#0f1629]">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-slate-400 font-medium">Robot actif</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Robot actif</span>
               <div className="flex items-center gap-1">
-                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
-                <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-slate-600'}`} />
+                <span className={`text-xs ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>
                   {isOnline ? 'En ligne' : 'Hors ligne'}
                 </span>
               </div>
             </div>
-            <div className="text-white text-sm font-semibold mb-1">{robot.name}</div>
+            <div className="text-slate-900 dark:text-white text-sm font-semibold mb-1">{robot.name}</div>
             <div className="text-slate-500 text-xs mb-2">ID : {robot.id}</div>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Battery size={13} className={battery != null && battery < 20 ? 'text-red-400' : battery != null && battery < 40 ? 'text-amber-400' : 'text-emerald-400'} />
-              <div className="flex-1 bg-slate-700 rounded-full h-1.5">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <Battery size={13} className={battery != null && battery < 20 ? 'text-red-600 dark:text-red-400' : battery != null && battery < 40 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'} />
+              <div className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5">
                 <div
                   className={`h-1.5 rounded-full transition-all ${battery != null && battery < 20 ? 'bg-red-500' : battery != null && battery < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                   style={{ width: `${battery ?? 0}%` }}
                 />
               </div>
-              <span className={`font-medium ${battery != null && battery < 20 ? 'text-red-400' : battery != null && battery < 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
+              <span className={`font-medium ${battery != null && battery < 20 ? 'text-red-600 dark:text-red-400' : battery != null && battery < 40 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                 {battery != null ? `${battery}%` : '—'}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-400">
-              <Wifi size={12} className="text-blue-400" />
+            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <Wifi size={12} className="text-blue-600 dark:text-blue-400" />
               <span>
-                Connectivité : <span className="text-blue-400">Excellente</span>
+                Connectivité : <span className="text-blue-600 dark:text-blue-400">Excellente</span>
               </span>
             </div>
           </div>
@@ -132,7 +127,7 @@ export default function Sidebar({
             className={`w-full py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all duration-150 ${
               emergencyActive
                 ? 'bg-red-700 text-white shadow-lg shadow-red-900/50'
-                : 'bg-red-600/20 text-red-400 border border-red-600/40 hover:bg-red-600 hover:text-white hover:shadow-lg hover:shadow-red-900/40'
+                : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-600 hover:text-white hover:shadow-lg hover:shadow-red-900/40 dark:bg-red-600/20 dark:text-red-400 dark:border-red-600/40'
             }`}
           >
             <AlertOctagon size={16} />

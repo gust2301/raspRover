@@ -50,25 +50,25 @@ export default function MapCard() {
   }, [slamRunning, isOnline, fetchMap])
 
   return (
-    <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
+    <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
-          <Map size={15} className={slamRunning ? 'text-purple-400' : 'text-slate-500'} />
-          <h2 className="text-white font-semibold text-sm">Carte SLAM</h2>
+          <Map size={15} className={slamRunning ? 'text-purple-600 dark:text-purple-400' : 'text-slate-400 dark:text-slate-500'} />
+          <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Carte SLAM</h2>
           {slamRunning && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-mono">EN COURS</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400 font-mono">EN COURS</span>
           )}
         </div>
         <button
           onClick={() => navigate('/map')}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors"
           title="Ouvrir la carte complète"
         >
           <Maximize2 size={15} />
         </button>
       </div>
 
-      <div className="relative h-52 flex items-center justify-center" style={{ background: '#070d1a' }}>
+      <div className="relative h-52 flex items-center justify-center bg-[#070d1a]">
         {!isOnline ? (
           <div className="text-center text-slate-600 space-y-1">
             <Map size={28} className="mx-auto opacity-30" />

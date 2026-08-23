@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { RotateCcw, Save, Settings as SettingsIcon, SlidersHorizontal, WifiOff, Crosshair } from 'lucide-react'
+import { RotateCcw, Save, Settings as SettingsIcon, SlidersHorizontal, WifiOff, Crosshair, Sun, Moon } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
+import { useTheme } from '../context/ThemeContext'
 import { getRobotApiUrl } from '../lib/robotTransport'
+import NetworkSettings from '../components/NetworkSettings'
 
 const ZONE_LABEL: Record<string, string> = {
   front: 'Avant',
@@ -15,12 +17,49 @@ const ZONES = ['front', 'right', 'rear', 'left'] as const
 function ZoneDistance({ label, cm }: { label: string; cm: number | null | undefined }) {
   const active = typeof cm === 'number'
   return (
-    <div className={`rounded-lg border px-3 py-2 ${active ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-slate-800 bg-slate-900/40'}`}>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 font-mono text-sm ${active ? 'text-cyan-300' : 'text-slate-600'}`}>
+    <div className={`rounded-lg border px-3 py-2 ${active ? 'border-cyan-200 bg-cyan-50 dark:border-cyan-500/30 dark:bg-cyan-500/5' : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40'}`}>
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
+      <div className={`mt-1 font-mono text-sm ${active ? 'text-cyan-700 dark:text-cyan-300' : 'text-slate-400 dark:text-slate-600'}`}>
         {active ? `${cm.toFixed(0)} cm` : '--'}
       </div>
     </div>
+  )
+}
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme()
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Sun size={17} className="text-blue-600 dark:text-blue-400" />
+        <h2 className="text-slate-900 dark:text-white font-semibold">Apparence</h2>
+      </div>
+      <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setTheme('light')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            theme === 'light'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+        >
+          <Sun size={15} />
+          Clair
+        </button>
+        <button
+          onClick={() => setTheme('dark')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            theme === 'dark'
+              ? 'bg-slate-950 text-white shadow-sm'
+              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+        >
+          <Moon size={15} />
+          Sombre
+        </button>
+      </div>
+      <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">Le thème choisi est mémorisé sur cet appareil.</p>
+    </section>
   )
 }
 
@@ -79,28 +118,34 @@ export default function Settings() {
   return (
     <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-          <SettingsIcon size={22} className="text-blue-300" />
+        <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/20 flex items-center justify-center">
+          <SettingsIcon size={22} className="text-blue-600 dark:text-blue-300" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-white">Paramètres</h1>
-          <p className="text-sm text-slate-500">Calibration et réglages runtime du robot.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Paramètres</h1>
+          <p className="text-sm text-slate-400 dark:text-slate-500">Calibration et réglages runtime du robot.</p>
         </div>
       </div>
 
-      <section className="rounded-xl border border-slate-800 bg-[#0f1629] p-5">
+      <AppearanceSection />
+
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5">
+        <NetworkSettings />
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5">
         <div className="flex items-center justify-between gap-3 mb-5">
           <div className="flex items-center gap-2">
-            <SlidersHorizontal size={17} className="text-cyan-300" />
-            <h2 className="text-white font-semibold">Calibration LIDAR</h2>
+            <SlidersHorizontal size={17} className="text-cyan-600 dark:text-cyan-300" />
+            <h2 className="text-slate-900 dark:text-white font-semibold">Calibration LIDAR</h2>
           </div>
-          <div className={`text-xs font-mono ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+          <div className={`text-xs font-mono ${connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
             {connected ? 'ONLINE' : 'OFFLINE'}
           </div>
         </div>
 
         {!connected && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
             <WifiOff size={14} />
             Connecte-toi au robot pour modifier la calibration en temps réel.
           </div>
@@ -110,31 +155,31 @@ export default function Settings() {
           <div className="space-y-4">
 
             {/* Auto-calibrage */}
-            <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 space-y-2">
-              <div className="text-xs text-blue-300 font-medium">Calibrage automatique</div>
-              <p className="text-[11px] text-slate-400">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/5 px-4 py-3 space-y-2">
+              <div className="text-xs text-blue-700 dark:text-blue-300 font-medium">Calibrage automatique</div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Placez le robot à ~50 cm face à un obstacle, puis cliquez.
                 L'avant du robot sera aligné sur l'obstacle détecté.
               </p>
               <button
                 onClick={handleAutoCalibrate}
                 disabled={!connected || autoCalibrating}
-                className="w-full h-10 rounded-lg border border-blue-500/50 bg-blue-600/20 text-sm text-blue-300 flex items-center justify-center gap-2 hover:bg-blue-600/30 disabled:opacity-40"
+                className="w-full h-10 rounded-lg border border-blue-300 bg-blue-100 text-sm text-blue-700 hover:bg-blue-200 dark:border-blue-500/50 dark:bg-blue-600/20 dark:text-blue-300 dark:hover:bg-blue-600/30 flex items-center justify-center gap-2 disabled:opacity-40"
               >
                 <Crosshair size={15} />
                 {autoCalibrating ? 'Calibrage…' : 'Calibrer l\'avant automatiquement'}
               </button>
               {autoCalibMsg && (
-                <div className={`text-[11px] font-mono ${autoCalibMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>
+                <div className={`text-[11px] font-mono ${autoCalibMsg.startsWith('✓') ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                   {autoCalibMsg}
                 </div>
               )}
             </div>
 
             {/* Réglage manuel */}
-            <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wide text-slate-500">Offset actuel</span>
-              <span className="text-xl font-bold font-mono text-cyan-300">{offset.toFixed(0)}°</span>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2 flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Offset actuel</span>
+              <span className="text-xl font-bold font-mono text-cyan-700 dark:text-cyan-300">{offset.toFixed(0)}°</span>
             </div>
 
             <div className="grid grid-cols-4 gap-2">
@@ -143,7 +188,7 @@ export default function Settings() {
                   key={delta}
                   onClick={() => conn.adjustLidarOffset(delta)}
                   disabled={!connected}
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-800 text-xs font-mono text-slate-200 hover:bg-slate-700 disabled:opacity-40"
+                  className="h-10 rounded-lg border border-slate-300 bg-slate-100 text-xs font-mono text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 disabled:opacity-40"
                 >
                   {delta > 0 ? `+${delta}°` : `${delta}°`}
                 </button>
@@ -154,7 +199,7 @@ export default function Settings() {
               <button
                 onClick={() => conn.setLidarCalibration({ angle_offset_deg: offset, invert_angles: inverted, save: true })}
                 disabled={!connected}
-                className="h-10 rounded-lg border border-emerald-500/40 bg-emerald-600/15 text-xs text-emerald-300 flex items-center justify-center gap-1.5 hover:bg-emerald-600/25 disabled:opacity-40"
+                className="h-10 rounded-lg border border-emerald-300 bg-emerald-50 text-xs text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-600/15 dark:text-emerald-300 dark:hover:bg-emerald-600/25 flex items-center justify-center gap-1.5 disabled:opacity-40"
               >
                 <Save size={14} />
                 Sauvegarder
@@ -162,16 +207,16 @@ export default function Settings() {
               <button
                 onClick={() => conn.setLidarCalibration({ angle_offset_deg: 0, invert_angles: false, save: true })}
                 disabled={!connected}
-                className="h-10 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40"
+                className="h-10 rounded-lg border border-slate-300 bg-slate-100 text-xs text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 disabled:opacity-40"
               >
                 <RotateCcw size={14} className="inline mr-1" />
                 Reset
               </button>
             </div>
 
-            <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
               Obstacle le plus proche :{' '}
-              <span className="font-mono text-cyan-300">
+              <span className="font-mono text-cyan-700 dark:text-cyan-300">
                 {nearest ? `${ZONE_LABEL[nearest.zone]} — ${nearest.cm.toFixed(0)} cm` : '--'}
               </span>
             </div>
@@ -185,8 +230,8 @@ export default function Settings() {
               <ZoneDistance label="Gauche" cm={zones?.left} />
             </div>
 
-            <div className="rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-              <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[10px] uppercase text-slate-500 border-b border-slate-800">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 overflow-hidden">
+              <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[10px] uppercase text-slate-400 dark:text-slate-500 border-b border-slate-200 dark:border-slate-800">
                 <span>Brut</span>
                 <span>Corr.</span>
                 <span>Zone</span>
@@ -194,16 +239,16 @@ export default function Settings() {
               </div>
               <div className="max-h-64 overflow-y-auto">
                 {debugPoints.length > 0 ? debugPoints.slice(0, 18).map((p, idx) => (
-                  <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-400 border-b border-slate-900 last:border-b-0">
+                  <div key={`${p.raw_angle}-${p.corrected_angle}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-1.5 text-[11px] font-mono text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-900 last:border-b-0">
                     <span>{p.raw_angle.toFixed(0)}°</span>
                     <span>{p.corrected_angle.toFixed(0)}°</span>
-                    <span className={p.zone === 'front' ? 'text-red-300' : p.zone === 'right' ? 'text-cyan-300' : p.zone === 'left' ? 'text-blue-300' : 'text-slate-500'}>
+                    <span className={p.zone === 'front' ? 'text-red-600 dark:text-red-300' : p.zone === 'right' ? 'text-cyan-600 dark:text-cyan-300' : p.zone === 'left' ? 'text-blue-600 dark:text-blue-300' : 'text-slate-400 dark:text-slate-500'}>
                       {ZONE_LABEL[p.zone] ?? p.zone}
                     </span>
                     <span className="text-right">{p.distance_cm.toFixed(0)}</span>
                   </div>
                 )) : (
-                  <div className="px-3 py-6 text-center text-xs text-slate-600">
+                  <div className="px-3 py-6 text-center text-xs text-slate-400 dark:text-slate-600">
                     Aucune mesure LIDAR disponible
                   </div>
                 )}

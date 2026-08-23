@@ -23,7 +23,7 @@ export default function AppLayout() {
   }, [location.pathname])
 
   return (
-    <div className="flex min-h-screen" style={{ background: '#0a0f1e' }}>
+    <div className="flex min-h-screen bg-slate-100 dark:bg-[#0a0f1e]">
       {!isMobileLandscapePilotage && (
         <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       )}

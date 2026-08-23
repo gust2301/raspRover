@@ -12,30 +12,32 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
 
   return (
     <header
-      className="flex items-center justify-between gap-3 px-3 sm:px-4 lg:px-6 py-3 border-b border-slate-800 sticky top-0 z-20"
-      style={{ background: '#0a0f1e' }}
+      className="flex items-center justify-between gap-2 px-3 sm:px-4 lg:px-6 py-3 border-b sticky top-0 z-20
+        bg-white border-slate-200 dark:bg-[#0a0f1e] dark:border-slate-800"
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
         <button
           onClick={onOpenSidebar}
-          className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors lg:hidden"
+          className="p-2 rounded-lg transition-colors lg:hidden flex-shrink-0
+            text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
         >
           <Menu size={18} />
         </button>
 
-        <div className="relative min-w-0">
+        <div className="relative min-w-0 flex-1 sm:flex-none">
           <button
             onClick={() => setSiteMenuOpen(v => !v)}
-            className="flex items-center gap-2 max-w-[55vw] sm:max-w-none px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-slate-500 transition-colors text-sm"
+            className="flex items-center gap-2 w-full sm:w-auto sm:max-w-none px-3 py-2 rounded-lg border transition-colors text-sm min-w-0
+              border-slate-200 text-slate-900 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500"
           >
-            <Building2 size={15} className="text-blue-400 flex-shrink-0" />
-            <span className="font-medium truncate">{selectedSite.name}</span>
-            <ChevronDown size={14} className="text-slate-500 flex-shrink-0" />
+            <Building2 size={15} className="flex-shrink-0 text-blue-600 dark:text-blue-400" />
+            <span className="font-medium truncate min-w-0">{selectedSite.name}</span>
+            <ChevronDown size={14} className="flex-shrink-0 text-slate-400 dark:text-slate-500" />
           </button>
           {siteMenuOpen && (
             <div
-              className="absolute top-full mt-1 left-0 w-56 rounded-lg border border-slate-700 shadow-xl z-50 overflow-hidden"
-              style={{ background: '#0f1629' }}
+              className="absolute top-full mt-1 left-0 w-56 rounded-lg border shadow-xl z-50 overflow-hidden
+                bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-700"
             >
               {mockSites.map(site => (
                 <button
@@ -44,20 +46,20 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
                     setSelectedSite(site)
                     setSiteMenuOpen(false)
                   }}
-                  className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors hover:bg-slate-800 ${
-                    site.id === selectedSite.id ? 'text-blue-400' : 'text-slate-300'
+                  className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${
+                    site.id === selectedSite.id ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   <div
-                    className={`w-1.5 h-1.5 rounded-full ${
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                       site.status === 'operational'
                         ? 'bg-emerald-500'
                         : site.status === 'degraded'
                           ? 'bg-amber-500'
-                          : 'bg-red-500'
+                          : 'bg-red-600'
                     }`}
                   />
-                  {site.name}
+                  <span className="truncate">{site.name}</span>
                 </button>
               ))}
             </div>
@@ -65,21 +67,21 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
         {/* Robot connection status */}
         {conn.status === 'connected' ? (
           <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-            <span className="hidden sm:block text-xs font-mono truncate max-w-[120px] text-emerald-400">
+            <div className="w-2 h-2 rounded-full animate-pulse flex-shrink-0 bg-emerald-500" />
+            <span className="hidden sm:block text-xs font-mono truncate max-w-[120px] text-emerald-700 dark:text-emerald-400">
               {conn.robotIp}
             </span>
             {conn.latencyMs !== null && (
-              <span className="hidden lg:block text-xs text-slate-600 font-mono">{conn.latencyMs} ms</span>
+              <span className="hidden lg:block text-xs font-mono text-slate-400 dark:text-slate-500">{conn.latencyMs} ms</span>
             )}
             <button
               onClick={conn.disconnect}
               title="Déconnecter"
-              className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-1.5 rounded-lg transition-colors text-slate-400 hover:text-red-600 hover:bg-red-50 dark:text-slate-500 dark:hover:text-red-400 dark:hover:bg-red-500/10"
             >
               <WifiOff size={13} />
             </button>
@@ -87,28 +89,28 @@ export default function Header({ onOpenSidebar }: { onOpenSidebar: () => void })
         ) : (
           <button
             onClick={() => navigate('/connect')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0
-              bg-blue-600/15 text-blue-300 border border-blue-500/30
-              hover:bg-blue-600/25 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0 border transition-colors
+              bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100
+              dark:bg-blue-600/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-600/25"
           >
             <Wifi size={13} />
             <span className="hidden sm:inline">Connecter le robot</span>
           </button>
         )}
 
-        <button className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+        <button className="relative p-2 rounded-lg transition-colors text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
           <Bell size={18} />
           <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
             3
           </span>
         </button>
 
-        <button className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors">
-          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center">
+        <button className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg border transition-colors border-slate-200 hover:border-slate-400 dark:border-slate-700 dark:hover:border-slate-500">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center bg-blue-600">
             <User size={14} className="text-white" />
           </div>
-          <span className="hidden sm:inline text-sm text-slate-300 font-medium">AD</span>
-          <ChevronDown size={13} className="hidden sm:block text-slate-500" />
+          <span className="hidden sm:inline text-sm font-medium text-slate-700 dark:text-slate-300">AD</span>
+          <ChevronDown size={13} className="hidden sm:block text-slate-400 dark:text-slate-500" />
         </button>
       </div>
     </header>

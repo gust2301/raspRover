@@ -25,9 +25,9 @@ interface Incident {
 // ---------------------------------------------------------------------------
 
 const SEVERITY_STYLE: Record<string, { badge: string; icon: React.ReactNode; dot: string }> = {
-  info:     { badge: 'bg-blue-500/10 text-blue-300 border-blue-500/30',   icon: <Info size={13} />,         dot: 'bg-blue-400'  },
-  warning:  { badge: 'bg-amber-500/10 text-amber-300 border-amber-500/30', icon: <AlertTriangle size={13} />, dot: 'bg-amber-400' },
-  critical: { badge: 'bg-red-500/10 text-red-300 border-red-500/30',       icon: <ShieldAlert size={13} />,   dot: 'bg-red-500'   },
+  info:     { badge: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/30',   icon: <Info size={13} />,         dot: 'bg-blue-400'  },
+  warning:  { badge: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30', icon: <AlertTriangle size={13} />, dot: 'bg-amber-400' },
+  critical: { badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30',       icon: <ShieldAlert size={13} />,   dot: 'bg-red-500'   },
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -69,11 +69,11 @@ function IncidentRow({ inc }: { inc: Incident }) {
   const s = SEVERITY_STYLE[inc.severity] ?? SEVERITY_STYLE.warning
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-800/60 hover:bg-slate-800/20 transition-colors">
+    <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/20 transition-colors">
       <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${s.dot}`} />
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2 mb-0.5">
-          <span className="text-sm font-medium text-slate-200">
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
             {TYPE_LABEL[inc.type] ?? inc.type}
           </span>
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${s.badge}`}>
@@ -86,8 +86,9 @@ function IncidentRow({ inc }: { inc: Incident }) {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs
-                bg-emerald-500/10 text-emerald-300 border border-emerald-500/30
-                hover:bg-emerald-500/20 transition-colors"
+                bg-emerald-50 text-emerald-700 border border-emerald-200
+                hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30
+                dark:hover:bg-emerald-500/20 transition-colors"
             >
               <Video size={10} />
               Média
@@ -95,10 +96,10 @@ function IncidentRow({ inc }: { inc: Incident }) {
           )}
         </div>
         {inc.details && (
-          <p className="text-xs text-slate-500 truncate">{inc.details}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{inc.details}</p>
         )}
       </div>
-      <span className="text-xs text-slate-600 font-mono flex-shrink-0 mt-0.5 whitespace-nowrap">
+      <span className="text-xs text-slate-400 dark:text-slate-600 font-mono flex-shrink-0 mt-0.5 whitespace-nowrap">
         {formatTs(inc.ts)}
       </span>
     </div>
@@ -178,15 +179,15 @@ export default function Incidents() {
 
   return (
     <div className="max-w-4xl mx-auto w-full space-y-4">
-      <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0f1629' }}>
+      <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] overflow-hidden">
 
         {/* ── Barre de titre ─────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <AlertTriangle size={15} className="text-amber-400" />
-            <h1 className="text-white font-semibold text-sm">Journal des incidents</h1>
+            <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400" />
+            <h1 className="text-slate-900 dark:text-white font-semibold text-sm">Journal des incidents</h1>
             {!isLoading && incidents.length > 0 && (
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">
                 {incidents.length} entrée{incidents.length > 1 ? 's' : ''}
               </span>
             )}
@@ -194,7 +195,7 @@ export default function Incidents() {
           <button
             onClick={fetchIncidents}
             disabled={isLoading}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-800"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-40 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
             Actualiser
@@ -202,10 +203,10 @@ export default function Incidents() {
         </div>
 
         {/* ── Filtres date ───────────────────────────────────────────────── */}
-        <div className="px-4 py-3 border-b border-slate-800 space-y-2.5">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
           {/* Ligne 1 : boutons période rapide */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-500 w-14 flex-shrink-0">Période</span>
+            <span className="text-xs text-slate-400 dark:text-slate-500 w-14 flex-shrink-0">Période</span>
             <div className="flex gap-1">
               {DAYS_OPTIONS.map(o => (
                 <button
@@ -214,7 +215,7 @@ export default function Incidents() {
                   className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                     !dateFilter && days === o.value
                       ? 'bg-slate-600 text-white'
-                      : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                      : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   {o.label}
@@ -222,26 +223,25 @@ export default function Incidents() {
               ))}
             </div>
             {/* Séparateur */}
-            <span className="text-slate-700 text-xs">ou</span>
+            <span className="text-slate-300 dark:text-slate-700 text-xs">ou</span>
             {/* Date picker */}
             <div className="flex items-center gap-1.5">
-              <Calendar size={13} className="text-slate-500 flex-shrink-0" />
+              <Calendar size={13} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
               <input
                 type="date"
                 value={dateFilter}
                 max={todayStr()}
                 onChange={e => selectDate(e.target.value)}
-                className={`bg-slate-800 border text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors ${
+                className={`bg-white dark:bg-slate-800 border text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-slate-500 transition-colors ${
                   dateFilter
-                    ? 'border-slate-500 text-slate-200'
-                    : 'border-slate-700 text-slate-400'
+                    ? 'border-slate-400 text-slate-700 dark:border-slate-500 dark:text-slate-200'
+                    : 'border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400'
                 }`}
-                style={{ colorScheme: 'dark' }}
               />
               {dateFilter && (
                 <button
                   onClick={clearDate}
-                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                  className="text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
                   title="Effacer la date"
                 >
                   <X size={13} />
@@ -252,28 +252,28 @@ export default function Incidents() {
 
           {/* Résumé période active */}
           {dateFilter && (
-            <p className="text-xs text-slate-500">
-              Affichage du <span className="text-slate-300 font-medium">{periodLabel}</span>
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              Affichage du <span className="text-slate-600 dark:text-slate-300 font-medium">{periodLabel}</span>
             </p>
           )}
         </div>
 
         {/* ── Stats ─────────────────────────────────────────────────────── */}
-        <div className="flex border-b border-slate-800">
+        <div className="flex border-b border-slate-200 dark:border-slate-800">
           {[
-            { key: 'critical', label: 'Critiques', count: counts.critical, color: 'text-red-400'   },
-            { key: 'warning',  label: 'Alertes',   count: counts.warning,  color: 'text-amber-400' },
-            { key: 'info',     label: 'Infos',     count: counts.info,     color: 'text-blue-400'  },
+            { key: 'critical', label: 'Critiques', count: counts.critical, color: 'text-red-600 dark:text-red-400'   },
+            { key: 'warning',  label: 'Alertes',   count: counts.warning,  color: 'text-amber-600 dark:text-amber-400' },
+            { key: 'info',     label: 'Infos',     count: counts.info,     color: 'text-blue-600 dark:text-blue-400'  },
           ].map(s => (
-            <div key={s.key} className="flex-1 px-4 py-3 text-center border-r border-slate-800 last:border-r-0">
+            <div key={s.key} className="flex-1 px-4 py-3 text-center border-r border-slate-200 dark:border-slate-800 last:border-r-0">
               <p className={`text-xl font-bold font-mono ${s.color}`}>{s.count}</p>
-              <p className="text-xs text-slate-600 mt-0.5">{s.label}</p>
+              <p className="text-xs text-slate-400 dark:text-slate-600 mt-0.5">{s.label}</p>
             </div>
           ))}
         </div>
 
         {/* ── Filtre sévérité ───────────────────────────────────────────── */}
-        <div className="flex gap-1 px-4 py-2 border-b border-slate-800">
+        <div className="flex gap-1 px-4 py-2 border-b border-slate-200 dark:border-slate-800">
           {SEVERITY_FILTER.map(f => (
             <button
               key={f}
@@ -281,7 +281,7 @@ export default function Incidents() {
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors capitalize ${
                 severityFilter === f
                   ? 'bg-slate-700 text-white'
-                  : 'text-slate-500 hover:text-slate-300'
+                  : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300'
               }`}
             >
               {f === 'tous' ? `Tous (${incidents.length})` : f}
@@ -292,7 +292,7 @@ export default function Incidents() {
         {/* ── Contenu ───────────────────────────────────────────────────── */}
         <div>
           {error && (
-            <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border-b border-red-500/20 px-4 py-3">
+            <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border-b border-red-200 dark:text-red-300 dark:bg-red-500/10 dark:border-red-500/20 px-4 py-3">
               <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -300,20 +300,20 @@ export default function Incidents() {
 
           {isLoading && incidents.length === 0 && (
             <div className="flex justify-center py-12">
-              <Loader2 size={24} className="text-slate-600 animate-spin" />
+              <Loader2 size={24} className="text-slate-400 dark:text-slate-600 animate-spin" />
             </div>
           )}
 
           {!isLoading && filtered.length === 0 && !error && (
             <div className="text-center py-12 space-y-2">
-              <AlertTriangle size={32} className="mx-auto text-slate-700" />
-              <p className="text-slate-600 text-sm">
+              <AlertTriangle size={32} className="mx-auto text-slate-300 dark:text-slate-700" />
+              <p className="text-slate-400 dark:text-slate-600 text-sm">
                 {severityFilter === 'tous'
                   ? `Aucun incident pour ${dateFilter ? `le ${periodLabel}` : 'cette période'}.`
                   : `Aucun incident « ${severityFilter} » sur cette période.`}
               </p>
               {!dateFilter && (
-                <p className="text-xs text-slate-700">
+                <p className="text-xs text-slate-300 dark:text-slate-700">
                   Les incidents sont enregistrés automatiquement pendant la patrouille.
                 </p>
               )}

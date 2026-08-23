@@ -88,7 +88,7 @@ export default function SlamMappingControls() {
       className={`touch-none select-none rounded-xl border flex flex-col items-center justify-center gap-1 transition-colors ${
         active === direction
           ? 'border-blue-400 bg-blue-600 text-white'
-          : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+          : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
       } disabled:opacity-35`}
     >
       {icon}<span className="text-[11px]">{label}</span>
@@ -96,9 +96,9 @@ export default function SlamMappingControls() {
   )
 
   return (
-    <section className="rounded-xl border border-blue-500/20 bg-slate-900/60 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-800">
-        <h2 className="text-sm font-medium text-white">Pilotage de cartographie</h2>
+    <section className="rounded-xl border border-blue-200 bg-white dark:border-blue-500/20 dark:bg-slate-900/60 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+        <h2 className="text-sm font-medium text-slate-900 dark:text-white">Pilotage de cartographie</h2>
         <p className="text-xs text-slate-500 mt-0.5">Pilotez et contrôlez la carte sans changer d’écran.</p>
       </div>
 
@@ -123,13 +123,13 @@ export default function SlamMappingControls() {
           {driveButton('backward', 'Arrière', <ArrowDown size={21} />, '3 / 2')}
         </div>
 
-        <label className="block mt-4 text-xs text-slate-400">
+        <label className="block mt-4 text-xs text-slate-500 dark:text-slate-400">
           <span className="flex justify-between mb-2"><span>Vitesse</span><span>{Math.round(speed * 200)} %</span></span>
           <input type="range" min="0.15" max="0.5" step="0.05" value={speed}
             onChange={(event) => setSpeed(Number(event.target.value))}
             className="w-full accent-blue-500" />
         </label>
-        <p className="text-[11px] text-slate-600 text-center mt-2">WASD ou flèches · Espace pour arrêter</p>
+        <p className="text-[11px] text-slate-400 dark:text-slate-600 text-center mt-2">WASD ou flèches · Espace pour arrêter</p>
       </div>
     </section>
   )

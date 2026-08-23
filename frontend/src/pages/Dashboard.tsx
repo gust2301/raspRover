@@ -25,7 +25,7 @@ export default function Dashboard() {
 
   const kpis = [
     {
-      icon: <Shield size={20} className={obstacle ? 'text-red-400' : 'text-blue-400'} />,
+      icon: <Shield size={20} className={obstacle ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'} />,
       iconBg: obstacle ? 'bg-red-500/10' : 'bg-blue-500/10',
       value: obstacle ? '⚠' : '—',
       label: 'Obstacle détecté',
@@ -33,7 +33,7 @@ export default function Dashboard() {
       statusDot: (obstacle ? 'red' : 'green') as 'red' | 'green',
     },
     {
-      icon: <Camera size={20} className={isOnline ? 'text-emerald-400' : 'text-slate-500'} />,
+      icon: <Camera size={20} className={isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'} />,
       iconBg: isOnline ? 'bg-emerald-500/10' : 'bg-slate-500/10',
       value: isOnline ? '1' : '0',
       label: 'Caméra active',
@@ -41,7 +41,7 @@ export default function Dashboard() {
       statusDot: (isOnline ? 'green' : 'red') as 'green' | 'red',
     },
     {
-      icon: <Route size={20} className={patrolActive ? 'text-blue-400' : 'text-slate-500'} />,
+      icon: <Route size={20} className={patrolActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'} />,
       iconBg: patrolActive ? 'bg-blue-500/10' : 'bg-slate-500/10',
       value: patrolActive ? (patrolState === 'avoiding' ? '↩' : '▶') : '■',
       label: 'Patrouille',
@@ -51,7 +51,7 @@ export default function Dashboard() {
       statusDot: (patrolActive ? 'green' : 'red') as 'green' | 'red',
     },
     {
-      icon: <BatteryMedium size={20} className={!isOnline ? 'text-slate-500' : batteryLow ? 'text-red-400' : 'text-emerald-400'} />,
+      icon: <BatteryMedium size={20} className={!isOnline ? 'text-slate-400 dark:text-slate-500' : batteryLow ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'} />,
       iconBg: !isOnline ? 'bg-slate-500/10' : batteryLow ? 'bg-red-500/10' : 'bg-emerald-500/10',
       value: batteryPct != null ? `${batteryPct}%` : isOnline ? '—' : '—',
       label: 'Batterie',
@@ -84,17 +84,16 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* LiDAR radar card */}
         <div
-          className="rounded-xl p-4 space-y-3"
-          style={{ background: '#0f1629', border: '1px solid #1e293b' }}
+          className="rounded-xl p-4 space-y-3 border border-slate-200 bg-white dark:border-[#1e293b] dark:bg-[#0f1629]"
         >
           <div className="flex items-center gap-2">
-            <Radar size={16} className={scan?.connected ? 'text-cyan-400' : 'text-slate-500'} />
-            <span className="text-sm font-medium text-slate-300">Radar LIDAR 360°</span>
+            <Radar size={16} className={scan?.connected ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-400 dark:text-slate-500'} />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Radar LIDAR 360°</span>
             <span
               className={`ml-auto text-xs px-1.5 py-0.5 rounded ${
                 scan?.connected
-                  ? 'bg-cyan-500/10 text-cyan-400'
-                  : 'bg-slate-700 text-slate-500'
+                  ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400'
+                  : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-500'
               }`}
             >
               {scan?.connected ? `${scan.points.length} pts` : 'ROS2 hors ligne'}
@@ -113,9 +112,9 @@ export default function Dashboard() {
             {(['front', 'left', 'right'] as const).map((zone) => {
               const label = zone === 'front' ? 'Avant' : zone === 'left' ? 'Gauche' : 'Droite'
               return (
-                <div key={zone} className="rounded-lg bg-slate-800/50 px-2 py-1.5">
+                <div key={zone} className="rounded-lg bg-slate-100 dark:bg-slate-800/50 px-2 py-1.5">
                   <div className="text-slate-500 mb-0.5">{label}</div>
-                  <div className="text-white font-mono font-medium">
+                  <div className="text-slate-900 dark:text-white font-mono font-medium">
                     {s?.[`lidar_${zone}_cm` as keyof typeof s] != null
                       ? `${Math.round(s[`lidar_${zone}_cm` as keyof typeof s] as number)} cm`
                       : '—'}

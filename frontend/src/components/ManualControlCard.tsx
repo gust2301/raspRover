@@ -22,15 +22,15 @@ export default function ManualControlCard() {
   ]
 
   return (
-    <div className="rounded-xl border border-slate-800 p-5 h-full" style={{ background: '#0f1629' }}>
+    <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5 h-full">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-white font-semibold text-sm">Contrôle manuel</h2>
+        <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Contrôle manuel</h2>
         <button
           onClick={() => setManualMode(v => !v)}
           className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
             manualMode
-              ? 'bg-blue-600/20 text-blue-400 border border-blue-600/40'
-              : 'bg-slate-800 text-slate-400 border border-slate-700'
+              ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-600/20 dark:text-blue-400 dark:border-blue-600/40'
+              : 'bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
           }`}
         >
           {manualMode ? 'Mode manuel actif' : 'Mode manuel'}
@@ -38,9 +38,9 @@ export default function ManualControlCard() {
       </div>
 
       {!manualMode && (
-        <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-          <AlertCircle size={13} className="text-amber-400 flex-shrink-0" />
-          <p className="text-xs text-amber-400">Activez le mode manuel pour contrôler le robot</p>
+        <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20">
+          <AlertCircle size={13} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-amber-700 dark:text-amber-400">Activez le mode manuel pour contrôler le robot</p>
         </div>
       )}
 
@@ -59,12 +59,12 @@ export default function ManualControlCard() {
                 dir === null
                   ? active !== null
                     ? 'bg-red-600 text-white'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    : 'bg-slate-200 text-slate-600 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
                   : active === dir
                     ? 'bg-blue-600 text-white scale-95 shadow-lg shadow-blue-900/50'
                     : manualMode
-                      ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 active:bg-blue-600 active:text-white'
-                      : 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 active:bg-blue-600 active:text-white dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:active:bg-blue-600 dark:active:text-white'
+                      : 'bg-slate-100/60 text-slate-400 cursor-not-allowed dark:bg-slate-800/50 dark:text-slate-600'
               }`}
             >
               <Icon size={18} />
@@ -77,8 +77,8 @@ export default function ManualControlCard() {
       {/* Speed */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-400">Vitesse</span>
-          <span className="text-xs text-blue-400 font-medium">{speed.toFixed(1)} m/s</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">Vitesse</span>
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">{speed.toFixed(1)} m/s</span>
         </div>
         <input
           type="range"
@@ -90,13 +90,13 @@ export default function ManualControlCard() {
           disabled={!manualMode}
           className="w-full accent-blue-500 disabled:opacity-40"
         />
-        <div className="flex justify-between text-xs text-slate-600 mt-1">
+        <div className="flex justify-between text-xs text-slate-400 dark:text-slate-600 mt-1">
           <span>0</span>
           <span>2,0</span>
         </div>
       </div>
 
-      <p className="text-xs text-slate-600 mt-3 text-center">
+      <p className="text-xs text-slate-400 dark:text-slate-600 mt-3 text-center">
         Contrôle réservé aux opérateurs autorisés
       </p>
     </div>

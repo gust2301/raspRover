@@ -14,7 +14,7 @@ function SignalBars({ signal }: { signal: number }) {
       {bars.map((threshold, i) => (
         <span
           key={i}
-          className={`w-1 rounded-sm ${signal >= threshold ? 'bg-emerald-400' : 'bg-slate-700'}`}
+          className={`w-1 rounded-sm ${signal >= threshold ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-slate-200 dark:bg-slate-700'}`}
           style={{ height: `${(i + 1) * 4}px` }}
         />
       ))}
@@ -26,7 +26,7 @@ function SecurityBadge({ security }: { security: string | null }) {
   const secured = security && security !== '--' && security !== 'none'
   return (
     <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium ${
-      secured ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' : 'bg-slate-800 text-slate-500 border border-slate-700'
+      secured ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/20' : 'bg-slate-100 text-slate-400 border border-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700'
     }`}>
       {secured ? <Lock size={9} /> : <Unlock size={9} />}
       {secured ? (security ?? 'Secured') : 'Ouvert'}
@@ -34,7 +34,7 @@ function SecurityBadge({ security }: { security: string | null }) {
   )
 }
 
-export default function Network() {
+export default function NetworkSettings() {
   const conn = useSharedRobotConnection()
   const robotIp = conn.robotIp
 
@@ -126,36 +126,31 @@ export default function Network() {
   const hasRobot = !!robotIp
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-          <Wifi size={22} className="text-blue-300" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-white">Réseau / Wi-Fi</h1>
-          <p className="text-sm text-slate-500">Connecter le robot à un nouveau réseau Wi-Fi.</p>
-        </div>
+      <div className="flex items-center gap-2">
+        <Wifi size={17} className="text-blue-600 dark:text-blue-300" />
+        <h2 className="text-slate-900 dark:text-white font-semibold">Réseau / Wi-Fi</h2>
       </div>
 
       {!hasRobot && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           <WifiOff size={14} />
           Aucun robot configuré — entre l'IP du robot sur l'écran de connexion.
         </div>
       )}
 
       {/* Network Status */}
-      <section className="rounded-xl border border-slate-800 bg-[#0f1629] p-5">
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Signal size={16} className="text-blue-300" />
-            <h2 className="text-white font-semibold text-sm">Statut réseau actuel</h2>
+            <Signal size={16} className="text-blue-600 dark:text-blue-300" />
+            <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Statut réseau actuel</h2>
           </div>
           <button
             onClick={refreshStatus}
             disabled={!hasRobot || statusLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-300 border border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-600 border border-slate-300 bg-slate-100 hover:bg-slate-200 dark:text-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
           >
             <RefreshCw size={12} className={statusLoading ? 'animate-spin' : ''} />
             Actualiser
@@ -163,47 +158,47 @@ export default function Network() {
         </div>
 
         {statusError && (
-          <div className="mb-3 text-xs text-red-400 flex items-center gap-1.5">
+          <div className="mb-3 text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
             <XCircle size={13} /> {statusError}
           </div>
         )}
 
         {status ? (
           <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">État</div>
-              <div className={`flex items-center gap-1.5 text-sm font-medium ${status.connected ? 'text-emerald-400' : 'text-slate-500'}`}>
-                <div className={`w-2 h-2 rounded-full ${status.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">État</div>
+              <div className={`flex items-center gap-1.5 text-sm font-medium ${status.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                <div className={`w-2 h-2 rounded-full ${status.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-slate-600'}`} />
                 {status.connected ? 'Connecté' : 'Déconnecté'}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">SSID</div>
-              <div className="text-sm font-mono text-white truncate">{status.ssid ?? '—'}</div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">SSID</div>
+              <div className="text-sm font-mono text-slate-900 dark:text-white truncate">{status.ssid ?? '—'}</div>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Adresse IP</div>
-              <div className="text-sm font-mono text-cyan-300">{status.ipAddress ?? '—'}</div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">Adresse IP</div>
+              <div className="text-sm font-mono text-cyan-700 dark:text-cyan-300">{status.ipAddress ?? '—'}</div>
             </div>
           </div>
         ) : (
-          <div className="text-xs text-slate-600 py-2">
+          <div className="text-xs text-slate-400 dark:text-slate-600 py-2">
             Clique sur "Actualiser" pour voir le statut réseau du robot.
           </div>
         )}
       </section>
 
       {/* Wi-Fi Scan */}
-      <section className="rounded-xl border border-slate-800 bg-[#0f1629] p-5">
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Search size={16} className="text-blue-300" />
-            <h2 className="text-white font-semibold text-sm">Réseaux disponibles</h2>
+            <Search size={16} className="text-blue-600 dark:text-blue-300" />
+            <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Réseaux disponibles</h2>
           </div>
           <button
             onClick={handleScan}
             disabled={!hasRobot || scanLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-blue-300 border border-blue-600/40 bg-blue-600/15 hover:bg-blue-600/25 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 dark:text-blue-300 dark:border-blue-600/40 dark:bg-blue-600/15 dark:hover:bg-blue-600/25 disabled:opacity-40 transition-colors"
           >
             <Search size={12} className={scanLoading ? 'animate-pulse' : ''} />
             {scanLoading ? 'Scan en cours…' : 'Scanner'}
@@ -211,20 +206,20 @@ export default function Network() {
         </div>
 
         {scanError && (
-          <div className="mb-3 text-xs text-red-400 flex items-center gap-1.5">
+          <div className="mb-3 text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
             <XCircle size={13} /> {scanError}
           </div>
         )}
 
         {scanLoading && (
-          <div className="flex items-center gap-2 py-6 justify-center text-xs text-slate-500">
+          <div className="flex items-center gap-2 py-6 justify-center text-xs text-slate-400 dark:text-slate-500">
             <Search size={14} className="animate-pulse" />
             Scan des réseaux Wi-Fi…
           </div>
         )}
 
         {scanned && !scanLoading && networks.length === 0 && (
-          <div className="text-xs text-slate-600 py-4 text-center">Aucun réseau détecté.</div>
+          <div className="text-xs text-slate-400 dark:text-slate-600 py-4 text-center">Aucun réseau détecté.</div>
         )}
 
         {networks.length > 0 && (
@@ -235,18 +230,18 @@ export default function Network() {
                 onClick={() => handleSelectNetwork(net)}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-left transition-colors ${
                   selected?.ssid === net.ssid
-                    ? 'border-blue-500/50 bg-blue-600/15 text-white'
-                    : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
+                    ? 'border-blue-400 bg-blue-50 text-slate-900 dark:border-blue-500/50 dark:bg-blue-600/15 dark:text-white'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-900/60'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <Wifi size={15} className={selected?.ssid === net.ssid ? 'text-blue-400' : 'text-slate-500'} />
+                  <Wifi size={15} className={selected?.ssid === net.ssid ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'} />
                   <span className="text-sm font-medium truncate">{net.ssid}</span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <SecurityBadge security={net.security} />
                   <SignalBars signal={net.signal} />
-                  <span className="text-[10px] font-mono text-slate-500 w-7 text-right">{net.signal}%</span>
+                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 w-7 text-right">{net.signal}%</span>
                 </div>
               </button>
             ))}
@@ -256,14 +251,14 @@ export default function Network() {
 
       {/* Connect Form */}
       {selected && (
-        <section className="rounded-xl border border-slate-800 bg-[#0f1629] p-5 space-y-4">
+        <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <Lock size={16} className="text-blue-300" />
-            <h2 className="text-white font-semibold text-sm">Connexion</h2>
+            <Lock size={16} className="text-blue-600 dark:text-blue-300" />
+            <h2 className="text-slate-900 dark:text-white font-semibold text-sm">Connexion</h2>
           </div>
 
           {/* Warning */}
-          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-3 text-xs text-amber-300">
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/8 px-3 py-3 text-xs text-amber-700 dark:text-amber-300">
             <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
             <span>
               Le robot peut changer d'adresse IP après connexion au nouveau réseau.
@@ -273,9 +268,9 @@ export default function Network() {
 
           {/* SSID */}
           <div>
-            <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">Réseau sélectionné</label>
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950/60 text-sm text-white">
-              <Wifi size={13} className="text-blue-400 flex-shrink-0" />
+            <label className="block text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1.5">Réseau sélectionné</label>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/60 text-sm text-slate-900 dark:text-white">
+              <Wifi size={13} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />
               <span className="font-medium">{selected.ssid}</span>
               <span className="ml-auto">
                 <SecurityBadge security={selected.security} />
@@ -285,7 +280,7 @@ export default function Network() {
 
           {/* Password */}
           <div>
-            <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">Mot de passe</label>
+            <label className="block text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1.5">Mot de passe</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -293,12 +288,12 @@ export default function Network() {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Entrez le mot de passe Wi-Fi"
                 autoComplete="new-password"
-                className="w-full px-3 py-2 pr-10 rounded-lg border border-slate-700 bg-slate-950/60 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30"
+                className="w-full px-3 py-2 pr-10 rounded-lg border border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/60 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(v => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300"
                 tabIndex={-1}
               >
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -310,14 +305,14 @@ export default function Network() {
           {connectResult && (
             <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${
               connectResult.success
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-400'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : 'border-red-200 bg-red-50 text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400'
             }`}>
               {connectResult.success ? <CheckCircle size={14} className="mt-0.5 flex-shrink-0" /> : <XCircle size={14} className="mt-0.5 flex-shrink-0" />}
               <div>
                 <div>{connectResult.message}</div>
                 {connectResult.newIpAddress && (
-                  <div className="mt-1 font-mono text-emerald-200">
+                  <div className="mt-1 font-mono text-emerald-700 dark:text-emerald-200">
                     Nouvelle IP : {connectResult.newIpAddress}
                   </div>
                 )}
@@ -326,15 +321,15 @@ export default function Network() {
           )}
 
           {connectError && (
-            <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
               <XCircle size={13} /> {connectError}
             </div>
           )}
 
           {/* Confirmation step */}
           {confirming ? (
-            <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/8 p-4">
-              <div className="flex items-center gap-2 text-xs font-medium text-amber-300">
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/8 p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
                 <AlertTriangle size={14} />
                 Confirmer la connexion à <span className="font-mono">"{selected.ssid}"</span> ?
               </div>
@@ -347,7 +342,7 @@ export default function Network() {
                 </button>
                 <button
                   onClick={() => setConfirming(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-700 bg-slate-800 text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                  className="flex-1 py-2 rounded-lg border border-slate-300 bg-slate-100 text-sm text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
                 >
                   Annuler
                 </button>

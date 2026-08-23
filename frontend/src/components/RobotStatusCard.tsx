@@ -26,7 +26,7 @@ function BatteryGauge({ pct, voltage }: { pct: number | null; voltage: number | 
   return (
     <div className="relative w-32 h-32 mx-auto">
       <svg viewBox="0 0 120 120" className="w-full h-full -rotate-[135deg]">
-        <circle cx="60" cy="60" r={radius} fill="none" stroke="#1e293b" strokeWidth="10"
+        <circle cx="60" cy="60" r={radius} fill="none" className="stroke-slate-200 dark:stroke-slate-800" strokeWidth="10"
           strokeDasharray={`${circumference * 0.75} ${circumference * 0.25}`}
           strokeLinecap="round" />
         <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="10"
@@ -36,11 +36,11 @@ function BatteryGauge({ pct, voltage }: { pct: number | null; voltage: number | 
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold text-white">{pct != null ? `${pct}%` : '—'}</span>
+        <span className="text-3xl font-bold text-slate-900 dark:text-white">{pct != null ? `${pct}%` : '—'}</span>
         {voltage !== undefined && (
-          <span className="text-xs text-slate-500 font-mono mt-0.5">{voltage.toFixed(1)} V</span>
+          <span className="text-xs text-slate-500 dark:text-slate-500 font-mono mt-0.5">{voltage.toFixed(1)} V</span>
         )}
-        <span className="text-xs text-slate-400 mt-0.5">Batterie</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Batterie</span>
       </div>
     </div>
   )
@@ -72,7 +72,7 @@ export default function RobotStatusCard() {
       icon: isOnline ? Wifi : WifiOff,
       label: 'Connectivité',
       value: isOnline ? `En ligne · ${conn.latencyMs ?? '—'} ms` : 'Hors ligne',
-      color: isOnline ? 'text-emerald-400' : 'text-slate-500',
+      color: isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500',
     },
     {
       icon: Bot,
@@ -80,7 +80,7 @@ export default function RobotStatusCard() {
       value: patrolActive
         ? (patrolState === 'avoiding' ? 'Évitement' : 'Patrouille')
         : 'Manuel',
-      color: patrolActive ? 'text-blue-400' : 'text-slate-300',
+      color: patrolActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-300',
     },
     {
       icon: Gauge,
@@ -88,23 +88,23 @@ export default function RobotStatusCard() {
       value: s?.speed_l != null
         ? `${s.speed_l.toFixed(2)} / ${(s.speed_r as number | undefined)?.toFixed(2) ?? '—'}`
         : '— / —',
-      color: 'text-blue-400',
+      color: 'text-blue-600 dark:text-blue-400',
     },
     {
       icon: Radar,
       label: 'Distance avant',
       value: frontCm != null ? `${(frontCm as number).toFixed(0)} cm` : '—',
-      color: obstacle ? 'text-red-400' : frontCm != null && (frontCm as number) < 50 ? 'text-amber-400' : 'text-emerald-400',
+      color: obstacle ? 'text-red-600 dark:text-red-400' : frontCm != null && (frontCm as number) < 50 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400',
     },
   ]
 
   return (
-    <div className="rounded-xl border border-slate-800 p-5 h-full" style={{ background: '#0f1629' }}>
+    <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0f1629] p-5 h-full">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-white font-semibold text-sm">État du robot</h2>
+        <h2 className="text-slate-900 dark:text-white font-semibold text-sm">État du robot</h2>
         <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
-          <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+          <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-slate-600'}`} />
+          <span className={`text-xs ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
             {isOnline ? 'En ligne' : 'Hors ligne'}
           </span>
         </div>
@@ -113,13 +113,13 @@ export default function RobotStatusCard() {
       <BatteryGauge pct={batteryPct ?? null} voltage={batteryV} />
 
       {!isOnline && (
-        <p className="text-center text-xs text-slate-600 mt-2 mb-2">Connectez-vous pour voir les données réelles</p>
+        <p className="text-center text-xs text-slate-400 dark:text-slate-600 mt-2 mb-2">Connectez-vous pour voir les données réelles</p>
       )}
 
       <div className="mt-4 space-y-3">
         {stats.map(({ icon: Icon, label, value, color }) => (
-          <div key={label} className="flex items-center justify-between py-2 border-b border-slate-800/50 last:border-0">
-            <div className="flex items-center gap-2 text-slate-400">
+          <div key={label} className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800/50 last:border-0">
+            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
               <Icon size={14} />
               <span className="text-xs">{label}</span>
             </div>
@@ -129,8 +129,8 @@ export default function RobotStatusCard() {
       </div>
 
       {obstacle && (
-        <div className="mt-3 px-3 py-2 rounded-lg bg-red-950/50 border border-red-700/40 text-center">
-          <span className="text-xs font-bold text-red-400 animate-pulse">⚠ OBSTACLE DÉTECTÉ</span>
+        <div className="mt-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/50 dark:border-red-700/40 text-center">
+          <span className="text-xs font-bold text-red-600 dark:text-red-400 animate-pulse">⚠ OBSTACLE DÉTECTÉ</span>
         </div>
       )}
     </div>
