@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, Car, CheckCircle,
   ChevronRight, CircleDot, House, Map, MapPin, Play, RotateCcw, Save,
-  Square, Trash2,
+  Square, Trash2, UserRound,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl, getRobotStreamUrl } from '../lib/robotTransport'
@@ -32,6 +32,14 @@ interface Pose {
 interface LearnedPoint extends Pose { pan: number; tilt: number; zone: string }
 interface SavedMap { name: string }
 interface RouteSummary { id: string; name: string; map_name: string; waypoint_count: number }
+interface FollowStatus {
+  follow_me_active: boolean
+  follow_me_state: string
+  follow_me_reason: string
+  follow_me_target_distance_m?: number | null
+  follow_me_trail: Pose[]
+  follow_me_trail_count?: number
+}
 
 function Step({ number, title, active, done }: { number: number; title: string; active: boolean; done: boolean }) {
   return <div className={`flex items-center gap-2 ${active ? 'text-blue-600 dark:text-blue-300' : done ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-600'}`}>
@@ -117,7 +125,7 @@ function LiveCamera({ streamUrl }: { streamUrl: string }) {
   </div>
 }
 
-function MapPanel({ map, pose, points = [] }: { map: SlamMap | null; pose: Pose | null; points?: LearnedPoint[] }) {
+function MapPanel({ map, pose, points = [], trail = [] }: { map: SlamMap | null; pose: Pose | null; points?: Pose[]; trail?: Pose[] }) {
   if (!map) return <div className="min-h-72 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-center text-sm text-slate-400 dark:text-slate-500">
     <div className="text-center"><Map size={34} className="mx-auto mb-2 opacity-30" /><p>La carte apparaîtra dès les premières mesures lidar.</p></div>
   </div>
@@ -129,6 +137,7 @@ function MapPanel({ map, pose, points = [] }: { map: SlamMap | null; pose: Pose 
   return <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-black overflow-auto p-3 flex justify-center">
     <div className="relative w-full" style={{ aspectRatio: `${map.width} / ${map.height}`, maxWidth: `min(100%, ${maxWidth}px)` }}>
       <img src={`data:image/png;base64,${map.image}`} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} alt="Carte du plateau" />
+      {trail.map((point, index) => <span key={`trail-${index}`} style={position(point)} className="absolute -ml-1 -mt-1 w-2 h-2 rounded-full bg-emerald-400/80" title="Trajectoire Follow Me" />)}
       {points.map((point, index) => <span key={index} style={position(point)} className="absolute -ml-3 -mt-3 w-6 h-6 rounded-full bg-emerald-500 border border-white text-white text-xs font-bold flex items-center justify-center">{index + 1}</span>)}
       {pose && <span style={position(pose)} className="absolute -ml-2 -mt-2 w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" title="Rover" />}
     </div>
@@ -157,6 +166,12 @@ export default function VehicleInspections() {
   const [finishMessage, setFinishMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [followStatus, setFollowStatus] = useState<FollowStatus>({
+    follow_me_active: false,
+    follow_me_state: 'idle',
+    follow_me_reason: '',
+    follow_me_trail: [],
+  })
   const refreshInFlight = useRef(false)
   const posePollInFlight = useRef(false)
   const mapDataRef = useRef<SlamMap | null>(null)
@@ -191,7 +206,7 @@ export default function VehicleInspections() {
   }, [refresh])
 
   useEffect(() => {
-    if (!connected || (phase !== 'learning' && phase !== 'inspection')) return
+    if (!connected || !['mapping', 'learning', 'inspection'].includes(phase)) return
     let disposed = false
     const updatePose = async () => {
       if (posePollInFlight.current) return
@@ -206,6 +221,27 @@ export default function VehicleInspections() {
     const timer = window.setInterval(() => { void updatePose() }, 500)
     return () => { disposed = true; window.clearInterval(timer) }
   }, [apiBase, connected, phase])
+
+  useEffect(() => {
+    if (!connected || phase !== 'mapping') return
+    let disposed = false
+    const updateFollow = async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/follow-me/status`)
+        if (response.ok && !disposed) setFollowStatus(await response.json())
+      } catch { /* arrêt sûr géré côté rover */ }
+    }
+    void updateFollow()
+    const timer = window.setInterval(() => { void updateFollow() }, 500)
+    return () => { disposed = true; window.clearInterval(timer) }
+  }, [apiBase, connected, phase])
+
+  useEffect(() => {
+    if (!followStatus.follow_me_active) return
+    return () => {
+      void fetch(`${apiBase}/api/follow-me/stop`, { method: 'POST', keepalive: true })
+    }
+  }, [apiBase, followStatus.follow_me_active])
 
   const move = useCallback((direction: Direction) => connection.sendMove(direction, 0.28), [connection.sendMove])
   const stop = useCallback(() => connection.sendStop(), [connection.sendStop])
@@ -222,7 +258,11 @@ export default function VehicleInspections() {
 
   async function startPlateauMapping() {
     setBusy(true); setError(null); setMapData(null)
-    try { await request('/api/slam/start'); setPhase('mapping'); setNotice('Cartographie démarrée : faites le tour du plateau.') }
+    try {
+      await request('/api/slam/start')
+      setFollowStatus({ follow_me_active: false, follow_me_state: 'idle', follow_me_reason: '', follow_me_trail: [] })
+      setPhase('mapping'); setNotice('Cartographie démarrée : pilotez le rover ou activez « Suivez-moi ».')
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Erreur') }
     finally { setBusy(false) }
   }
@@ -240,6 +280,10 @@ export default function VehicleInspections() {
     let savedName: string | null = null
     setBusy(true); setError(null); setNotice(null); setFinishMessage(null)
     try {
+      if (followStatus.follow_me_active) {
+        await request('/api/follow-me/stop')
+        setFollowStatus(current => ({ ...current, follow_me_active: false, follow_me_state: 'idle' }))
+      }
       setFinishStage('saving'); setFinishMessage('1/4 — Sauvegarde de la carte du plateau…')
       const saved = await request('/api/slam/save', { name: plateauName })
       savedName = saved.name
@@ -257,6 +301,28 @@ export default function VehicleInspections() {
         ? `La carte « ${savedName} » est bien sauvegardée, mais la préparation de Nav2 a échoué : ${detail}`
         : `La sauvegarde du plateau a échoué : ${detail}`)
     } finally { setBusy(false); setFinishStage(null) }
+  }
+
+  async function startFollowMe() {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const status = await request('/api/follow-me/start') as FollowStatus
+      setFollowStatus(status)
+      setNotice('Follow Me actif : placez-vous devant le rover puis marchez lentement.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Follow Me indisponible')
+    } finally { setBusy(false) }
+  }
+
+  async function stopFollowMe() {
+    setBusy(true); setError(null)
+    try {
+      const status = await request('/api/follow-me/stop') as FollowStatus
+      setFollowStatus(status)
+      setNotice('Follow Me arrêté. La trajectoire enregistrée reste visible.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Arrêt Follow Me impossible')
+    } finally { setBusy(false) }
   }
 
   async function loadPlateau(name: string) {
@@ -364,8 +430,48 @@ export default function VehicleInspections() {
     </div>}
 
     {phase === 'mapping' && <div className="space-y-5">
-      <section className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/5 p-4"><h2 className="text-slate-900 dark:text-white font-semibold">Étape 1 — Faites le tour complet du plateau</h2><p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Passez dans toutes les allées. Quand la carte est complète, revenez à l’endroit où le rover devra rentrer après chaque inspection.</p></section>
-      <div className="grid lg:grid-cols-[1fr_320px] gap-5"><div className="space-y-5"><LiveCamera streamUrl={streamUrl} /><MapPanel map={mapData} pose={pose} /></div><aside className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50 p-5 space-y-5"><DrivePad connected={connected && !busy} onMove={move} onStop={stop} /><div className="border-t border-slate-200 dark:border-slate-800 pt-4"><label className="text-xs text-slate-500 dark:text-slate-400">Nom du plateau</label><input value={plateauName} onChange={event => { setPlateauName(event.target.value); setFinishMessage(null) }} disabled={busy} className="w-full mt-1 bg-slate-100 dark:bg-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" /><div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 flex gap-2"><House size={15} className="shrink-0" />Ramenez d’abord le rover à sa future maison.</div><div className={`mt-3 flex items-center gap-2 text-xs ${pose ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}><CircleDot size={13} />{pose ? `Position disponible : ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : 'Attente de la position du rover…'}</div>{finishMessage && <div className={`mt-3 p-3 rounded-lg border text-xs ${finishStage ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-500/10 dark:border-blue-500/30 dark:text-blue-300' : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-300'}`}>{finishStage && <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse mr-2" />}{finishMessage}</div>}<button onClick={() => { void finishPlateau() }} disabled={busy} className="w-full mt-3 py-3 rounded-lg bg-emerald-600 text-white disabled:opacity-60"><Save size={15} className="inline mr-2" />{finishStage ? 'Préparation en cours…' : 'Terminer et enregistrer'}</button></div></aside></div>
+      <section className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/5 p-4">
+        <h2 className="text-slate-900 dark:text-white font-semibold">Étape 1 — Faites le tour complet du plateau</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Marchez lentement devant le rover avec « Suivez-moi », ou gardez le pilotage manuel. Quand la carte est complète, revenez à sa future maison.</p>
+      </section>
+      <div className="grid lg:grid-cols-[1fr_340px] gap-5">
+        <div className="space-y-5">
+          <LiveCamera streamUrl={streamUrl} />
+          <MapPanel map={mapData} pose={pose} trail={followStatus.follow_me_trail} />
+        </div>
+        <aside className="space-y-5">
+          <section className={`rounded-xl border p-4 space-y-3 ${followStatus.follow_me_active ? 'border-blue-300 bg-blue-50 dark:border-blue-500/40 dark:bg-blue-500/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50'}`}>
+            <div className="flex items-center gap-2">
+              <UserRound size={18} className="text-blue-600 dark:text-blue-400" />
+              <h3 className="font-medium text-slate-900 dark:text-white">Mode Suivez-moi</h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Placez-vous à 1–2 m devant l’OAK-D puis avancez lentement. Le rover s’arrête s’il vous perd ou détecte un obstacle.</p>
+            <div className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+              <span className={`inline-block w-2 h-2 rounded-full mr-2 ${followStatus.follow_me_active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              {followStatus.follow_me_reason || 'Prêt'}
+              {followStatus.follow_me_target_distance_m != null && ` · ${followStatus.follow_me_target_distance_m.toFixed(2)} m`}
+              <span className="block mt-1 text-slate-400">{followStatus.follow_me_trail_count ?? followStatus.follow_me_trail.length} points de trajectoire</span>
+            </div>
+            {followStatus.follow_me_active
+              ? <button onClick={() => { void stopFollowMe() }} disabled={busy} className="w-full py-3 rounded-lg bg-red-600 text-white font-medium disabled:opacity-40"><Square size={16} className="inline mr-2" />Arrêter le suivi</button>
+              : <button onClick={() => { void startFollowMe() }} disabled={!connected || busy} className="w-full py-3 rounded-lg bg-blue-600 text-white font-medium disabled:opacity-40"><UserRound size={16} className="inline mr-2" />Me suivre</button>}
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50 p-4">
+            <DrivePad connected={connected && !busy && !followStatus.follow_me_active} onMove={move} onStop={stop} />
+            {followStatus.follow_me_active && <p className="mt-2 text-center text-xs text-blue-600 dark:text-blue-300">Pilotage manuel verrouillé pendant le suivi.</p>}
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50 p-5">
+            <label className="text-xs text-slate-500 dark:text-slate-400">Nom du plateau</label>
+            <input value={plateauName} onChange={event => { setPlateauName(event.target.value); setFinishMessage(null) }} disabled={busy} className="w-full mt-1 bg-slate-100 dark:bg-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
+            <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 flex gap-2"><House size={15} className="shrink-0" />Revenez à la future maison avant d’enregistrer.</div>
+            <div className={`mt-3 flex items-center gap-2 text-xs ${pose ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}><CircleDot size={13} />{pose ? `Position disponible : ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : 'Attente de la position du rover…'}</div>
+            {finishMessage && <div className={`mt-3 p-3 rounded-lg border text-xs ${finishStage ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-500/10 dark:border-blue-500/30 dark:text-blue-300' : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-300'}`}>{finishStage && <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse mr-2" />}{finishMessage}</div>}
+            <button onClick={() => { void finishPlateau() }} disabled={busy} className="w-full mt-3 py-3 rounded-lg bg-emerald-600 text-white disabled:opacity-60"><Save size={15} className="inline mr-2" />{finishStage ? 'Préparation en cours…' : 'Terminer et enregistrer'}</button>
+          </section>
+        </aside>
+      </div>
     </div>}
 
     {phase === 'learning' && <div className="space-y-5">

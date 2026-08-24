@@ -100,6 +100,18 @@ sensors:
     depth_roi_bottom: 0.82    # Exclut le bas extrême où le sol domine
     min_valid_pixels: 80      # Rejette les pixels stéréo isolés
 
+follow_me:
+  # Apprentissage guidé du plateau avec une personne suivie par l'OAK-D Lite.
+  target_distance_m: 1.25
+  distance_deadband_m: 0.18
+  minimum_motor_command: 0.14 # Au-dessus de la zone morte mesurée des moteurs
+  max_forward_speed: 0.20     # Commande normalisée, volontairement lente
+  max_turn_speed: 0.18
+  obstacle_stop_cm: 55
+  side_stop_cm: 35
+  trail_spacing_m: 0.30       # Échantillonnage de la trajectoire SLAM
+  trail_yaw_spacing_deg: 20
+
 slam:
   # Vitesse maximale utilisee uniquement pour convertir les ordres Nav2.
   max_linear_speed_m_s: 0.65

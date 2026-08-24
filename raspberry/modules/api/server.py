@@ -38,6 +38,7 @@ from modules.automotive.navigation import (
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
 from modules.control.exceptions import ControlError
+from modules.control.follow_me import FollowMeController
 from modules.control.motor_controller import Direction
 from modules.control.nav2 import Nav2MotorBridge
 from modules.control.odometry import EncoderFeedbackPublisher
@@ -94,6 +95,7 @@ _patrol: PatrolController | None = None
 _human_detector: HumanDetector | None = None
 _oak: OakDLiteSensor | None = None
 _tracker: TrackerController | None = None
+_follow_me: FollowMeController | None = None
 _rover_name: str = "rasprover"
 _manual_obstacle_override_until: float = 0.0
 _slam_container: str = "ros2-lidar"  # SLAM runs inside the lidar container to share DDS
@@ -257,6 +259,7 @@ async def lifespan(app: FastAPI):
         _human_detector, \
         _oak, \
         _tracker, \
+        _follow_me, \
         _rover_name, \
         _encoder_feedback, \
         _nav2_motors, \
@@ -462,6 +465,27 @@ async def lifespan(app: FastAPI):
         if _pantilt
         else None
     )
+    follow_cfg = cfg.get("follow_me", {})
+    follow_lidar = _lidar or _lidar_ros_adapter
+    _follow_me = (
+        FollowMeController(
+            _motors,
+            _oak,
+            follow_lidar,
+            lambda: _read_container_json("/tmp/current_pose.json"),
+            target_distance_m=float(follow_cfg.get("target_distance_m", 1.25)),
+            distance_deadband_m=float(follow_cfg.get("distance_deadband_m", 0.18)),
+            minimum_motor_command=float(follow_cfg.get("minimum_motor_command", 0.14)),
+            max_forward_speed=float(follow_cfg.get("max_forward_speed", 0.20)),
+            max_turn_speed=float(follow_cfg.get("max_turn_speed", 0.18)),
+            obstacle_stop_cm=float(follow_cfg.get("obstacle_stop_cm", 55.0)),
+            side_stop_cm=float(follow_cfg.get("side_stop_cm", 35.0)),
+            trail_spacing_m=float(follow_cfg.get("trail_spacing_m", 0.30)),
+            trail_yaw_spacing_deg=float(follow_cfg.get("trail_yaw_spacing_deg", 20.0)),
+        )
+        if _motors and _oak and follow_lidar
+        else None
+    )
     _inspection_runner = InspectionRunner(
         _automotive_repository,
         _inspection_navigate,
@@ -495,6 +519,9 @@ async def lifespan(app: FastAPI):
 
     if _inspection_runner and _inspection_runner.active:
         await _inspection_runner.stop()
+
+    if _follow_me and _follow_me.active:
+        await _follow_me.stop()
 
     if _patrol and _patrol.active:
         loop = asyncio.get_event_loop()
@@ -743,6 +770,7 @@ def _system_status() -> dict:
     if nav2_active:
         patrol_data = {**patrol_data, "patrol_active": True, "patrol_state": "nav2"}
     tracker_data = _tracker.to_dict() if _tracker else {"tracker_active": False}
+    follow_data = _follow_me.to_dict() if _follow_me else {"follow_me_active": False}
     human_data = _human_detector.to_dict() if _human_detector else {}
     distance_data = _ultrasonic.to_dict() if _ultrasonic else {}
     vision_data = _vision.to_dict() if _vision else {}
@@ -766,6 +794,7 @@ def _system_status() -> dict:
         **lidar_data,
         **patrol_data,
         **tracker_data,
+        **follow_data,
         **human_data,
     }
 
@@ -1829,6 +1858,8 @@ async def slam_start() -> dict:
 async def slam_stop() -> dict:
     loop = asyncio.get_running_loop()
     try:
+        if _follow_me and _follow_me.active:
+            await _follow_me.stop()
         if _nav2_motors:
             await loop.run_in_executor(None, _nav2_motors.cancel)
         await loop.run_in_executor(None, _stop_ros_navigation_processes)
@@ -1934,6 +1965,8 @@ async def slam_save(body: dict[str, Any] | None = None) -> dict:
 @app.post("/api/slam/load")
 async def slam_load(body: dict[str, Any]) -> dict:
     """Load a persistent map and start AMCL + Nav2 localization."""
+    if _follow_me and _follow_me.active:
+        await _follow_me.stop()
     safe_name = validate_map_name(body.get("name", ""))
     if safe_name is None:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Nom invalide"})
@@ -2396,6 +2429,11 @@ async def automotive_inspection_start(body: dict[str, Any]) -> dict:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Service indisponible"})
     if _motors is None or _nav2_motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    if _follow_me and _follow_me.active:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Arrêtez Follow Me avant l’inspection"},
+        )
     registration = str(body.get("registration", "")).strip().upper()
     route_id = str(body.get("route_id", "")).strip()
     label = str(body.get("label", "")).strip() or None
@@ -2476,6 +2514,68 @@ async def automotive_capture_image(capture_id: str):
 
 
 # ---------------------------------------------------------------------------
+# REST — Follow Me (apprentissage du plateau)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/follow-me/start")
+async def follow_me_start() -> dict:
+    if _follow_me is None or _oak is None or _motors is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": "Follow Me indisponible : OAK, LIDAR ou moteurs absents",
+            },
+        )
+    oak_status = _oak.to_dict()
+    if not oak_status.get("oak_connected"):
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": oak_status.get("oak_error") or "OAK-D non connectée"},
+        )
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _slam_running):
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Démarrez la cartographie SLAM avant Follow Me"},
+        )
+    if _inspection_runner and _inspection_runner.active:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Une inspection est déjà en cours"},
+        )
+    if _patrol and _patrol.active:
+        await _patrol.stop(loop)
+    if _tracker and _tracker.active:
+        _tracker.stop()
+    if _nav2_motors and _nav2_motors.enabled:
+        await loop.run_in_executor(None, _nav2_motors.cancel)
+    _follow_me.start(loop)
+    return {"ok": True, **_follow_me.to_dict()}
+
+
+@app.post("/api/follow-me/stop")
+async def follow_me_stop() -> dict:
+    if _follow_me is None:
+        return {"ok": True, "follow_me_active": False, "follow_me_state": "idle"}
+    await _follow_me.stop()
+    return {"ok": True, **_follow_me.to_dict()}
+
+
+@app.get("/api/follow-me/status")
+async def follow_me_status() -> dict:
+    if _follow_me is None:
+        return {
+            "follow_me_active": False,
+            "follow_me_state": "unavailable",
+            "follow_me_reason": "OAK, LIDAR ou moteurs absents",
+            "follow_me_trail": [],
+        }
+    return _follow_me.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # REST — Patrouille
 # ---------------------------------------------------------------------------
 
@@ -2486,6 +2586,8 @@ async def patrol_start() -> dict:
     if _patrol is None or _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "not ready"})
     loop = asyncio.get_running_loop()
+    if _follow_me and _follow_me.active:
+        await _follow_me.stop()
     if _nav2_motors and _nav2_motors.enabled:
         await loop.run_in_executor(None, _nav2_motors.cancel)
     await _patrol.start(loop)
@@ -2514,6 +2616,11 @@ async def nav2_home_start() -> dict:
     """Send one and only one Nav2 goal: the saved home of the active map."""
     if _nav2_motors is None or _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    if _follow_me and _follow_me.active:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Arrêtez Follow Me avant le retour maison"},
+        )
     loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, _nav2_ready):
         return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
@@ -2681,6 +2788,11 @@ async def nav2_home_status() -> dict:
 async def nav2_patrol_start(body: dict[str, Any]) -> dict:
     if _nav2_motors is None or _motors is None:
         return JSONResponse(status_code=503, content={"ok": False, "error": "Moteurs absents"})
+    if _follow_me and _follow_me.active:
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": "Arrêtez Follow Me avant la navigation Nav2"},
+        )
     loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, _nav2_ready):
         return JSONResponse(status_code=409, content={"ok": False, "error": "Nav2 non actif"})
@@ -2960,9 +3072,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "message": "not ready"})
                     continue
                 # Patrouille active → ignore les commandes manuelles
-                if (_patrol and _patrol.active) or (_nav2_motors and _nav2_motors.enabled):
+                if (
+                    (_patrol and _patrol.active)
+                    or (_nav2_motors and _nav2_motors.enabled)
+                    or (_follow_me and _follow_me.active)
+                ):
                     await ws.send_json(
-                        {"type": "error", "message": "Patrouille active — arrête-la d'abord"}
+                        {"type": "error", "message": "Navigation autonome active — arrêtez-la"}
                     )
                     continue
                 try:
@@ -3027,6 +3143,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "message": str(exc)})
 
             elif msg_type == "stop":
+                if _follow_me and _follow_me.active:
+                    await _follow_me.stop()
                 if _motors and not (_nav2_motors and _nav2_motors.enabled):
                     await loop.run_in_executor(None, _motors.stop)
 
@@ -3107,6 +3225,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
                 action = data.get("action", "start")
                 if action == "start":
+                    if _follow_me and _follow_me.active:
+                        await _follow_me.stop()
                     if _tracker and _tracker.active:
                         _tracker.stop()
                     await _patrol.start(loop)
@@ -3120,6 +3240,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
                 action = data.get("action", "start")
                 if action == "start":
+                    if _follow_me and _follow_me.active:
+                        await _follow_me.stop()
                     if _patrol and _patrol.active:
                         await _patrol.stop(loop)
                     _tracker.start(loop)
@@ -3195,6 +3317,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         _manager.disconnect(ws)
+        # Follow Me est un mode supervisé par une personne : une perte de
+        # l'application doit l'arrêter, contrairement à une patrouille autonome.
+        if _follow_me and _follow_me.active:
+            await _follow_me.stop()
         autonomous = (_patrol and _patrol.active) or (_nav2_motors and _nav2_motors.enabled)
         if _motors and not autonomous:
             try:
