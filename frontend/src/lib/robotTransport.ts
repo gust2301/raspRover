@@ -23,6 +23,10 @@ export function getRobotStreamUrl(robotIp: string): string {
   return `${parseRobotUrl(robotIp).httpBase}/stream`
 }
 
+export function getRobotOakStreamUrl(robotIp: string): string {
+  return `${parseRobotUrl(robotIp).httpBase}/api/oak/stream`
+}
+
 export function getRobotWsUrl(robotIp: string): string {
   return `${parseRobotUrl(robotIp).wsBase}/ws`
 }

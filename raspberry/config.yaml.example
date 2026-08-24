@@ -95,6 +95,8 @@ sensors:
     enabled: true
     model: "mobilenet-ssd"    # Personne/voiture exécuté sur l'OAK, pas sur la Pi
     fps: 8                    # Fréquence publiée; branchement USB 3 requis
+    video_fps: 5              # Flux JPEG bas-débit pour l'écran de test caméra
+                               # (/api/oak/stream) — pas utilisé pour la détection
     obstacle_distance_mm: 700 # Sécurité profondeur devant le rover
     depth_roi_top: 0.45       # ROI verticale: exclut plafond/horizon
     depth_roi_bottom: 0.82    # Exclut le bas extrême où le sol domine
@@ -109,13 +111,17 @@ sensors:
 
 follow_me:
   # Apprentissage guidé du plateau avec une personne suivie par l'OAK-D Lite.
-  target_distance_m: 1.25
+  target_distance_m: 0.90     # Distance de suivi ; réduire encore pour les
+                               # espaces exigus (plancher matériel : 0.8 m)
   distance_deadband_m: 0.18
   minimum_motor_command: 0.14 # Au-dessus de la zone morte mesurée des moteurs
   max_forward_speed: 0.20     # Commande normalisée, volontairement lente
   max_turn_speed: 0.18
-  obstacle_stop_cm: 55
-  side_stop_cm: 35
+  obstacle_stop_cm: 40         # Sécurité LIDAR avant (plancher matériel : 30)
+  side_stop_cm: 28             # Sécurité LIDAR latérale (plancher matériel : 25)
+  align_deadband_deg: 12       # Tolérance d'angle avant de considérer l'axe aligné
+  pivot_only_deg: 35           # Au-delà : pivot pur, pas d'avance (evite un
+                                # virage trop large qui perdrait la personne)
   trail_spacing_m: 0.30       # Échantillonnage de la trajectoire SLAM
   trail_yaw_spacing_deg: 20
 

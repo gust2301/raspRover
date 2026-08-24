@@ -12,6 +12,7 @@ import Pilotage from './pages/Pilotage'
 import MapView from './pages/MapView'
 import ConnectScreen from './pages/ConnectScreen'
 import VehicleInspections from './pages/VehicleInspections'
+import OakVision from './pages/OakVision'
 import { RobotConnectionProvider } from './context/RobotConnectionContext'
 import { ThemeProvider } from './context/ThemeContext'
 import UpdatePrompt from './components/UpdatePrompt'
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="settings" element={<Settings />} />
               <Route path="map" element={<MapView />} />
               <Route path="vehicle-inspections" element={<VehicleInspections />} />
+              <Route path="oak-vision" element={<OakVision />} />
             </Route>
           </Routes>
         </BrowserRouter>

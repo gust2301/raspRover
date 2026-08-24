@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Route, AlertTriangle, Car,
-  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map,
+  Bot, MapPin, FileText, Settings, Battery, Wifi, AlertOctagon, Gamepad2, X, Map, ScanEye,
 } from 'lucide-react'
 import { mockRobot } from '../data/robots'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/pilotage', icon: Gamepad2, label: 'Pilotage', highlight: true },
   { to: '/cameras', icon: Camera, label: 'Caméras', highlight: false },
   { to: '/vehicle-inspections', icon: Car, label: 'Inspections véhicules', highlight: true },
+  { to: '/oak-vision', icon: ScanEye, label: 'Vision OAK-D', highlight: false },
   { to: '/patrols', icon: Route, label: 'Patrouilles', highlight: false },
   { to: '/map', icon: Map, label: 'Carte SLAM', highlight: false },
   { to: '/incidents', icon: AlertTriangle, label: 'Incidents', highlight: false },

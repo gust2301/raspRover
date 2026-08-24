@@ -78,12 +78,42 @@ def test_follow_me_stops_immediately_when_person_is_lost():
 def test_follow_me_lidar_obstacle_has_priority():
     controller, motors, oak, lidar = _controller()
     oak.person_target = _target(z_mm=2000)
-    lidar.snapshot = LidarSnapshot(connected=True, front_distance_cm=40.0)
+    lidar.snapshot = LidarSnapshot(connected=True, front_distance_cm=20.0)
 
     asyncio.run(controller._step())
 
     assert motors.commands[-1] == ("stop",)
     assert controller.to_dict()["follow_me_state"] == "obstacle"
+
+
+def test_follow_me_creeps_forward_while_turning_moderately():
+    """A moderately misaligned but still-far person must not freeze translation:
+    the rover should keep closing distance while pivoting towards them."""
+    controller, motors, oak, _lidar = _controller()
+    oak.person_target = _target(x_mm=728, z_mm=2000)  # ~20°, 2.0 m away
+
+    asyncio.run(controller._step())
+
+    command = motors.commands[-1]
+    assert command[0] == "drive"
+    left, right = command[1], command[2]
+    assert left > 0.2  # turn + forward creep stack up on this side
+    assert right < 0.0  # still net turning right…
+    assert right > -0.12  # …but far less reversed than a pure pivot (~-0.16)
+    assert controller.to_dict()["follow_me_state"] == "turning_right"
+
+
+def test_follow_me_pivots_in_place_beyond_pivot_threshold():
+    """Near the edge of the camera's field of view, forward creep must stay
+    off entirely so the rover doesn't arc away from (and lose) the person."""
+    controller, motors, oak, _lidar = _controller()
+    oak.person_target = _target(x_mm=1258, z_mm=1500)  # ~40°, 1.5 m away
+
+    asyncio.run(controller._step())
+
+    command = motors.commands[-1]
+    assert command[0] == "drive"
+    assert command[1] == -command[2]  # pure pivot: no forward component
 
 
 def test_follow_me_records_spaced_slam_poses():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import time
 from typing import Any
@@ -114,10 +115,27 @@ def run(args: argparse.Namespace) -> None:
         stereo.depth.link(detector.inputDepth)
         detector.out.link(detection_output.input)
 
+        # Flux JPEG bas-débit pour l'écran de test OAK — même cadrage 300x300
+        # que la preview envoyée au détecteur, pour que les boîtes de
+        # détection (coordonnées normalisées 0-1) se superposent pile sur
+        # l'image affichée. Un .video à un autre ratio décalerait les boîtes.
+        color.setVideoSize(300, 300)
+        video_encoder = pipeline.create(dai.node.VideoEncoder)
+        video_encoder.setDefaultProfilePreset(
+            args.video_fps, dai.VideoEncoderProperties.Profile.MJPEG
+        )
+        video_output = pipeline.create(dai.node.XLinkOut)
+        video_output.setStreamName("video")
+        color.video.link(video_encoder.input)
+        video_encoder.bitstream.link(video_output.input)
+
     with dai.Device(pipeline) as device:
         depth_queue = device.getOutputQueue("depth", maxSize=2, blocking=False)
         detection_queue = (
             device.getOutputQueue("detections", maxSize=2, blocking=False) if blob_path else None
+        )
+        video_queue = (
+            device.getOutputQueue("video", maxSize=2, blocking=False) if blob_path else None
         )
         emit(
             "ready",
@@ -126,8 +144,17 @@ def run(args: argparse.Namespace) -> None:
             model_error=model_error,
         )
         last_depth_emit = 0.0
+        last_video_emit = 0.0
         interval = 1.0 / max(1, args.fps)
+        video_interval = 1.0 / max(1, args.video_fps)
         while True:
+            if video_queue:
+                packet = video_queue.tryGet()
+                now = time.monotonic()
+                if packet is not None and now - last_video_emit >= video_interval:
+                    jpeg_b64 = base64.b64encode(packet.getData().tobytes()).decode("ascii")
+                    emit("video", jpeg_b64=jpeg_b64)
+                    last_video_emit = now
             if detection_queue:
                 packet = detection_queue.tryGet()
                 if packet is not None:
@@ -142,6 +169,10 @@ def run(args: argparse.Namespace) -> None:
                                 "confidence": float(detection.confidence),
                                 "cx": float(detection.xmin + detection.xmax) / 2.0,
                                 "cy": float(detection.ymin + detection.ymax) / 2.0,
+                                "xmin": float(detection.xmin),
+                                "xmax": float(detection.xmax),
+                                "ymin": float(detection.ymin),
+                                "ymax": float(detection.ymax),
                                 "x_mm": int(spatial.x),
                                 "y_mm": int(spatial.y),
                                 "z_mm": int(spatial.z),
@@ -162,6 +193,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="mobilenet-ssd")
     parser.add_argument("--fps", type=int, default=8)
+    parser.add_argument("--video-fps", type=int, default=5)
     parser.add_argument("--obstacle-distance-mm", type=int, default=700)
     parser.add_argument("--depth-roi-top", type=float, default=0.45)
     parser.add_argument("--depth-roi-bottom", type=float, default=0.82)

@@ -57,6 +57,8 @@ from modules.sensors.lidar import LidarPoint, LidarSnapshot
 from modules.sensors.lidar_ros import ROS2LidarBridge
 
 from .camera import (
+    BLACK_JPEG_FRAME,
+    BOUNDARY,
     capture_photo,
     generate_frames,
     get_recording_state,
@@ -404,6 +406,7 @@ async def lifespan(app: FastAPI):
         _oak = OakDLiteSensor(
             model=str(oak_cfg.get("model", "mobilenet-ssd")),
             fps=int(oak_cfg.get("fps", 8)),
+            video_fps=int(oak_cfg.get("video_fps", 5)),
             obstacle_distance_mm=int(oak_cfg.get("obstacle_distance_mm", 700)),
             depth_roi_top=float(oak_cfg.get("depth_roi_top", 0.45)),
             depth_roi_bottom=float(oak_cfg.get("depth_roi_bottom", 0.82)),
@@ -479,13 +482,15 @@ async def lifespan(app: FastAPI):
             _oak,
             follow_lidar,
             lambda: _read_container_json("/tmp/current_pose.json"),
-            target_distance_m=float(follow_cfg.get("target_distance_m", 1.25)),
+            target_distance_m=float(follow_cfg.get("target_distance_m", 0.90)),
             distance_deadband_m=float(follow_cfg.get("distance_deadband_m", 0.18)),
             minimum_motor_command=float(follow_cfg.get("minimum_motor_command", 0.14)),
             max_forward_speed=float(follow_cfg.get("max_forward_speed", 0.20)),
             max_turn_speed=float(follow_cfg.get("max_turn_speed", 0.18)),
-            obstacle_stop_cm=float(follow_cfg.get("obstacle_stop_cm", 55.0)),
-            side_stop_cm=float(follow_cfg.get("side_stop_cm", 35.0)),
+            obstacle_stop_cm=float(follow_cfg.get("obstacle_stop_cm", 40.0)),
+            side_stop_cm=float(follow_cfg.get("side_stop_cm", 28.0)),
+            align_deadband_deg=float(follow_cfg.get("align_deadband_deg", 12.0)),
+            pivot_only_deg=float(follow_cfg.get("pivot_only_deg", 35.0)),
             trail_spacing_m=float(follow_cfg.get("trail_spacing_m", 0.30)),
             trail_yaw_spacing_deg=float(follow_cfg.get("trail_yaw_spacing_deg", 20.0)),
         )
@@ -834,6 +839,29 @@ async def video_stream() -> StreamingResponse:
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+def _oak_frame_stream():
+    """Rejoue le dernier JPEG reçu de l'OAK — écran de test caméra uniquement."""
+    while True:
+        frame = _oak.last_frame_jpeg if _oak else None
+        yield BOUNDARY + (frame or BLACK_JPEG_FRAME) + b"\r\n"
+        time.sleep(0.15)
+
+
+@app.get("/api/oak/stream")
+async def oak_video_stream() -> StreamingResponse:
+    return StreamingResponse(
+        _oak_frame_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/oak/status")
+async def oak_status() -> dict:
+    if _oak is None:
+        return {"oak_available": False, "oak_connected": False}
+    return _oak.to_dict()
 
 
 # ---------------------------------------------------------------------------

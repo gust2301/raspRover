@@ -26,13 +26,15 @@ class FollowMeController:
         lidar,
         pose_provider: Callable[[], dict[str, Any] | None],
         *,
-        target_distance_m: float = 1.25,
+        target_distance_m: float = 0.90,
         distance_deadband_m: float = 0.18,
         minimum_motor_command: float = 0.14,
         max_forward_speed: float = 0.20,
         max_turn_speed: float = 0.18,
-        obstacle_stop_cm: float = 55.0,
-        side_stop_cm: float = 35.0,
+        obstacle_stop_cm: float = 40.0,
+        side_stop_cm: float = 28.0,
+        align_deadband_deg: float = 12.0,
+        pivot_only_deg: float = 35.0,
         trail_spacing_m: float = 0.30,
         trail_yaw_spacing_deg: float = 20.0,
     ) -> None:
@@ -49,6 +51,10 @@ class FollowMeController:
         self.max_turn_speed = max(self.minimum_motor_command, min(float(max_turn_speed), 0.30))
         self.obstacle_stop_cm = max(30.0, float(obstacle_stop_cm))
         self.side_stop_cm = max(25.0, float(side_stop_cm))
+        self.align_deadband_rad = math.radians(max(5.0, float(align_deadband_deg)))
+        self.pivot_only_rad = math.radians(
+            max(math.degrees(self.align_deadband_rad) + 5.0, float(pivot_only_deg))
+        )
         self.trail_spacing_m = max(0.10, float(trail_spacing_m))
         self.trail_yaw_spacing_rad = math.radians(max(5.0, float(trail_yaw_spacing_deg)))
         self._task: asyncio.Task | None = None
@@ -139,30 +145,52 @@ class FollowMeController:
             self._record_pose()
             return
 
-        if abs(angle_rad) > math.radians(12.0):
+        angle_abs = abs(angle_rad)
+        distance_error = distance_m - self.target_distance_m
+        aligned = angle_abs <= self.align_deadband_rad
+        too_far = distance_error > self.distance_deadband_m
+
+        if aligned and not too_far:
+            await self._stop_for("target_reached", "Distance de suivi atteinte")
+            self._record_pose()
+            return
+
+        turn = 0.0
+        if not aligned:
             turn = min(
                 self.max_turn_speed,
-                max(self.minimum_motor_command, 0.10 + abs(angle_rad) * 0.18),
+                max(self.minimum_motor_command, 0.10 + angle_abs * 0.18),
             )
-            if angle_rad > 0.0:
-                await asyncio.to_thread(self._motors.drive, turn, -turn)
-                self._state = "turning_right"
-            else:
-                await asyncio.to_thread(self._motors.drive, -turn, turn)
-                self._state = "turning_left"
-            self._reason = "Alignement sur la personne"
-        elif distance_m > self.target_distance_m + self.distance_deadband_m:
-            distance_error = distance_m - self.target_distance_m
+            if angle_rad < 0.0:
+                turn = -turn
+
+        forward = 0.0
+        if too_far and angle_abs < self.pivot_only_rad:
             speed = min(
                 self.max_forward_speed,
                 max(self.minimum_motor_command, 0.10 + distance_error * 0.10),
             )
-            steering = max(-0.65, min(0.65, angle_rad / math.radians(20.0)))
-            await asyncio.to_thread(self._motors.arc, speed, steering)
-            self._state = "following"
-            self._reason = "Suivi de la personne"
+            # Le pivot domine à mesure que le désalignement grandit, pour ne
+            # pas foncer de travers ; en dessous du seuil de pivot pur, le
+            # rover avance donc en tournant au lieu de s'arrêter pour pivoter.
+            blend = max(0.0, 1.0 - angle_abs / self.pivot_only_rad)
+            forward = speed * blend
+
+        if turn and forward:
+            await asyncio.to_thread(self._motors.drive, forward + turn, forward - turn)
+        elif turn:
+            await asyncio.to_thread(self._motors.drive, turn, -turn)
         else:
-            await self._stop_for("target_reached", "Distance de suivi atteinte")
+            steering = max(-0.65, min(0.65, angle_rad / math.radians(20.0)))
+            await asyncio.to_thread(self._motors.arc, forward, steering)
+
+        if turn > 0.0:
+            self._state = "turning_right"
+        elif turn < 0.0:
+            self._state = "turning_left"
+        else:
+            self._state = "following"
+        self._reason = "Alignement sur la personne" if turn else "Suivi de la personne"
 
         self._record_pose()
 
@@ -180,13 +208,13 @@ class FollowMeController:
             and snapshot.front_distance_cm < self.obstacle_stop_cm
         ):
             return f"Obstacle devant à {snapshot.front_distance_cm:.0f} cm"
-        if angle_rad < -math.radians(12.0):
+        if angle_rad < -self.align_deadband_rad:
             if (
                 snapshot.left_distance_cm is not None
                 and snapshot.left_distance_cm < self.side_stop_cm
             ):
                 return f"Obstacle à gauche à {snapshot.left_distance_cm:.0f} cm"
-        if angle_rad > math.radians(12.0):
+        if angle_rad > self.align_deadband_rad:
             if (
                 snapshot.right_distance_cm is not None
                 and snapshot.right_distance_cm < self.side_stop_cm

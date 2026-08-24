@@ -6,6 +6,8 @@ development machines and on a rover where the camera is disconnected.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import pathlib
@@ -34,6 +36,10 @@ class OakTarget:
     x_mm: int
     y_mm: int
     z_mm: int
+    xmin: float = 0.0
+    xmax: float = 0.0
+    ymin: float = 0.0
+    ymax: float = 0.0
 
 
 class OakDLiteSensor:
@@ -44,6 +50,7 @@ class OakDLiteSensor:
         *,
         model: str = "mobilenet-ssd",
         fps: int = 8,
+        video_fps: int = 5,
         obstacle_distance_mm: int = 700,
         depth_roi_top: float = 0.45,
         depth_roi_bottom: float = 0.82,
@@ -54,6 +61,7 @@ class OakDLiteSensor:
     ) -> None:
         self.model = model
         self.fps = max(1, min(int(fps), 15))
+        self.video_fps = max(1, min(int(video_fps), 10))
         self.obstacle_distance_mm = max(150, int(obstacle_distance_mm))
         self.depth_roi_top = max(0.0, min(float(depth_roi_top), 0.9))
         self.depth_roi_bottom = max(self.depth_roi_top + 0.05, min(float(depth_roi_bottom), 1.0))
@@ -80,6 +88,8 @@ class OakDLiteSensor:
             "center": None,
             "right": None,
         }
+        self._last_frame_jpeg: bytes | None = None
+        self._last_frame_ts = 0.0
         self._last_update_ts = 0.0
 
     @property
@@ -103,6 +113,14 @@ class OakDLiteSensor:
         with self._lock:
             return dict(self._depth_zones)
 
+    @property
+    def last_frame_jpeg(self) -> bytes | None:
+        """Fresh JPEG frame for the OAK debug view, or ``None`` when stale."""
+        with self._lock:
+            if time.monotonic() - self._last_frame_ts > 2.0:
+                return None
+            return self._last_frame_jpeg
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -118,6 +136,9 @@ class OakDLiteSensor:
         if self._thread:
             self._thread.join(timeout=4.0)
             self._thread = None
+        with self._lock:
+            self._last_frame_jpeg = None
+            self._last_frame_ts = 0.0
         self._publish_person(None)
         self._publish_depth(
             {"left": False, "center": False, "right": False},
@@ -133,6 +154,9 @@ class OakDLiteSensor:
                 "oak_error": self._error,
                 "oak_depth_zones": dict(self._depth_zones),
                 "oak_depth_cm": dict(self._depth_cm),
+                "oak_video_available": (
+                    time.monotonic() - self._last_frame_ts <= 2.0 if self._last_frame_ts else False
+                ),
                 "oak_detections": [target.__dict__ for target in self._detections],
                 "oak_vehicle": self._vehicle_target.__dict__ if self._vehicle_target else None,
                 "oak_last_update_age_s": (
@@ -159,6 +183,8 @@ class OakDLiteSensor:
                     self.model,
                     "--fps",
                     str(self.fps),
+                    "--video-fps",
+                    str(self.video_fps),
                     "--obstacle-distance-mm",
                     str(self.obstacle_distance_mm),
                     "--depth-roi-top",
@@ -218,6 +244,15 @@ class OakDLiteSensor:
                 self._last_update_ts = time.monotonic()
             self._publish_person((person.cx, person.cy, person.confidence) if person else None)
             return
+        if kind == "video":
+            try:
+                frame = base64.b64decode(message["jpeg_b64"])
+            except (KeyError, ValueError, TypeError, binascii.Error):
+                return
+            with self._lock:
+                self._last_frame_jpeg = frame
+                self._last_frame_ts = time.monotonic()
+            return
         if kind == "depth":
             zones = {name: bool(message["zones"].get(name)) for name in self._depth_zones}
             distances = {name: message["distances_cm"].get(name) for name in self._depth_cm}
@@ -248,6 +283,8 @@ class OakDLiteSensor:
             self._person_update_ts = 0.0
             self._vehicle_target = None
             self._vehicle_update_ts = 0.0
+            self._last_frame_jpeg = None
+            self._last_frame_ts = 0.0
         self._publish_person(None)
         self._publish_depth(
             {"left": False, "center": False, "right": False},
