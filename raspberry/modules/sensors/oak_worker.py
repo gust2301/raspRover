@@ -100,7 +100,9 @@ def run(args: argparse.Namespace) -> None:
     if blob_path:
         color = pipeline.create(dai.node.ColorCamera)
         detector = pipeline.create(dai.node.MobileNetSpatialDetectionNetwork)
+        tracker = pipeline.create(dai.node.ObjectTracker)
         detection_output = pipeline.create(dai.node.XLinkOut)
+        tracklet_output = pipeline.create(dai.node.XLinkOut)
         color.setBoardSocket(dai.CameraBoardSocket.CAM_A)
         color.setPreviewSize(300, 300)
         color.setInterleaved(False)
@@ -116,9 +118,19 @@ def run(args: argparse.Namespace) -> None:
         detector.setDepthUpperThreshold(8000)
         detector.input.setBlocking(False)
         detection_output.setStreamName("detections")
+        tracklet_output.setStreamName("person_tracklets")
+        tracker.setDetectionLabelsToTrack([15])  # classe VOC ``person``
+        tracker.setTrackerType(dai.TrackerType.SHORT_TERM_IMAGELESS)
+        tracker.setTrackerIdAssignmentPolicy(dai.TrackerIdAssignmentPolicy.UNIQUE_ID)
         color.preview.link(detector.input)
         stereo.depth.link(detector.inputDepth)
         detector.out.link(detection_output.input)
+        # Le tracker conserve une identité stable lorsque MobileNet manque une
+        # frame. Les détections spatiales lui transmettent aussi X/Y/Z.
+        detector.passthrough.link(tracker.inputTrackerFrame)
+        detector.passthrough.link(tracker.inputDetectionFrame)
+        detector.out.link(tracker.inputDetections)
+        tracker.out.link(tracklet_output.input)
 
         # L'encodeur MJPEG matériel bloque ce modèle OAK-D Lite avec le flux
         # spatial. Envoyer la preview 300x300 brute puis l'encoder sur l'hôte
@@ -133,6 +145,11 @@ def run(args: argparse.Namespace) -> None:
         detection_queue = (
             device.getOutputQueue("detections", maxSize=2, blocking=False) if blob_path else None
         )
+        tracklet_queue = (
+            device.getOutputQueue("person_tracklets", maxSize=4, blocking=False)
+            if blob_path
+            else None
+        )
         video_queue = (
             device.getOutputQueue("video", maxSize=2, blocking=False) if blob_path else None
         )
@@ -141,6 +158,7 @@ def run(args: argparse.Namespace) -> None:
             usb_speed=str(device.getUsbSpeed()).split(".")[-1],
             model=args.model if blob_path else None,
             model_error=model_error,
+            person_tracker=bool(blob_path),
         )
         last_depth_emit = 0.0
         last_video_emit = 0.0
@@ -185,6 +203,34 @@ def run(args: argparse.Namespace) -> None:
                         )
                     items.sort(key=lambda item: (item["z_mm"] <= 0, item["z_mm"]))
                     emit("detections", items=items)
+            if tracklet_queue:
+                packet = tracklet_queue.tryGet()
+                if packet is not None:
+                    items = []
+                    for tracklet in packet.tracklets:
+                        roi = tracklet.roi
+                        top_left = roi.topLeft()
+                        bottom_right = roi.bottomRight()
+                        spatial = tracklet.spatialCoordinates
+                        status = str(tracklet.status).split(".")[-1]
+                        items.append(
+                            {
+                                "label": "person",
+                                "confidence": 1.0,
+                                "cx": float(top_left.x + bottom_right.x) / 2.0,
+                                "cy": float(top_left.y + bottom_right.y) / 2.0,
+                                "xmin": float(top_left.x),
+                                "xmax": float(bottom_right.x),
+                                "ymin": float(top_left.y),
+                                "ymax": float(bottom_right.y),
+                                "x_mm": int(spatial.x),
+                                "y_mm": int(spatial.y),
+                                "z_mm": int(spatial.z),
+                                "track_id": int(tracklet.id),
+                                "tracking_status": status,
+                            }
+                        )
+                    emit("person_tracklets", items=items)
             packet = depth_queue.tryGet()
             now = time.monotonic()
             if packet is not None and now - last_depth_emit >= interval:

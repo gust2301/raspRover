@@ -94,8 +94,8 @@ sensors:
   oak:
     enabled: true
     model: "mobilenet-ssd"    # Personne/voiture exécuté sur l'OAK, pas sur la Pi
-    fps: 8                    # Fréquence publiée; branchement USB 3 requis
-    video_fps: 5              # Flux JPEG bas-débit pour l'écran de test caméra
+    fps: 15                   # Détection/tracking; branchement USB 3 requis
+    video_fps: 8              # Flux JPEG pour l'écran de test caméra
                                # (/api/oak/stream) — pas utilisé pour la détection
     obstacle_distance_mm: 700 # Sécurité profondeur devant le rover
     depth_roi_top: 0.45       # ROI verticale: exclut plafond/horizon
@@ -111,17 +111,18 @@ sensors:
 
 follow_me:
   # Apprentissage guidé du plateau avec une personne suivie par l'OAK-D Lite.
-  target_distance_m: 0.90     # Distance de suivi ; réduire encore pour les
-                               # espaces exigus (plancher matériel : 0.8 m)
-  distance_deadband_m: 0.18
+  target_distance_m: 0.75     # Distance confortable derrière la personne
+  distance_deadband_m: 0.10
   minimum_motor_command: 0.14 # Au-dessus de la zone morte mesurée des moteurs
-  max_forward_speed: 0.20     # Commande normalisée, volontairement lente
-  max_turn_speed: 0.18
+  max_forward_speed: 0.30
+  max_turn_speed: 0.30
   obstacle_stop_cm: 40         # Sécurité LIDAR avant (plancher matériel : 30)
   side_stop_cm: 28             # Sécurité LIDAR latérale (plancher matériel : 25)
-  align_deadband_deg: 12       # Tolérance d'angle avant de considérer l'axe aligné
-  pivot_only_deg: 35           # Au-delà : pivot pur, pas d'avance (evite un
+  align_deadband_deg: 6        # Corrige rapidement les changements de direction
+  pivot_only_deg: 48           # Au-delà : pivot pur, pas d'avance (evite un
                                 # virage trop large qui perdrait la personne)
+  target_loss_grace_s: 0.65    # Cherche brièvement sur place, jamais en aveugle
+  target_smoothing: 0.45       # EMA X/Z : réduit le tremblement sans forte latence
   trail_spacing_m: 0.30       # Échantillonnage de la trajectoire SLAM
   trail_yaw_spacing_deg: 20
 

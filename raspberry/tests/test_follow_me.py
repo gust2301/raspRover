@@ -97,9 +97,9 @@ def test_follow_me_creeps_forward_while_turning_moderately():
     command = motors.commands[-1]
     assert command[0] == "drive"
     left, right = command[1], command[2]
-    assert left > 0.2  # turn + forward creep stack up on this side
-    assert right < 0.0  # still net turning right…
-    assert right > -0.12  # …but far less reversed than a pure pivot (~-0.16)
+    assert left > 0.3  # correction franche sur la roue extérieure
+    assert right > 0.0  # les deux roues avancent : virage fluide, pas de pivot saccadé
+    assert left > right
     assert controller.to_dict()["follow_me_state"] == "turning_right"
 
 
@@ -107,13 +107,40 @@ def test_follow_me_pivots_in_place_beyond_pivot_threshold():
     """Near the edge of the camera's field of view, forward creep must stay
     off entirely so the rover doesn't arc away from (and lose) the person."""
     controller, motors, oak, _lidar = _controller()
-    oak.person_target = _target(x_mm=1258, z_mm=1500)  # ~40°, 1.5 m away
+    oak.person_target = _target(x_mm=1788, z_mm=1500)  # ~50°, 1.5 m away
 
     asyncio.run(controller._step())
 
     command = motors.commands[-1]
     assert command[0] == "drive"
     assert command[1] == -command[2]  # pure pivot: no forward component
+
+
+def test_follow_me_brief_loss_searches_last_bearing_without_advancing():
+    controller, motors, oak, _lidar = _controller()
+    oak.person_target = _target(x_mm=700, z_mm=1400)
+    asyncio.run(controller._step())
+
+    oak.person_target = None
+    asyncio.run(controller._step())
+
+    command = motors.commands[-1]
+    assert command[0] == "drive"
+    assert command[1] == -command[2]
+    assert controller.to_dict()["follow_me_state"] == "reacquiring"
+
+
+def test_follow_me_stops_after_target_loss_grace_period():
+    controller, motors, oak, _lidar = _controller()
+    oak.person_target = _target(x_mm=700, z_mm=1400)
+    asyncio.run(controller._step())
+    controller._last_target_ts -= controller.target_loss_grace_s + 0.1
+
+    oak.person_target = None
+    asyncio.run(controller._step())
+
+    assert motors.commands[-1] == ("stop",)
+    assert controller.to_dict()["follow_me_state"] == "waiting_person"
 
 
 def test_follow_me_records_spaced_slam_poses():

@@ -26,15 +26,17 @@ class FollowMeController:
         lidar,
         pose_provider: Callable[[], dict[str, Any] | None],
         *,
-        target_distance_m: float = 0.90,
-        distance_deadband_m: float = 0.18,
+        target_distance_m: float = 0.75,
+        distance_deadband_m: float = 0.10,
         minimum_motor_command: float = 0.14,
-        max_forward_speed: float = 0.20,
-        max_turn_speed: float = 0.18,
+        max_forward_speed: float = 0.30,
+        max_turn_speed: float = 0.30,
         obstacle_stop_cm: float = 40.0,
         side_stop_cm: float = 28.0,
-        align_deadband_deg: float = 12.0,
-        pivot_only_deg: float = 35.0,
+        align_deadband_deg: float = 6.0,
+        pivot_only_deg: float = 48.0,
+        target_loss_grace_s: float = 0.65,
+        target_smoothing: float = 0.45,
         trail_spacing_m: float = 0.30,
         trail_yaw_spacing_deg: float = 20.0,
     ) -> None:
@@ -42,7 +44,7 @@ class FollowMeController:
         self._oak = oak
         self._lidar = lidar
         self._pose_provider = pose_provider
-        self.target_distance_m = max(0.8, float(target_distance_m))
+        self.target_distance_m = max(0.55, float(target_distance_m))
         self.distance_deadband_m = max(0.05, float(distance_deadband_m))
         self.minimum_motor_command = max(0.10, min(float(minimum_motor_command), 0.20))
         self.max_forward_speed = max(
@@ -55,6 +57,8 @@ class FollowMeController:
         self.pivot_only_rad = math.radians(
             max(math.degrees(self.align_deadband_rad) + 5.0, float(pivot_only_deg))
         )
+        self.target_loss_grace_s = max(0.0, min(float(target_loss_grace_s), 1.0))
+        self.target_smoothing = max(0.1, min(float(target_smoothing), 1.0))
         self.trail_spacing_m = max(0.10, float(trail_spacing_m))
         self.trail_yaw_spacing_rad = math.radians(max(5.0, float(trail_yaw_spacing_deg)))
         self._task: asyncio.Task | None = None
@@ -63,6 +67,7 @@ class FollowMeController:
         self._reason = ""
         self._target_distance: float | None = None
         self._target_angle: float | None = None
+        self._last_target_ts = 0.0
         self._trail: list[dict[str, float]] = []
 
     @property
@@ -109,13 +114,14 @@ class FollowMeController:
         self._reason = ""
         self._target_distance = None
         self._target_angle = None
+        self._last_target_ts = 0.0
         log.info("Follow Me arrêté")
 
     async def _run(self) -> None:
         try:
             while self._active:
                 await self._step()
-                await asyncio.sleep(0.10)
+                await asyncio.sleep(0.05)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -129,6 +135,30 @@ class FollowMeController:
     async def _step(self) -> None:
         target = self._oak.person_target
         if target is None or target.z_mm <= 0:
+            age = time.monotonic() - self._last_target_ts
+            if (
+                self._last_target_ts
+                and age <= self.target_loss_grace_s
+                and self._target_angle is not None
+                and abs(self._target_angle) > self.align_deadband_rad
+            ):
+                # Courte occultation : chercher dans la dernière direction,
+                # sans jamais avancer à l'aveugle.
+                turn = math.copysign(
+                    min(
+                        self.max_turn_speed,
+                        max(self.minimum_motor_command, abs(self._target_angle) * 0.55),
+                    ),
+                    self._target_angle,
+                )
+                hazard = self._safety_veto(self._target_angle)
+                if hazard:
+                    await self._stop_for("obstacle", hazard)
+                else:
+                    await asyncio.to_thread(self._motors.drive, turn, -turn)
+                    self._state = "reacquiring"
+                    self._reason = "Personne masquée — recherche dans la dernière direction"
+                return
             self._target_distance = None
             self._target_angle = None
             await self._stop_for("waiting_person", "Personne perdue — rover arrêté")
@@ -136,8 +166,13 @@ class FollowMeController:
 
         distance_m = target.z_mm / 1000.0
         angle_rad = math.atan2(float(target.x_mm), float(target.z_mm))
+        alpha = self.target_smoothing
+        if self._target_distance is not None and self._target_angle is not None:
+            distance_m = alpha * distance_m + (1.0 - alpha) * self._target_distance
+            angle_rad = alpha * angle_rad + (1.0 - alpha) * self._target_angle
         self._target_distance = round(distance_m, 3)
         self._target_angle = angle_rad
+        self._last_target_ts = time.monotonic()
 
         hazard = self._safety_veto(angle_rad)
         if hazard:
@@ -159,7 +194,7 @@ class FollowMeController:
         if not aligned:
             turn = min(
                 self.max_turn_speed,
-                max(self.minimum_motor_command, 0.10 + angle_abs * 0.18),
+                max(self.minimum_motor_command, angle_abs * 0.55),
             )
             if angle_rad < 0.0:
                 turn = -turn
@@ -168,12 +203,12 @@ class FollowMeController:
         if too_far and angle_abs < self.pivot_only_rad:
             speed = min(
                 self.max_forward_speed,
-                max(self.minimum_motor_command, 0.10 + distance_error * 0.10),
+                max(self.minimum_motor_command, 0.12 + distance_error * 0.22),
             )
             # Le pivot domine à mesure que le désalignement grandit, pour ne
             # pas foncer de travers ; en dessous du seuil de pivot pur, le
             # rover avance donc en tournant au lieu de s'arrêter pour pivoter.
-            blend = max(0.0, 1.0 - angle_abs / self.pivot_only_rad)
+            blend = max(0.0, 1.0 - (angle_abs / self.pivot_only_rad) ** 1.5)
             forward = speed * blend
 
         if turn and forward:

@@ -40,6 +40,8 @@ class OakTarget:
     xmax: float = 0.0
     ymin: float = 0.0
     ymax: float = 0.0
+    track_id: int | None = None
+    tracking_status: str | None = None
 
 
 class OakDLiteSensor:
@@ -80,6 +82,8 @@ class OakDLiteSensor:
         self._detections: list[OakTarget] = []
         self._person_target: OakTarget | None = None
         self._person_update_ts = 0.0
+        self._person_track_id: int | None = None
+        self._person_tracker_enabled = False
         self._vehicle_target: OakTarget | None = None
         self._vehicle_update_ts = 0.0
         self._depth_zones = {"left": False, "center": False, "right": False}
@@ -104,7 +108,7 @@ class OakDLiteSensor:
     def person_target(self) -> OakTarget | None:
         """Fresh spatial person target, or ``None`` when it is lost."""
         with self._lock:
-            if time.monotonic() - self._person_update_ts > 0.75:
+            if time.monotonic() - self._person_update_ts > 0.35:
                 return None
             return self._person_target
 
@@ -158,6 +162,8 @@ class OakDLiteSensor:
                     time.monotonic() - self._last_frame_ts <= 2.0 if self._last_frame_ts else False
                 ),
                 "oak_detections": [target.__dict__ for target in self._detections],
+                "oak_person": self._person_target.__dict__ if self._person_target else None,
+                "oak_person_tracker": self._person_tracker_enabled,
                 "oak_vehicle": self._vehicle_target.__dict__ if self._vehicle_target else None,
                 "oak_last_update_age_s": (
                     round(time.monotonic() - self._last_update_ts, 2)
@@ -226,6 +232,7 @@ class OakDLiteSensor:
                 self._available = True
                 self._connected = True
                 self._usb_speed = str(message.get("usb_speed") or "UNKNOWN")
+                self._person_tracker_enabled = bool(message.get("person_tracker"))
                 self._error = message.get("model_error")
             return
         if kind == "detections":
@@ -237,10 +244,34 @@ class OakDLiteSensor:
             )
             with self._lock:
                 self._detections = targets
-                self._person_target = person
-                self._person_update_ts = time.monotonic()
+                # Le flux de tracklets est prioritaire : une détection brute
+                # ne doit pas faire sauter l'identité suivie à chaque frame.
+                if not self._person_tracker_enabled:
+                    self._person_target = person
+                    self._person_update_ts = time.monotonic()
                 self._vehicle_target = vehicle
                 self._vehicle_update_ts = time.monotonic()
+                self._last_update_ts = time.monotonic()
+            if not self._person_tracker_enabled:
+                self._publish_person((person.cx, person.cy, person.confidence) if person else None)
+            return
+        if kind == "person_tracklets":
+            tracklets = [OakTarget(**item) for item in message.get("items", [])]
+            active = [
+                item
+                for item in tracklets
+                if item.z_mm > 0 and item.tracking_status in {"NEW", "TRACKED"}
+            ]
+            person = next(
+                (item for item in active if item.track_id == self._person_track_id),
+                None,
+            )
+            if person is None and active:
+                person = min(active, key=lambda item: item.z_mm)
+            with self._lock:
+                self._person_target = person
+                self._person_track_id = person.track_id if person else self._person_track_id
+                self._person_update_ts = time.monotonic()
                 self._last_update_ts = time.monotonic()
             self._publish_person((person.cx, person.cy, person.confidence) if person else None)
             return
@@ -281,6 +312,7 @@ class OakDLiteSensor:
             self._detections = []
             self._person_target = None
             self._person_update_ts = 0.0
+            self._person_track_id = None
             self._vehicle_target = None
             self._vehicle_update_ts = 0.0
             self._last_frame_jpeg = None
