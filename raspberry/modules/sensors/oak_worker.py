@@ -103,7 +103,12 @@ def run(args: argparse.Namespace) -> None:
         color.setPreviewSize(300, 300)
         color.setInterleaved(False)
         color.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-        color.setFps(30)
+        # La caméra et l'encodeur doivent partager la même cadence. Avec une
+        # caméra à 30 i/s et un encodeur déclaré à 5 i/s, la file vidéo finit
+        # par bloquer tout le pipeline (profondeur et détections comprises),
+        # surtout lorsque l'OAK négocie en USB 2.
+        color_fps = max(args.fps, args.video_fps)
+        color.setFps(color_fps)
         detector.setBlobPath(blob_path)
         detector.setConfidenceThreshold(0.5)
         detector.setBoundingBoxScaleFactor(0.5)
@@ -115,15 +120,13 @@ def run(args: argparse.Namespace) -> None:
         stereo.depth.link(detector.inputDepth)
         detector.out.link(detection_output.input)
 
-        # Flux JPEG bas-débit pour l'écran de test OAK — même cadrage 300x300
-        # que la preview envoyée au détecteur, pour que les boîtes de
-        # détection (coordonnées normalisées 0-1) se superposent pile sur
-        # l'image affichée. Un .video à un autre ratio décalerait les boîtes.
-        color.setVideoSize(300, 300)
+        # Flux JPEG bas-débit pour l'écran de test OAK. L'encodeur matériel
+        # exige une largeur multiple de 16 : 304 conserve le cadrage carré du
+        # détecteur 300x300 et permet aux coordonnées normalisées des boîtes de
+        # rester alignées avec l'image.
+        color.setVideoSize(304, 304)
         video_encoder = pipeline.create(dai.node.VideoEncoder)
-        video_encoder.setDefaultProfilePreset(
-            args.video_fps, dai.VideoEncoderProperties.Profile.MJPEG
-        )
+        video_encoder.setDefaultProfilePreset(color_fps, dai.VideoEncoderProperties.Profile.MJPEG)
         video_output = pipeline.create(dai.node.XLinkOut)
         video_output.setStreamName("video")
         color.video.link(video_encoder.input)

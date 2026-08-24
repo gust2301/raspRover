@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { ScanEye, Wifi, WifiOff, AlertCircle, Radar } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
+  Radar, ScanEye, Square, Wifi, WifiOff,
+} from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
 import { getRobotApiUrl, getRobotOakStreamUrl } from '../lib/robotTransport'
 
@@ -34,6 +37,14 @@ interface OakStatus {
 }
 
 const VEHICLE_LABELS = new Set(['car', 'truck', 'bus', 'motorbike', 'motorcycle'])
+type Direction = 'forward' | 'backward' | 'left' | 'right'
+
+const KEY_DIRECTIONS: Record<string, Direction> = {
+  ArrowUp: 'forward', w: 'forward', W: 'forward',
+  ArrowDown: 'backward', s: 'backward', S: 'backward',
+  ArrowLeft: 'left', a: 'left', A: 'left',
+  ArrowRight: 'right', d: 'right', D: 'right',
+}
 
 function boxColor(label: string): string {
   if (label === 'person') return '#22c55e'
@@ -43,6 +54,135 @@ function boxColor(label: string): string {
 
 function formatDistance(zMm: number): string {
   return `${(zMm / 1000).toFixed(2)} m`
+}
+
+function OakDriveControls({ enabled }: { enabled: boolean }) {
+  const connection = useSharedRobotConnection()
+  const [speed, setSpeed] = useState(0.25)
+  const [active, setActive] = useState<Direction | null>(null)
+  const repeatRef = useRef<ReturnType<typeof window.setInterval> | null>(null)
+  const activeRef = useRef<Direction | null>(null)
+
+  const stop = useCallback(() => {
+    if (repeatRef.current !== null) {
+      window.clearInterval(repeatRef.current)
+      repeatRef.current = null
+    }
+    if (activeRef.current !== null) connection.sendStop()
+    activeRef.current = null
+    setActive(null)
+  }, [connection])
+
+  const start = useCallback((direction: Direction) => {
+    if (!enabled || activeRef.current === direction) return
+    stop()
+    activeRef.current = direction
+    setActive(direction)
+    connection.sendMove(direction, speed)
+    repeatRef.current = window.setInterval(
+      () => connection.sendMove(direction, speed),
+      150,
+    )
+  }, [connection, enabled, speed, stop])
+
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.matches('input, textarea, select, button')) return
+      const direction = KEY_DIRECTIONS[event.key]
+      if (direction) {
+        event.preventDefault()
+        start(direction)
+      } else if (event.key === ' ') {
+        event.preventDefault()
+        stop()
+      }
+    }
+    const keyUp = (event: KeyboardEvent) => {
+      if (KEY_DIRECTIONS[event.key]) stop()
+    }
+    const release = () => stop()
+    window.addEventListener('keydown', keyDown)
+    window.addEventListener('keyup', keyUp)
+    window.addEventListener('pointerup', release)
+    window.addEventListener('blur', release)
+    return () => {
+      window.removeEventListener('keydown', keyDown)
+      window.removeEventListener('keyup', keyUp)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('blur', release)
+      stop()
+    }
+  }, [start, stop])
+
+  const button = (
+    direction: Direction,
+    label: string,
+    icon: React.ReactNode,
+    gridArea: string,
+  ) => (
+    <button
+      type="button"
+      aria-label={label}
+      style={{ gridArea }}
+      disabled={!enabled}
+      onPointerDown={(event) => { event.preventDefault(); start(direction) }}
+      className={`touch-none select-none rounded-xl border flex flex-col items-center justify-center gap-1 transition-colors ${
+        active === direction
+          ? 'border-blue-400 bg-blue-600 text-white'
+          : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+      } disabled:opacity-35`}
+    >
+      {icon}<span className="text-[10px]">{label}</span>
+    </button>
+  )
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900/50">
+      <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+        Pilotage du rover
+      </h2>
+      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+        Maintenez un bouton, ou utilisez WASD / les flèches. Espace pour arrêter.
+      </p>
+      <div className="mt-3 mx-auto grid grid-cols-[repeat(3,62px)] grid-rows-[repeat(3,56px)] justify-center gap-2">
+        {button('forward', 'Avant', <ArrowUp size={19} />, '1 / 2')}
+        {button('left', 'Gauche', <ArrowLeft size={19} />, '2 / 1')}
+        <button
+          type="button"
+          aria-label="Stop"
+          style={{ gridArea: '2 / 2' }}
+          onPointerDown={stop}
+          disabled={!enabled}
+          className="touch-none rounded-xl border border-red-500/40 bg-red-500/15 text-red-500 flex flex-col items-center justify-center gap-1 disabled:opacity-35"
+        >
+          <Square size={18} /><span className="text-[10px]">Stop</span>
+        </button>
+        {button('right', 'Droite', <ArrowRight size={19} />, '2 / 3')}
+        {button('backward', 'Arrière', <ArrowDown size={19} />, '3 / 2')}
+      </div>
+      <label className="block mt-3 text-xs text-slate-500 dark:text-slate-400">
+        <span className="flex justify-between mb-1.5">
+          <span>Vitesse</span><span>{Math.round(speed * 200)} %</span>
+        </span>
+        <input
+          type="range"
+          min="0.15"
+          max="0.5"
+          step="0.05"
+          value={speed}
+          onChange={(event) => setSpeed(Number(event.target.value))}
+          disabled={!enabled}
+          className="w-full accent-blue-500 disabled:opacity-35"
+        />
+      </label>
+      {!enabled && (
+        <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+          Pilotage indisponible pendant une patrouille ou lorsque le contrôle manuel est verrouillé.
+        </p>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +228,10 @@ export default function OakVision() {
   const detections = status.oak_detections ?? []
   const depthZones = status.oak_depth_zones
   const depthCm = status.oak_depth_cm
+  const driveEnabled = connected
+    && !(conn.lastStatus?.patrol_active ?? false)
+    && (conn.lastStatus?.control_available ?? true)
+  const videoReady = connected && Boolean(status.oak_video_available) && !streamUnavailable
 
   return (
     <div className="space-y-4">
@@ -130,7 +274,7 @@ export default function OakVision() {
                 key={`${streamUrl}-${streamKey}`}
                 src={streamUrl}
                 alt="Flux OAK-D"
-                className={`w-full h-full object-contain ${streamUnavailable ? 'hidden' : ''}`}
+                className={`w-full h-full object-contain ${videoReady ? '' : 'invisible'}`}
                 onLoad={() => {
                   setStreamUnavailable(false)
                   if (streamRetryRef.current) clearTimeout(streamRetryRef.current)
@@ -146,14 +290,14 @@ export default function OakVision() {
               />
             ) : null}
 
-            {(!connected || streamUnavailable) && (
+            {!videoReady && (
               <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm gap-2">
                 <WifiOff size={16} />
-                {connected ? 'Flux OAK indisponible…' : 'Robot non connecté'}
+                {connected ? 'Attente du flux vidéo OAK…' : 'Robot non connecté'}
               </div>
             )}
 
-            {!streamUnavailable && connected && detections.map((det, i) => (
+            {videoReady && detections.map((det, i) => (
               <div
                 key={i}
                 className="absolute border-2 pointer-events-none"
@@ -234,6 +378,8 @@ export default function OakVision() {
             Dernière mise à jour :{' '}
             {status.oak_last_update_age_s != null ? `il y a ${status.oak_last_update_age_s.toFixed(1)} s` : '—'}
           </div>
+
+          <OakDriveControls enabled={driveEnabled} />
         </div>
       </div>
     </div>
