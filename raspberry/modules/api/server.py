@@ -400,6 +400,7 @@ async def lifespan(app: FastAPI):
     # proches. Les détecteurs historiques restent actifs comme repli.
     oak_cfg = cfg.get("sensors", {}).get("oak", {})
     if oak_cfg.get("enabled", True):
+        target_labels_cfg = oak_cfg.get("target_labels")
         _oak = OakDLiteSensor(
             model=str(oak_cfg.get("model", "mobilenet-ssd")),
             fps=int(oak_cfg.get("fps", 8)),
@@ -407,6 +408,7 @@ async def lifespan(app: FastAPI):
             depth_roi_top=float(oak_cfg.get("depth_roi_top", 0.45)),
             depth_roi_bottom=float(oak_cfg.get("depth_roi_bottom", 0.82)),
             min_valid_pixels=int(oak_cfg.get("min_valid_pixels", 80)),
+            target_labels=frozenset(target_labels_cfg) if target_labels_cfg else None,
             on_person=_human_detector.update_external_target,
             on_depth=_vision.update_external_depth if _vision else None,
         )

@@ -18,6 +18,12 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# Classes VOC (mobilenet-ssd) comptant comme "véhicule" pour l'inspection
+# automobile. Surchargeable via sensors.oak.target_labels dans config.yaml —
+# utile pour tester le recalage caméra avec un objet de substitution (chaise,
+# canapé…) tant qu'aucune vraie voiture n'est disponible sur site.
+DEFAULT_VEHICLE_LABELS = frozenset({"car", "truck", "bus", "motorbike", "motorcycle"})
+
 
 @dataclass(frozen=True)
 class OakTarget:
@@ -42,6 +48,7 @@ class OakDLiteSensor:
         depth_roi_top: float = 0.45,
         depth_roi_bottom: float = 0.82,
         min_valid_pixels: int = 80,
+        target_labels: frozenset[str] | None = None,
         on_person: Callable[[tuple[float, float, float] | None], None] | None = None,
         on_depth: Callable[[dict[str, bool], dict[str, float | None]], None] | None = None,
     ) -> None:
@@ -51,6 +58,7 @@ class OakDLiteSensor:
         self.depth_roi_top = max(0.0, min(float(depth_roi_top), 0.9))
         self.depth_roi_bottom = max(self.depth_roi_top + 0.05, min(float(depth_roi_bottom), 1.0))
         self.min_valid_pixels = max(10, int(min_valid_pixels))
+        self.target_labels = frozenset(target_labels) if target_labels else DEFAULT_VEHICLE_LABELS
         self._on_person = on_person
         self._on_depth = on_depth
         self._lock = threading.Lock()
@@ -198,11 +206,7 @@ class OakDLiteSensor:
             targets = [OakTarget(**item) for item in message.get("items", [])]
             person = next((item for item in targets if item.label == "person"), None)
             vehicle = next(
-                (
-                    item
-                    for item in targets
-                    if item.label in {"car", "truck", "bus", "motorbike", "motorcycle"}
-                ),
+                (item for item in targets if item.label in self.target_labels),
                 None,
             )
             with self._lock:

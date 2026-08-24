@@ -99,6 +99,13 @@ sensors:
     depth_roi_top: 0.45       # ROI verticale: exclut plafond/horizon
     depth_roi_bottom: 0.82    # Exclut le bas extrême où le sol domine
     min_valid_pixels: 80      # Rejette les pixels stéréo isolés
+    # target_labels: classes mobilenet-ssd comptant comme "véhicule" pour le
+    # recalage caméra avant capture d'inspection (défaut si omis : car, truck,
+    # bus, motorbike, motorcycle). À surcharger en test tant qu'aucune vraie
+    # voiture n'est disponible sur site — classes VOC utilisables : aeroplane,
+    # bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog,
+    # horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor.
+    # target_labels: ["chair"]
 
 follow_me:
   # Apprentissage guidé du plateau avec une personne suivie par l'OAK-D Lite.
