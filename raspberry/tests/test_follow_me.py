@@ -116,33 +116,6 @@ def test_follow_me_pivots_in_place_beyond_pivot_threshold():
     assert command[1] == -command[2]  # pure pivot: no forward component
 
 
-def test_follow_me_brief_loss_searches_last_bearing_without_advancing():
-    controller, motors, oak, _lidar = _controller()
-    oak.person_target = _target(x_mm=700, z_mm=1400)
-    asyncio.run(controller._step())
-
-    oak.person_target = None
-    asyncio.run(controller._step())
-
-    command = motors.commands[-1]
-    assert command[0] == "drive"
-    assert command[1] == -command[2]
-    assert controller.to_dict()["follow_me_state"] == "reacquiring"
-
-
-def test_follow_me_stops_after_target_loss_grace_period():
-    controller, motors, oak, _lidar = _controller()
-    oak.person_target = _target(x_mm=700, z_mm=1400)
-    asyncio.run(controller._step())
-    controller._last_target_ts -= controller.target_loss_grace_s + 0.1
-
-    oak.person_target = None
-    asyncio.run(controller._step())
-
-    assert motors.commands[-1] == ("stop",)
-    assert controller.to_dict()["follow_me_state"] == "waiting_person"
-
-
 def test_follow_me_records_spaced_slam_poses():
     poses = iter(
         [

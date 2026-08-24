@@ -491,7 +491,6 @@ async def lifespan(app: FastAPI):
             side_stop_cm=float(follow_cfg.get("side_stop_cm", 28.0)),
             align_deadband_deg=float(follow_cfg.get("align_deadband_deg", 6.0)),
             pivot_only_deg=float(follow_cfg.get("pivot_only_deg", 48.0)),
-            target_loss_grace_s=float(follow_cfg.get("target_loss_grace_s", 0.65)),
             target_smoothing=float(follow_cfg.get("target_smoothing", 0.45)),
             trail_spacing_m=float(follow_cfg.get("trail_spacing_m", 0.30)),
             trail_yaw_spacing_deg=float(follow_cfg.get("trail_yaw_spacing_deg", 20.0)),

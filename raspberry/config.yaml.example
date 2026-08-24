@@ -121,7 +121,6 @@ follow_me:
   align_deadband_deg: 6        # Corrige rapidement les changements de direction
   pivot_only_deg: 48           # Au-delà : pivot pur, pas d'avance (evite un
                                 # virage trop large qui perdrait la personne)
-  target_loss_grace_s: 0.65    # Cherche brièvement sur place, jamais en aveugle
   target_smoothing: 0.45       # EMA X/Z : réduit le tremblement sans forte latence
   trail_spacing_m: 0.30       # Échantillonnage de la trajectoire SLAM
   trail_yaw_spacing_deg: 20
