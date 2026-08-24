@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import time
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import blobconverter
 import depthai as dai
 import numpy as np
+from PIL import Image
 
 VOC_LABELS = (
     "background",
@@ -103,10 +105,8 @@ def run(args: argparse.Namespace) -> None:
         color.setPreviewSize(300, 300)
         color.setInterleaved(False)
         color.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-        # La caméra et l'encodeur doivent partager la même cadence. Avec une
-        # caméra à 30 i/s et un encodeur déclaré à 5 i/s, la file vidéo finit
-        # par bloquer tout le pipeline (profondeur et détections comprises),
-        # surtout lorsque l'OAK négocie en USB 2.
+        # Limiter la source couleur réduit le trafic lorsque l'OAK négocie en
+        # USB 2. La preview est partagée par le détecteur et l'écran de test.
         color_fps = max(args.fps, args.video_fps)
         color.setFps(color_fps)
         detector.setBlobPath(blob_path)
@@ -120,17 +120,13 @@ def run(args: argparse.Namespace) -> None:
         stereo.depth.link(detector.inputDepth)
         detector.out.link(detection_output.input)
 
-        # Flux JPEG bas-débit pour l'écran de test OAK. L'encodeur matériel
-        # exige une largeur multiple de 16 : 304 conserve le cadrage carré du
-        # détecteur 300x300 et permet aux coordonnées normalisées des boîtes de
-        # rester alignées avec l'image.
-        color.setVideoSize(304, 304)
-        video_encoder = pipeline.create(dai.node.VideoEncoder)
-        video_encoder.setDefaultProfilePreset(color_fps, dai.VideoEncoderProperties.Profile.MJPEG)
+        # L'encodeur MJPEG matériel bloque ce modèle OAK-D Lite avec le flux
+        # spatial. Envoyer la preview 300x300 brute puis l'encoder sur l'hôte
+        # garde le pipeline profondeur/détection vivant et garantit que les
+        # boîtes normalisées se superposent exactement à l'image affichée.
         video_output = pipeline.create(dai.node.XLinkOut)
         video_output.setStreamName("video")
-        color.video.link(video_encoder.input)
-        video_encoder.bitstream.link(video_output.input)
+        color.preview.link(video_output.input)
 
     with dai.Device(pipeline) as device:
         depth_queue = device.getOutputQueue("depth", maxSize=2, blocking=False)
@@ -155,7 +151,13 @@ def run(args: argparse.Namespace) -> None:
                 packet = video_queue.tryGet()
                 now = time.monotonic()
                 if packet is not None and now - last_video_emit >= video_interval:
-                    jpeg_b64 = base64.b64encode(packet.getData().tobytes()).decode("ascii")
+                    frame = packet.getFrame()
+                    if frame.ndim == 3 and frame.shape[0] == 3:
+                        frame = np.transpose(frame, (1, 2, 0))
+                    rgb = np.ascontiguousarray(frame[:, :, ::-1])
+                    buffer = io.BytesIO()
+                    Image.fromarray(rgb).save(buffer, format="JPEG", quality=72, optimize=False)
+                    jpeg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
                     emit("video", jpeg_b64=jpeg_b64)
                     last_video_emit = now
             if detection_queue:
