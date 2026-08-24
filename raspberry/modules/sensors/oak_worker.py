@@ -12,6 +12,7 @@ from typing import Any
 import blobconverter
 import depthai as dai
 import numpy as np
+from oak_depth import depth_zones
 from PIL import Image
 
 VOC_LABELS = (
@@ -44,29 +45,6 @@ def emit(kind: str, **payload: Any) -> None:
         print(json.dumps({"type": kind, **payload}, separators=(",", ":")), flush=True)
     except BrokenPipeError:
         raise SystemExit(0) from None
-
-
-def depth_zones(depth: np.ndarray, args: argparse.Namespace) -> tuple[dict, dict]:
-    height, width = depth.shape
-    roi = depth[int(height * args.depth_roi_top) : int(height * args.depth_roi_bottom), :]
-    third = width // 3
-    areas = {
-        "left": roi[:, :third],
-        "center": roi[:, third : 2 * third],
-        "right": roi[:, 2 * third :],
-    }
-    zones: dict[str, bool] = {}
-    distances: dict[str, float | None] = {}
-    for name, area in areas.items():
-        valid = area[(area >= 100) & (area <= 8000)]
-        if valid.size < args.min_valid_pixels:
-            zones[name] = False
-            distances[name] = None
-            continue
-        distance_mm = float(np.percentile(valid, 8))
-        zones[name] = distance_mm <= args.obstacle_distance_mm
-        distances[name] = round(distance_mm / 10.0, 1)
-    return zones, distances
 
 
 def run(args: argparse.Namespace) -> None:
@@ -162,6 +140,8 @@ def run(args: argparse.Namespace) -> None:
         )
         last_depth_emit = 0.0
         last_video_emit = 0.0
+        person_rois: list[tuple[float, float, float, float]] = []
+        person_rois_ts = 0.0
         interval = 1.0 / max(1, args.fps)
         video_interval = 1.0 / max(1, args.video_fps)
         while True:
@@ -202,6 +182,12 @@ def run(args: argparse.Namespace) -> None:
                             }
                         )
                     items.sort(key=lambda item: (item["z_mm"] <= 0, item["z_mm"]))
+                    person_rois = [
+                        (item["xmin"], item["ymin"], item["xmax"], item["ymax"])
+                        for item in items
+                        if item["label"] == "person"
+                    ]
+                    person_rois_ts = time.monotonic()
                     emit("detections", items=items)
             if tracklet_queue:
                 packet = tracklet_queue.tryGet()
@@ -234,7 +220,8 @@ def run(args: argparse.Namespace) -> None:
             packet = depth_queue.tryGet()
             now = time.monotonic()
             if packet is not None and now - last_depth_emit >= interval:
-                zones, distances = depth_zones(packet.getFrame(), args)
+                excluded = person_rois if now - person_rois_ts <= 0.35 else []
+                zones, distances = depth_zones(packet.getFrame(), args, excluded)
                 emit("depth", zones=zones, distances_cm=distances)
                 last_depth_emit = now
             time.sleep(0.01)
