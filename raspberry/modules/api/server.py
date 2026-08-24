@@ -2535,10 +2535,14 @@ async def follow_me_start() -> dict:
             content={"ok": False, "error": oak_status.get("oak_error") or "OAK-D non connectée"},
         )
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, _slam_running):
+    localized = await loop.run_in_executor(None, lambda: _slam_running() or _nav2_running())
+    if not localized:
         return JSONResponse(
             status_code=409,
-            content={"ok": False, "error": "Démarrez la cartographie SLAM avant Follow Me"},
+            content={
+                "ok": False,
+                "error": "Démarrez la cartographie SLAM ou chargez un plateau avant Follow Me",
+            },
         )
     if _inspection_runner and _inspection_runner.active:
         return JSONResponse(
