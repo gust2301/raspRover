@@ -2620,7 +2620,7 @@ async def automotive_capture_image(capture_id: str):
 
 
 # ---------------------------------------------------------------------------
-# REST — Follow Me (apprentissage du plateau)
+# REST — Follow Me (pilotage supervisé et apprentissage du plateau)
 # ---------------------------------------------------------------------------
 
 
@@ -2640,16 +2640,11 @@ async def follow_me_start() -> dict:
             status_code=409,
             content={"ok": False, "error": oak_status.get("oak_error") or "OAK-D non connectée"},
         )
+    # Le suivi OAK/LIDAR n'a pas besoin de localisation. Une pose SLAM reste
+    # utilisée lorsqu'elle existe pour enregistrer la trajectoire pendant
+    # l'apprentissage d'un plateau, mais son absence ne doit pas bloquer le
+    # mode Follow Me depuis l'écran Pilotage.
     loop = asyncio.get_running_loop()
-    localized = await loop.run_in_executor(None, lambda: _slam_running() or _nav2_running())
-    if not localized:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "error": "Démarrez la cartographie SLAM ou chargez un plateau avant Follow Me",
-            },
-        )
     if _inspection_runner and _inspection_runner.active:
         return JSONResponse(
             status_code=409,

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Wifi, AlertOctagon, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Square, Camera, CameraOff, Activity, Lightbulb, Siren, Radar,
-  Image, Video, VideoOff, Loader2, Circle, Crosshair,
+  Image, Video, VideoOff, Loader2, Circle, Crosshair, UserRound,
 } from 'lucide-react'
 import { useSharedRobotConnection } from '../context/RobotConnectionContext'
-import { getRobotStreamUrl } from '../lib/robotTransport'
+import { getRobotApiUrl, getRobotStreamUrl } from '../lib/robotTransport'
 import { useMedia } from '../hooks/useMedia'
 
 // ---------------------------------------------------------------------------
@@ -13,6 +13,13 @@ import { useMedia } from '../hooks/useMedia'
 // ---------------------------------------------------------------------------
 
 type Direction = 'forward' | 'backward' | 'left' | 'right'
+
+interface FollowMeStatus {
+  follow_me_active: boolean
+  follow_me_state: string
+  follow_me_reason: string
+  follow_me_target_distance_m?: number | null
+}
 
 const KEY_MAP: Record<string, Direction> = {
   ArrowUp: 'forward', w: 'forward', W: 'forward',
@@ -545,15 +552,27 @@ export default function Pilotage() {
   const streamRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [cameraLight, setCameraLight] = useState(false)
   const [isMobileLandscape, setIsMobileLandscape] = useState(false)
+  const [followStatus, setFollowStatus] = useState<FollowMeStatus>({
+    follow_me_active: false,
+    follow_me_state: 'idle',
+    follow_me_reason: 'Prêt',
+  })
+  const [followBusy, setFollowBusy] = useState(false)
+  const [followError, setFollowError] = useState<string | null>(null)
+  const followActiveRef = useRef(false)
 
   const patrolActive = conn.lastStatus?.patrol_active ?? false
   const trackingActive = conn.trackingActive
   const personDetected = conn.personDetected
   const robotConnected = conn.status === 'connected'
-  const connected = robotConnected && !emergency && !patrolActive && (conn.lastStatus?.control_available ?? true)
+  const followMeActive = followStatus.follow_me_active
+  const controlAvailable = conn.lastStatus?.control_available ?? true
+  const connected = robotConnected && !emergency && !patrolActive && !followMeActive && controlAvailable
+  const followMeCanStart = robotConnected && !emergency && !patrolActive && controlAvailable
   // L'alerte peut toujours être déclenchée si le robot est connecté (même en emergency)
   const canAlert = robotConnected
   const streamUrl = getRobotStreamUrl(conn.robotIp)
+  const apiBase = getRobotApiUrl(conn.robotIp)
 
   useEffect(() => {
     setStreamUnavailable(false)
@@ -564,6 +583,35 @@ export default function Pilotage() {
   useEffect(() => {
     setCameraLight(Boolean(conn.lastStatus?.camera_light))
   }, [conn.lastStatus?.camera_light])
+
+  useEffect(() => {
+    if (!robotConnected) {
+      setFollowStatus({ follow_me_active: false, follow_me_state: 'idle', follow_me_reason: 'Robot hors ligne' })
+      return
+    }
+    let disposed = false
+    const refresh = async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/follow-me/status`)
+        if (response.ok && !disposed) setFollowStatus(await response.json())
+      } catch {
+        // Le WebSocket principal gère l'état de connexion ; nouvel essai au prochain cycle.
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 500)
+    return () => { disposed = true; window.clearInterval(timer) }
+  }, [apiBase, robotConnected])
+
+  useEffect(() => {
+    followActiveRef.current = followMeActive
+  }, [followMeActive])
+
+  useEffect(() => () => {
+    if (followActiveRef.current) {
+      void fetch(`${apiBase}/api/follow-me/stop`, { method: 'POST', keepalive: true })
+    }
+  }, [apiBase])
 
   useEffect(() => {
     const updateViewportMode = () => {
@@ -595,6 +643,41 @@ export default function Pilotage() {
     conn.sendStop()
   }, [conn])
 
+  const startFollowMe = useCallback(async () => {
+    if (!followMeCanStart || followBusy) return
+    setFollowBusy(true)
+    setFollowError(null)
+    conn.sendStop()
+    if (trackingActive) conn.stopTracking()
+    try {
+      const response = await fetch(`${apiBase}/api/follow-me/start`, { method: 'POST' })
+      const data = await response.json() as FollowMeStatus & { ok?: boolean; error?: string }
+      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Follow Me indisponible')
+      setFollowStatus(data)
+    } catch (reason) {
+      setFollowError(reason instanceof Error ? reason.message : 'Follow Me indisponible')
+    } finally {
+      setFollowBusy(false)
+    }
+  }, [apiBase, conn, followBusy, followMeCanStart, trackingActive])
+
+  const stopFollowMe = useCallback(async () => {
+    if (followBusy) return
+    setFollowBusy(true)
+    setFollowError(null)
+    try {
+      const response = await fetch(`${apiBase}/api/follow-me/stop`, { method: 'POST' })
+      const data = await response.json() as FollowMeStatus & { ok?: boolean; error?: string }
+      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Arrêt Follow Me impossible')
+      setFollowStatus(data)
+    } catch (reason) {
+      conn.sendStop()
+      setFollowError(reason instanceof Error ? reason.message : 'Arrêt Follow Me impossible')
+    } finally {
+      setFollowBusy(false)
+    }
+  }, [apiBase, conn, followBusy])
+
   const handlePanTilt = useCallback((p: number, t: number) => {
     setPan(p)
     setTilt(t)
@@ -603,8 +686,11 @@ export default function Pilotage() {
 
   const handleEmergency = useCallback(() => {
     setEmergency(true)
+    if (followActiveRef.current) {
+      void fetch(`${apiBase}/api/follow-me/stop`, { method: 'POST', keepalive: true })
+    }
     conn.sendStop()
-  }, [conn])
+  }, [apiBase, conn])
 
   const handleAlert = useCallback(() => {
     if (alertActive) {
@@ -757,7 +843,7 @@ export default function Pilotage() {
               />
             )}
 
-            {(!connected || streamUnavailable) && (
+            {(!robotConnected || streamUnavailable) && (
               <div className="text-center z-10 px-6">
                 {streamUnavailable ? (
                   <CameraOff size={48} className="mx-auto mb-3 text-slate-700" />
@@ -784,6 +870,22 @@ export default function Pilotage() {
                   {personDetected ? 'PERSONNE DÉTECTÉE' : 'RECHERCHE…'}
                 </span>
               </div>
+            )}
+
+            {isMobileLandscape && (
+              <button
+                type="button"
+                onClick={() => { void (followMeActive ? stopFollowMe() : startFollowMe()) }}
+                disabled={followBusy || (!followMeActive && !followMeCanStart)}
+                className={`absolute top-3 left-3 z-30 flex items-center gap-2 rounded-xl px-3 py-2 border text-xs font-bold backdrop-blur-sm disabled:opacity-40 ${
+                  followMeActive
+                    ? 'bg-red-900/85 border-red-500/60 text-red-100'
+                    : 'bg-blue-900/85 border-blue-500/60 text-blue-100'
+                }`}
+              >
+                {followBusy ? <Loader2 size={14} className="animate-spin" /> : <UserRound size={14} />}
+                {followMeActive ? 'Arrêter Follow Me' : 'Follow Me'}
+              </button>
             )}
 
             {/* Obstacle warning overlay */}
@@ -959,6 +1061,45 @@ export default function Pilotage() {
                 {cameraLight ? 'Lampe caméra allumée' : 'Allumer la lampe caméra'}
               </span>
             </button>
+          </div>
+
+          {/* Follow Me */}
+          <div className="px-5 py-4 border-b border-slate-800">
+            <div className="flex items-center gap-2 mb-2">
+              <UserRound size={18} className={followMeActive ? 'text-emerald-400' : 'text-blue-400'} />
+              <span className="text-sm font-semibold text-slate-200">Follow Me</span>
+              <span className={`ml-auto w-2 h-2 rounded-full ${followMeActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Placez-vous devant l’OAK-D. Le rover vous suit et s’arrête s’il vous perd ou rencontre un obstacle.
+            </p>
+            <div className="mb-3 rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
+              {followStatus.follow_me_reason || (followMeActive ? 'Suivi actif' : 'Prêt')}
+              {followStatus.follow_me_target_distance_m != null && (
+                <span className="text-slate-500"> · {followStatus.follow_me_target_distance_m.toFixed(2)} m</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => { void (followMeActive ? stopFollowMe() : startFollowMe()) }}
+              disabled={followBusy || (!followMeActive && !followMeCanStart)}
+              className={`w-full py-3 rounded-xl border-2 transition-all flex items-center justify-center gap-2 font-bold disabled:opacity-35 ${
+                followMeActive
+                  ? 'bg-red-600/20 text-red-300 border-red-500/60 hover:bg-red-600/30'
+                  : 'bg-blue-600/20 text-blue-300 border-blue-500/60 hover:bg-blue-600/30'
+              }`}
+            >
+              {followBusy ? <Loader2 size={17} className="animate-spin" /> : followMeActive ? <Square size={16} /> : <UserRound size={17} />}
+              <span className="text-sm">{followMeActive ? 'Arrêter le suivi' : 'Me suivre'}</span>
+            </button>
+            {followMeActive && (
+              <p className="mt-2 text-xs text-blue-300">Pilotage manuel verrouillé pendant le suivi.</p>
+            )}
+            {followError && (
+              <p className="mt-2 rounded-lg border border-red-700/40 bg-red-900/20 px-3 py-2 text-xs text-red-300">
+                {followError}
+              </p>
+            )}
           </div>
 
           {/* Tracking */}
@@ -1166,9 +1307,6 @@ export default function Pilotage() {
     </div>
   )
 }
-
-
-
 
 
 

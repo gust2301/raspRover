@@ -58,6 +58,8 @@ function formatDistance(zMm: number): string {
 
 function OakDriveControls({ enabled }: { enabled: boolean }) {
   const connection = useSharedRobotConnection()
+  const sendMove = connection.sendMove
+  const sendStop = connection.sendStop
   const [speed, setSpeed] = useState(0.25)
   const [active, setActive] = useState<Direction | null>(null)
   const repeatRef = useRef<ReturnType<typeof window.setInterval> | null>(null)
@@ -68,22 +70,22 @@ function OakDriveControls({ enabled }: { enabled: boolean }) {
       window.clearInterval(repeatRef.current)
       repeatRef.current = null
     }
-    if (activeRef.current !== null) connection.sendStop()
+    if (activeRef.current !== null) sendStop()
     activeRef.current = null
     setActive(null)
-  }, [connection])
+  }, [sendStop])
 
   const start = useCallback((direction: Direction) => {
     if (!enabled || activeRef.current === direction) return
     stop()
     activeRef.current = direction
     setActive(direction)
-    connection.sendMove(direction, speed)
+    sendMove(direction, speed)
     repeatRef.current = window.setInterval(
-      () => connection.sendMove(direction, speed),
+      () => sendMove(direction, speed),
       150,
     )
-  }, [connection, enabled, speed, stop])
+  }, [enabled, sendMove, speed, stop])
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
