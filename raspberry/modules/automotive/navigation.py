@@ -8,10 +8,20 @@ WARNING_POSITION_STDDEV_M = 0.12
 WARNING_YAW_STDDEV_RAD = math.radians(8.0)
 LOST_POSITION_STDDEV_M = 0.20
 LOST_YAW_STDDEV_RAD = math.radians(15.0)
-INSPECTION_POSITION_TOLERANCE_M = 0.05
-INSPECTION_YAW_TOLERANCE_RAD = math.radians(3.0)
+# Tolérances d'arrivée AMCL. Desserrées par rapport aux tolérances Nav2
+# elles-mêmes (nav2_goal_xy_tolerance_m, nav2_goal_yaw_tolerance_rad) : les
+# valeurs précédentes (5 cm / 3°) étaient plus strictes que ce que Nav2 vise,
+# ce qui rejetait en boucle des arrivées que Nav2 considérait pourtant
+# atteintes et déclenchait ses comportements de récupération (spin sur
+# place) près d'un obstacle proche du point appris.
+INSPECTION_POSITION_TOLERANCE_M = 0.08
+INSPECTION_YAW_TOLERANCE_RAD = math.radians(6.0)
 INSPECTION_STABLE_POSITION_DELTA_M = 0.025
 INSPECTION_STABLE_YAW_DELTA_RAD = math.radians(3.0)
+
+# Recalage visuel OAK-D avant capture (voir _align_to_vehicle dans server.py).
+VEHICLE_ALIGN_TOLERANCE_RAD = math.radians(5.0)
+VEHICLE_ALIGN_MAX_CORRECTION_RAD = math.radians(15.0)
 
 
 def compensated_capture_pan(
@@ -96,3 +106,32 @@ def target_pose_error(target: dict, pose: dict) -> tuple[float, float]:
         math.cos(float(target.get("yaw", 0.0)) - float(pose.get("yaw", 0.0))),
     )
     return distance, yaw_error
+
+
+def vehicle_bearing_rad(x_mm: float, z_mm: float) -> float:
+    """Chassis-relative bearing to an OAK-D spatial detection.
+
+    Same convention as the person-following bearing in FollowMeController:
+    positive is to the right, since the OAK-D Lite is fixed to the chassis
+    (not on the pan-tilt bracket) — rotating the chassis directly changes it.
+    """
+    return math.atan2(float(x_mm), float(z_mm))
+
+
+def vehicle_alignment_needed(
+    bearing_rad: float, *, tolerance_rad: float = VEHICLE_ALIGN_TOLERANCE_RAD
+) -> bool:
+    """True when the detected vehicle is far enough off-axis to warrant a nudge."""
+    return abs(bearing_rad) > tolerance_rad
+
+
+def vehicle_alignment_out_of_range(
+    bearing_rad: float, *, limit_rad: float = VEHICLE_ALIGN_MAX_CORRECTION_RAD
+) -> bool:
+    """True when the bearing is too large to correct automatically in place."""
+    return abs(bearing_rad) > limit_rad
+
+
+def vehicle_alignment_turn_speed(bearing_rad: float, *, minimum: float, maximum: float) -> float:
+    """Small proportional in-place turn command, mirroring FollowMeController."""
+    return min(maximum, max(minimum, 0.10 + abs(float(bearing_rad)) * 0.18))

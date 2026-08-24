@@ -65,6 +65,7 @@ class OakDLiteSensor:
         self._person_target: OakTarget | None = None
         self._person_update_ts = 0.0
         self._vehicle_target: OakTarget | None = None
+        self._vehicle_update_ts = 0.0
         self._depth_zones = {"left": False, "center": False, "right": False}
         self._depth_cm: dict[str, float | None] = {
             "left": None,
@@ -75,7 +76,10 @@ class OakDLiteSensor:
 
     @property
     def vehicle_target(self) -> OakTarget | None:
+        """Fresh spatial vehicle target, or ``None`` when it is lost."""
         with self._lock:
+            if time.monotonic() - self._vehicle_update_ts > 0.75:
+                return None
             return self._vehicle_target
 
     @property
@@ -206,6 +210,7 @@ class OakDLiteSensor:
                 self._person_target = person
                 self._person_update_ts = time.monotonic()
                 self._vehicle_target = vehicle
+                self._vehicle_update_ts = time.monotonic()
                 self._last_update_ts = time.monotonic()
             self._publish_person((person.cx, person.cy, person.confidence) if person else None)
             return
@@ -238,6 +243,7 @@ class OakDLiteSensor:
             self._person_target = None
             self._person_update_ts = 0.0
             self._vehicle_target = None
+            self._vehicle_update_ts = 0.0
         self._publish_person(None)
         self._publish_depth(
             {"left": False, "center": False, "right": False},

@@ -34,6 +34,10 @@ from modules.automotive.navigation import (
     pose_delta,
     pose_quality_warning,
     target_pose_error,
+    vehicle_alignment_needed,
+    vehicle_alignment_out_of_range,
+    vehicle_alignment_turn_speed,
+    vehicle_bearing_rad,
 )
 from modules.control import ESP32Link, LightController, MotorController, PanTiltController
 from modules.control.drive_mixer import DriveConfig, DriveMixer
@@ -1316,6 +1320,80 @@ def _active_map_name() -> str | None:
         return None
 
 
+VEHICLE_ALIGN_TIMEOUT_S = 4.0
+VEHICLE_ALIGN_MIN_TURN = 0.12
+VEHICLE_ALIGN_MAX_TURN = 0.20
+
+
+async def _align_to_vehicle() -> tuple[bool, str | None]:
+    """Nudge the chassis onto the OAK-D-detected vehicle before a capture.
+
+    The OAK-D Lite is fixed to the chassis (not the pan-tilt bracket), so its
+    bearing to the detected car/truck/bus directly reflects the chassis
+    heading error. Returns ``(vehicle_seen, error)``: ``vehicle_seen`` is
+    False when no vehicle was visible during the budget, in which case the
+    caller should fall back to the AMCL-only heading check
+    (`_set_inspection_capture_pan`) — this step is purely additive and never
+    blocks a capture just because the OAK-D didn't recognize the target.
+    ``error`` is set only when a vehicle was seen but alignment could not be
+    confirmed safely within the time/angle budget.
+    """
+    if _oak is None or _motors is None:
+        return False, None
+    loop = asyncio.get_running_loop()
+    deadline = time.monotonic() + VEHICLE_ALIGN_TIMEOUT_S
+    seen = False
+    while time.monotonic() < deadline:
+        target = _oak.vehicle_target
+        if target is None:
+            await asyncio.sleep(0.15)
+            continue
+        seen = True
+        bearing = vehicle_bearing_rad(target.x_mm, target.z_mm)
+        if not vehicle_alignment_needed(bearing):
+            await loop.run_in_executor(None, _motors.stop)
+            return True, None
+        if vehicle_alignment_out_of_range(bearing):
+            await loop.run_in_executor(None, _motors.stop)
+            return True, (
+                "Écart trop important avec la voiture détectée pour un recalage automatique"
+            )
+        if _obstacle_front():
+            await loop.run_in_executor(None, _motors.stop)
+            return True, "Obstacle détecté pendant le recalage caméra"
+        turn = vehicle_alignment_turn_speed(
+            bearing, minimum=VEHICLE_ALIGN_MIN_TURN, maximum=VEHICLE_ALIGN_MAX_TURN
+        )
+        if bearing > 0:
+            await loop.run_in_executor(None, lambda turn=turn: _motors.drive(turn, -turn))
+        else:
+            await loop.run_in_executor(None, lambda turn=turn: _motors.drive(-turn, turn))
+        await asyncio.sleep(0.15)
+    await loop.run_in_executor(None, _motors.stop)
+    return (True, "Recalage caméra non stabilisé à temps") if seen else (False, None)
+
+
+async def _ensure_capture_heading(waypoint: dict) -> dict:
+    """Confirm (and if needed correct) the rover heading before framing a capture.
+
+    Prefers the OAK-D vehicle detection, which physically corrects chassis
+    drift onto the actual car rather than only trusting the AMCL pose
+    recorded during learning. Falls back to the stricter AMCL-only yaw check
+    when no vehicle is visible to the OAK-D.
+    """
+    stable_pose = await _wait_for_stable_inspection_pose(waypoint)
+    vehicle_seen, align_error = await _align_to_vehicle()
+    if align_error:
+        raise RuntimeError(align_error)
+    if vehicle_seen:
+        # Le recalage a pu déplacer le châssis : on re-mesure une pose stable.
+        stable_pose = await _wait_for_stable_inspection_pose(waypoint)
+        waypoint["_capture_pan"] = float(waypoint.get("pan", 0.0))
+    else:
+        _set_inspection_capture_pan(waypoint, stable_pose)
+    return stable_pose
+
+
 async def _inspection_navigate(waypoint: dict) -> None:
     """Reach one learned pose, then prove the rover is stopped at that pose."""
     if _nav2_motors is None or not _nav2_ready():
@@ -1353,8 +1431,7 @@ async def _inspection_navigate(waypoint: dict) -> None:
             if candidate:
                 await _inspection_cancel_navigation()
                 try:
-                    stable_pose = await _wait_for_stable_inspection_pose(waypoint)
-                    _set_inspection_capture_pan(waypoint, stable_pose)
+                    stable_pose = await _ensure_capture_heading(waypoint)
                     distance, yaw_error = target_pose_error(waypoint, stable_pose)
                     waypoint["_arrival_pose"] = stable_pose
                     log.info(
@@ -1458,8 +1535,7 @@ async def _wait_for_stable_inspection_pose(waypoint: dict, timeout: float = 3.0)
 async def _inspection_capture(inspection_id: str, waypoint: dict) -> tuple[str, dict | None]:
     """Capture only after a final stop check and camera/exposure settling."""
     loop = asyncio.get_running_loop()
-    stable_pose = await _wait_for_stable_inspection_pose(waypoint)
-    _set_inspection_capture_pan(waypoint, stable_pose)
+    await _ensure_capture_heading(waypoint)
     if _pantilt is not None:
         capture_pan = float(waypoint.get("_capture_pan", waypoint["pan"]))
         await loop.run_in_executor(None, lambda: _pantilt.goto(capture_pan, waypoint["tilt"]))
