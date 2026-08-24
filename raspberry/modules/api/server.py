@@ -405,8 +405,8 @@ async def lifespan(app: FastAPI):
         target_labels_cfg = oak_cfg.get("target_labels")
         _oak = OakDLiteSensor(
             model=str(oak_cfg.get("model", "mobilenet-ssd")),
-            fps=int(oak_cfg.get("fps", 8)),
-            video_fps=int(oak_cfg.get("video_fps", 5)),
+            fps=int(oak_cfg.get("fps", 15)),
+            video_fps=int(oak_cfg.get("video_fps", 8)),
             obstacle_distance_mm=int(oak_cfg.get("obstacle_distance_mm", 700)),
             depth_roi_top=float(oak_cfg.get("depth_roi_top", 0.45)),
             depth_roi_bottom=float(oak_cfg.get("depth_roi_bottom", 0.82)),
