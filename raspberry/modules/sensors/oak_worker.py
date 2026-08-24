@@ -183,7 +183,12 @@ def run(args: argparse.Namespace) -> None:
                         )
                     items.sort(key=lambda item: (item["z_mm"] <= 0, item["z_mm"]))
                     person_rois = [
-                        (item["xmin"], item["ymin"], item["xmax"], item["ymax"])
+                        (
+                            item["xmin"] - 0.10,
+                            item["ymin"],
+                            item["xmax"] + 0.10,
+                            item["ymax"],
+                        )
                         for item in items
                         if item["label"] == "person"
                     ]
